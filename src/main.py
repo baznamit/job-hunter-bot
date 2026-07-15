@@ -1,14 +1,26 @@
-from notifier import TelegramNotifier
+from src.providers.greenhouse import GreenhouseProvider
 
 
 def main():
-    notifier = TelegramNotifier()
 
-    notifier.send_message(
-        "🚀 Job Hunter Bot Started Successfully!\n\nGitHub Actions is connected."
-    )
+    provider = GreenhouseProvider()
 
-    print("Notification sent.")
+    jobs = provider.fetch_jobs()
+
+    print()
+    print("=" * 80)
+    print(f"Total Jobs Found: {len(jobs)}")
+    print("=" * 80)
+    print()
+
+    for job in jobs:
+
+        print(f"Company : {job.company}")
+        print(f"Title    : {job.title}")
+        print(f"Location : {job.location}")
+        print(f"Source   : {job.source}")
+        print(f"Apply    : {job.url}")
+        print("-" * 80)
 
 
 if __name__ == "__main__":

@@ -8,4 +8,3 @@ class Job:
     location: str
     url: str
     source: str
-    posted_at: str

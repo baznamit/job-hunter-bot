@@ -1,0 +1,24 @@
+{
+    "greenhouse": [
+        {
+            "company": "Postman",
+            "board": "postman"
+        },
+        {
+            "company": "Canva",
+            "board": "canva"
+        },
+        {
+            "company": "Coinbase",
+            "board": "coinbase"
+        },
+        {
+            "company": "Figma",
+            "board": "figma"
+        },
+        {
+            "company": "Stripe",
+            "board": "stripe"
+        }
+    ]
+}
