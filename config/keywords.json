@@ -1,0 +1,19 @@
+{
+  "include": [
+    "Java",
+    "Spring Boot",
+    "React",
+    "Backend",
+    "Full Stack",
+    "Software Engineer",
+    "SDE"
+  ],
+  "exclude": [
+    "Principal",
+    "Staff",
+    "Director",
+    "Intern",
+    "QA",
+    "Android"
+  ]
+}
