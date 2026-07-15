@@ -5,21 +5,80 @@ class JobFilter:
 
     def __init__(self):
 
+        # Load keyword configuration
         with open("config/keywords.json", "r", encoding="utf-8") as file:
-            config = json.load(file)
+            keyword_config = json.load(file)
 
-        self.include = [word.lower() for word in config["include"]]
-        self.exclude = [word.lower() for word in config["exclude"]]
+        self.include_keywords = [
+            keyword.lower()
+            for keyword in keyword_config["include"]
+        ]
 
-    def should_include(self, title: str):
+        self.exclude_keywords = [
+            keyword.lower()
+            for keyword in keyword_config["exclude"]
+        ]
+
+        # Load application settings
+        with open("config/settings.json", "r", encoding="utf-8") as file:
+            settings = json.load(file)
+
+        self.allowed_locations = [
+            location.lower()
+            for location in settings["allowed_locations"]
+        ]
+
+        self.excluded_levels = [
+            level.lower()
+            for level in settings["excluded_levels"]
+        ]
+
+    def should_include(self, job):
+
+        if not self._keyword_match(job.title):
+            return False
+
+        if not self._location_match(job.location):
+            return False
+
+        if not self._seniority_match(job.title):
+            return False
+
+        return True
+
+    def _keyword_match(self, title):
 
         title = title.lower()
 
-        include_match = any(keyword in title for keyword in self.include)
+        include = any(
+            keyword in title
+            for keyword in self.include_keywords
+        )
 
-        if not include_match:
+        if not include:
             return False
 
-        exclude_match = any(keyword in title for keyword in self.exclude)
+        exclude = any(
+            keyword in title
+            for keyword in self.exclude_keywords
+        )
 
-        return not exclude_match
+        return not exclude
+
+    def _location_match(self, location):
+
+        location = location.lower()
+
+        return any(
+            allowed_location in location
+            for allowed_location in self.allowed_locations
+        )
+
+    def _seniority_match(self, title):
+
+        title = title.lower()
+
+        return not any(
+            level in title
+            for level in self.excluded_levels
+        )

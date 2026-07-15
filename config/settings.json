@@ -1,0 +1,30 @@
+{
+    "allowed_locations": [
+        "Mumbai",
+        "Navi Mumbai",
+        "Thane",
+        "Pune",
+        "Bangalore",
+        "Bengaluru",
+        "India",
+        "Remote",
+        "Hybrid"
+    ],
+
+    "excluded_levels": [
+        "Senior",
+        "Lead",
+        "Principal",
+        "Staff",
+        "Director",
+        "Head",
+        "Manager",
+        "Architect",
+        "VP",
+        "Vice President"
+    ],
+
+    "telegram": {
+        "max_jobs_per_message": 10
+    }
+}
