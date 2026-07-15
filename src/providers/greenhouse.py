@@ -1,7 +1,7 @@
 import json
 import requests
 
-from src.models import Job
+from models import Job
 
 
 class GreenhouseProvider:

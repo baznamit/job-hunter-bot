@@ -1,4 +1,4 @@
-from src.providers.greenhouse import GreenhouseProvider
+from providers.greenhouse import GreenhouseProvider
 
 
 def main():
