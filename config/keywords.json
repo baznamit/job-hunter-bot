@@ -1,19 +1,38 @@
 {
-  "include": [
-    "Java",
-    "Spring Boot",
-    "React",
-    "Backend",
-    "Full Stack",
-    "Software Engineer",
-    "SDE"
-  ],
-  "exclude": [
-    "Principal",
-    "Staff",
-    "Director",
-    "Intern",
-    "QA",
-    "Android"
-  ]
+    "include": [
+        "java",
+        "spring",
+        "spring boot",
+        "backend",
+        "full stack",
+        "fullstack",
+        "software engineer",
+        "software developer",
+        "sde",
+        "application engineer",
+        "platform engineer"
+    ],
+    "exclude": [
+        "intern",
+        "ios",
+        "android",
+        "qa",
+        "quality",
+        "test",
+        "testing",
+        "support",
+        "sales",
+        "marketing",
+        "recruiter",
+        "hr",
+        "manager",
+        "director",
+        "principal",
+        "staff",
+        "machine learning",
+        "ml",
+        "data scientist",
+        "data analyst",
+        "designer"
+    ]
 }
