@@ -1,24 +1,181 @@
 {
-    "greenhouse": [
-        {
-            "company": "Postman",
-            "board": "postman"
-        },
-        {
-            "company": "Canva",
-            "board": "canva"
-        },
-        {
-            "company": "Coinbase",
-            "board": "coinbase"
-        },
-        {
-            "company": "Figma",
-            "board": "figma"
-        },
-        {
-            "company": "Stripe",
-            "board": "stripe"
-        }
-    ]
+  "version": "1.0",
+  "companies": [
+    {
+      "id": "upstox",
+      "name": "Upstox",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://upstox.com/careers/",
+      "provider": {
+        "type": "custom",
+        "status": "verified",
+        "config": {}
+      },
+      "locations": ["Mumbai", "Bengaluru"],
+      "roles": [
+        "SDE I",
+        "SDE II",
+        "Backend Engineer",
+        "Full Stack Engineer",
+        "Platform Engineer"
+      ],
+      "supports_remote": false,
+      "notes": "Official careers portal with searchable job listings."
+    },
+    {
+      "id": "phonepe",
+      "name": "PhonePe",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.phonepe.com/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "razorpay",
+      "name": "Razorpay",
+      "category": "Payments",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://razorpay.com/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "groww",
+      "name": "Groww",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://groww.in/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "browserstack",
+      "name": "BrowserStack",
+      "category": "SaaS",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.browserstack.com/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "fractal",
+      "name": "Fractal",
+      "category": "AI",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://fractal.ai/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "postman",
+      "name": "Postman",
+      "category": "Developer Tools",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.postman.com/company/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "atlassian",
+      "name": "Atlassian",
+      "category": "SaaS",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.atlassian.com/company/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "cred",
+      "name": "CRED",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.cred.club/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "meesho",
+      "name": "Meesho",
+      "category": "E-Commerce",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.meesho.io/jobs",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    }
+  ]
 }
