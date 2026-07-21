@@ -5,8 +5,7 @@ from pydantic import BaseModel, ConfigDict, HttpUrl
 
 class Job(BaseModel):
     """
-    Normalized job model used across the application,
-    independent of the ATS provider.
+    A normalized representation of a job posting, independent of the ATS.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -19,7 +18,5 @@ class Job(BaseModel):
 
     posted_at: datetime | None = None
     department: str | None = None
-
+    employment_type: str | None = None
     remote: bool = False
-
-    employment_type: str | None = None  

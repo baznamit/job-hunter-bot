@@ -12,13 +12,14 @@ from .job import Job
 
 __all__ = [
     "Company",
-    "CompanyCategory",
     "Provider",
     "ProviderConfig",
-    "ProviderStatus",
+    "CompanyCategory",
     "ProviderType",
+    "ProviderStatus",
     "CompanyRegistry",
     "RegistryCache",
     "PageSnapshot",
-    "Job"
+    "DetectionResult",
+    "Job",
 ]
