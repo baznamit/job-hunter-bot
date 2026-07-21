@@ -44,4 +44,4 @@ jobs:
 
       - name: Run Research Pipeline
         run: |
-          python research/main.py
+            python -m research.main
