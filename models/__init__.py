@@ -7,6 +7,7 @@ from .company import (
     ProviderType,
 )
 from .registry import CompanyRegistry, RegistryCache
+from .page import PageSnapshot
 
 __all__ = [
     "Company",
@@ -17,4 +18,5 @@ __all__ = [
     "ProviderType",
     "CompanyRegistry",
     "RegistryCache",
+    "PageSnapshot"
 ]
