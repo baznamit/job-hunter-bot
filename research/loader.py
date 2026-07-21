@@ -5,18 +5,11 @@ from models import CompanyRegistry
 from .paths import COMPANIES_FILE
 
 
-class RegistryLoader:
+def load_registry() -> CompanyRegistry:
     """
-    Responsible for loading the company registry.
+    Load and validate the company registry from disk.
     """
+    with COMPANIES_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
 
-    @staticmethod
-    def load() -> CompanyRegistry:
-        with COMPANIES_FILE.open(
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            return CompanyRegistry.model_validate_json(
-                json.dumps(json.load(file))
-            )
+    return CompanyRegistry.model_validate(data)

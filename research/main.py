@@ -1,15 +1,14 @@
-from research.loader import RegistryLoader
-from research.validator import RegistryValidator
+from research.loader import load_registry
+from research.validator import validate_registry
 
 
 def main() -> None:
-    registry = RegistryLoader.load()
+    registry = load_registry()
 
-    RegistryValidator.validate(registry)
+    validate_registry(registry)
 
     print(
-        f"Successfully validated "
-        f"{len(registry.companies)} companies."
+        f"Successfully validated {len(registry.companies)} companies."
     )
 
 
