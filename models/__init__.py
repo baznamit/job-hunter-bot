@@ -8,6 +8,7 @@ from .company import (
 )
 from .registry import CompanyRegistry, RegistryCache
 from .page import PageSnapshot
+from .job import Job
 
 __all__ = [
     "Company",
@@ -18,5 +19,6 @@ __all__ = [
     "ProviderType",
     "CompanyRegistry",
     "RegistryCache",
-    "PageSnapshot"
+    "PageSnapshot",
+    "Job"
 ]
