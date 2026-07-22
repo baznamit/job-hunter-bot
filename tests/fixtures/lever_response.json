@@ -1,0 +1,25 @@
+[
+  {
+    "id": "abc-123-def-456",
+    "text": "Backend Engineer",
+    "hostedUrl": "https://jobs.lever.co/atlassian/abc-123-def-456",
+    "categories": {
+      "location": "Bengaluru, India",
+      "department": "Engineering",
+      "team": "Backend Platform"
+    },
+    "workplaceType": "hybrid",
+    "createdAt": 1721030400000
+  },
+  {
+    "id": "bcd-234-efg-567",
+    "text": "Full Stack Developer",
+    "hostedUrl": "https://jobs.lever.co/atlassian/bcd-234-efg-567",
+    "categories": {
+      "location": "",
+      "department": "Product"
+    },
+    "workplaceType": "remote",
+    "createdAt": 1720944000000
+  }
+]

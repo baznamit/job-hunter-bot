@@ -1,58 +1,58 @@
-import json
+from datetime import datetime
+
 import requests
 
 from models import Job
+from models.company import Company
+
+from .base import ProviderAdapter
+
+_BASE_URL = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs"
+_TIMEOUT = 20
 
 
-class GreenhouseProvider:
+class GreenhouseAdapter(ProviderAdapter):
 
-    def __init__(self):
-        with open("config/companies.json", "r", encoding="utf-8") as file:
-            config = json.load(file)
+    def _fetch_raw(self, company: Company) -> dict:
+        board = company.provider.config.board
+        url = _BASE_URL.format(board=board)
+        response = requests.get(url, timeout=_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
 
-        self.boards = config.get("greenhouse", [])
+    def parse(self, raw: dict, company: Company) -> list[Job]:
+        jobs = []
+        for item in raw.get("jobs", []):
+            job = self._parse_item(item, company)
+            if job is not None:
+                jobs.append(job)
+        return jobs
 
-    def fetch_jobs(self):
+    def _parse_item(self, item: dict, company: Company) -> Job | None:
+        try:
+            location = "Unknown"
+            if item.get("location"):
+                location = item["location"].get("name") or "Unknown"
 
-        all_jobs = []
+            posted_at = None
+            if item.get("updated_at"):
+                posted_at = datetime.fromisoformat(
+                    item["updated_at"].replace("Z", "+00:00")
+                )
 
-        for company in self.boards:
+            department = None
+            departments = item.get("departments") or []
+            if departments:
+                department = departments[0].get("name")
 
-            board = company["board"]
-            company_name = company["company"]
-
-            url = f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs"
-
-            print(f"Fetching {company_name}...")
-
-            try:
-
-                response = requests.get(url, timeout=20)
-
-                if response.status_code != 200:
-                    print(f"Failed: {company_name}")
-                    continue
-
-                data = response.json()
-
-                for job in data["jobs"]:
-
-                    location = "Unknown"
-
-                    if job.get("location"):
-                        location = job["location"].get("name", "Unknown")
-
-                    all_jobs.append(
-                        Job(
-                            title=job["title"],
-                            company=company_name,
-                            location=location,
-                            url=job["absolute_url"],
-                            source="Greenhouse"
-                        )
-                    )
-
-            except Exception as e:
-                print(f"Error fetching {company_name}: {e}")
-
-        return all_jobs
+            return Job(
+                id=str(item["id"]),
+                title=item["title"],
+                company=company.name,
+                location=location,
+                url=item["absolute_url"],
+                posted_at=posted_at,
+                department=department,
+            )
+        except Exception:
+            return None

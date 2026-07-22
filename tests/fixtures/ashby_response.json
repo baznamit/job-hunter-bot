@@ -1,0 +1,24 @@
+{
+  "jobPostings": [
+    {
+      "id": "xyz-456-abc",
+      "title": "Software Engineer",
+      "locationName": "Bengaluru, Karnataka, India",
+      "jobUrl": "https://jobs.ashbyhq.com/navi/xyz-456-abc",
+      "departmentName": "Technology",
+      "employmentType": "FullTime",
+      "isRemote": false,
+      "publishedDate": "2024-07-15"
+    },
+    {
+      "id": "xyz-789-def",
+      "title": "Platform Engineer",
+      "locationName": null,
+      "jobUrl": "https://jobs.ashbyhq.com/navi/xyz-789-def",
+      "departmentName": null,
+      "employmentType": "FullTime",
+      "isRemote": true,
+      "publishedDate": "2024-07-10"
+    }
+  ]
+}

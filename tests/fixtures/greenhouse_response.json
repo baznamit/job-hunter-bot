@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "id": 7865432,
+      "title": "Software Engineer - Backend",
+      "absolute_url": "https://job-boards.greenhouse.io/postman/jobs/7865432",
+      "location": { "name": "Bangalore, India" },
+      "updated_at": "2024-07-15T09:00:00.000Z",
+      "departments": [{ "id": 1, "name": "Engineering" }]
+    },
+    {
+      "id": 7865433,
+      "title": "Senior Software Engineer",
+      "absolute_url": "https://job-boards.greenhouse.io/postman/jobs/7865433",
+      "location": { "name": "Remote" },
+      "updated_at": "2024-07-14T09:00:00.000Z",
+      "departments": []
+    },
+    {
+      "id": 7865434,
+      "title": "Missing Fields Job",
+      "absolute_url": null,
+      "location": null,
+      "updated_at": null,
+      "departments": null
+    }
+  ]
+}
