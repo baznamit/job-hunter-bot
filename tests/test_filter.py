@@ -53,16 +53,50 @@ def test_excludes_ml_engineer(f):
 
 # ── location ──────────────────────────────────────────────────────────────────
 
+def test_includes_bangalore_india(f):
+    assert f.should_include(_job("Backend Engineer", "Bangalore, India"))
+
+
+def test_includes_bengaluru(f):
+    assert f.should_include(_job("Platform Engineer", "Bengaluru, Karnataka, India"))
+
+
+def test_includes_mumbai(f):
+    assert f.should_include(_job("Software Engineer", "Mumbai"))
+
+
+def test_includes_mumbai_india(f):
+    assert f.should_include(_job("Software Engineer", "Mumbai, India"))
+
+
+def test_includes_remote_bangalore(f):
+    # "Remote - Bangalore" is an India-based remote role and should match.
+    assert f.should_include(_job("Backend Engineer", "Remote - Bangalore"))
+
+
+def test_includes_hybrid_bengaluru(f):
+    assert f.should_include(_job("Backend Engineer", "Hybrid - Bengaluru"))
+
+
+def test_excludes_generic_remote(f):
+    # Standalone "Remote" has no city — could be anywhere, exclude it.
+    assert not f.should_include(_job("Backend Engineer", "Remote"))
+
+
+def test_excludes_remote_canada(f):
+    assert not f.should_include(_job("Backend Engineer", "Remote - Canada"))
+
+
+def test_excludes_remote_brazil(f):
+    assert not f.should_include(_job("Software Engineer", "Remote - Brazil"))
+
+
 def test_excludes_us_location(f):
     assert not f.should_include(_job("Software Engineer", "San Francisco, CA"))
 
 
-def test_includes_remote(f):
-    assert f.should_include(_job("Backend Engineer", "Remote"))
-
-
-def test_includes_india(f):
-    assert f.should_include(_job("Platform Engineer", "Chennai, India"))
+def test_excludes_new_york(f):
+    assert not f.should_include(_job("Backend Engineer", "New York, NY"))
 
 
 # ── seniority ─────────────────────────────────────────────────────────────────

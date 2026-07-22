@@ -1,14 +1,8 @@
 {
     "allowed_locations": [
         "Mumbai",
-        "Navi Mumbai",
-        "Thane",
-        "Pune",
         "Bangalore",
-        "Bengaluru",
-        "India",
-        "Remote",
-        "Hybrid"
+        "Bengaluru"
     ],
 
     "excluded_levels": [
@@ -25,6 +19,6 @@
     ],
 
     "telegram": {
-        "max_jobs_per_message": 10
+        "max_jobs_per_message": 25
     }
 }

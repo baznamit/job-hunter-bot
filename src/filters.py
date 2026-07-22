@@ -46,8 +46,18 @@ class JobFilter:
         return not any(kw in title for kw in self.exclude_keywords)
 
     def _location_match(self, location: str) -> bool:
-        location = location.lower()
-        return any(allowed in location for allowed in self.allowed_locations)
+        loc = location.lower()
+        # Component-aware matching: a city name must appear at a location
+        # boundary (start, after ", ", or after " - ") to prevent
+        # "Remote - Canada" from matching "Remote".
+        return any(
+            loc == allowed
+            or loc.startswith(allowed + ",")
+            or loc.startswith(allowed + " ")
+            or (", " + allowed) in loc
+            or (" - " + allowed) in loc
+            for allowed in self.allowed_locations
+        )
 
     def _seniority_match(self, title: str) -> bool:
         title = title.lower()
