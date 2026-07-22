@@ -11,9 +11,9 @@ from .base import ProviderDetector
 _SLUG_PATTERNS = (
     re.compile(r"boards-api\.greenhouse\.io/v1/boards/([a-z0-9_-]+)", re.IGNORECASE),
     re.compile(r"job-boards\.greenhouse\.io/([a-z0-9_-]+)", re.IGNORECASE),
-    re.compile(r"boards\.greenhouse\.io/embed/job_board\?for=([a-z0-9_-]+)", re.IGNORECASE),
+    # Embed script (`/embed/job_board/js?for=`) and iframe (`/embed/job_board?for=`).
+    re.compile(r"greenhouse\.io/embed/job_board[^\"'?]*\?for=([a-z0-9_-]+)", re.IGNORECASE),
     re.compile(r"boards\.greenhouse\.io/([a-z0-9_-]+)", re.IGNORECASE),
-    re.compile(r"greenhouse\.io/embed/job_board\?for=([a-z0-9_-]+)", re.IGNORECASE),
 )
 
 # Slugs that appear in the patterns above but are not real board names.
