@@ -1,14 +1,18 @@
 from models import DetectionResult, PageSnapshot
 from models.company import ProviderType
 
+from .ashby import AshbyDetector
 from .base import ProviderDetector
 from .greenhouse import GreenhouseDetector
+from .lever import LeverDetector
 
 
 # Ordered by detection confidence / specificity. New ATS detectors are added
-# here as they are implemented (Lever, Ashby, SmartRecruiters, Workday).
+# here as they are implemented (SmartRecruiters, Workday).
 _DETECTORS: tuple[ProviderDetector, ...] = (
     GreenhouseDetector(),
+    LeverDetector(),
+    AshbyDetector(),
 )
 
 
