@@ -45,9 +45,11 @@
       "enabled": true,
       "career_page": "https://www.phonepe.com/en/careers.html",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "phonepe"
+        }
       },
       "locations": [],
       "roles": [],
@@ -62,9 +64,11 @@
       "enabled": true,
       "career_page": "https://razorpay.com/jobs/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "razorpaysoftwareprivatelimited"
+        }
       },
       "locations": [],
       "roles": [],
@@ -79,9 +83,11 @@
       "enabled": true,
       "career_page": "https://groww.in/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "groww"
+        }
       },
       "locations": [],
       "roles": [],
@@ -130,9 +136,11 @@
       "enabled": true,
       "career_page": "https://www.atlassian.com/company/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "lever",
+        "status": "partial",
+        "config": {
+          "board": "atlassian"
+        }
       },
       "locations": [],
       "roles": [],
@@ -147,9 +155,11 @@
       "enabled": true,
       "career_page": "https://cred.club/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "lever",
+        "status": "partial",
+        "config": {
+          "board": "cred"
+        }
       },
       "locations": [],
       "roles": [],
@@ -164,9 +174,11 @@
       "enabled": true,
       "career_page": "https://meesho.io/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "lever",
+        "status": "partial",
+        "config": {
+          "board": "meesho"
+        }
       },
       "locations": [],
       "roles": [],
@@ -476,9 +488,11 @@
       "enabled": true,
       "career_page": "https://careers.freshworks.com/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "lever",
+        "status": "partial",
+        "config": {
+          "board": "freshworks"
+        }
       },
       "locations": [],
       "roles": [],
@@ -493,9 +507,11 @@
       "enabled": true,
       "career_page": "https://www.inmobi.com/company/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "inmobi"
+        }
       },
       "locations": [],
       "roles": [],
@@ -510,9 +526,11 @@
       "enabled": true,
       "career_page": "https://navi.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "ashby",
+        "status": "partial",
+        "config": {
+          "organization": "navi"
+        }
       },
       "locations": [],
       "roles": [],
