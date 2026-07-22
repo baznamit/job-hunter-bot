@@ -21,6 +21,159 @@
       "notes": ""
     },
     {
+      "id": "upstox",
+      "name": "Upstox",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://upstox.com/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "phonepe",
+      "name": "PhonePe",
+      "category": "Payments",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.phonepe.com/en/careers.html",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "razorpay",
+      "name": "Razorpay",
+      "category": "Payments",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://razorpay.com/jobs/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "groww",
+      "name": "Groww",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://groww.in/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "browserstack",
+      "name": "BrowserStack",
+      "category": "Developer Tools",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.browserstack.com/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": true,
+      "notes": ""
+    },
+    {
+      "id": "fractal",
+      "name": "Fractal",
+      "category": "AI",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://fractal.ai/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "atlassian",
+      "name": "Atlassian",
+      "category": "Developer Tools",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.atlassian.com/company/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": true,
+      "notes": ""
+    },
+    {
+      "id": "cred",
+      "name": "CRED",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://cred.club/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "meesho",
+      "name": "Meesho",
+      "category": "E-Commerce",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://meesho.io/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
       "id": "canva",
       "name": "Canva",
       "category": "SaaS",
@@ -35,7 +188,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": ""
+      "notes": "Not auto-detected. Career page is JS-rendered. May use Workday or custom ATS — check manually."
     },
     {
       "id": "coinbase",
@@ -92,6 +245,329 @@
       "locations": [],
       "roles": [],
       "supports_remote": true,
+      "notes": ""
+    },
+    {
+      "id": "jpmorgan",
+      "name": "JPMorgan Chase",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.jpmorgan.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "amex",
+      "name": "American Express",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.americanexpress.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "visa",
+      "name": "Visa",
+      "category": "Payments",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://corporate.visa.com/en/jobs/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "mastercard",
+      "name": "Mastercard",
+      "category": "Payments",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.mastercard.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "deutschebank",
+      "name": "Deutsche Bank",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.db.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "morganstanley",
+      "name": "Morgan Stanley",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://www.morganstanley.com/people",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "goldmansachs",
+      "name": "Goldman Sachs",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://www.goldmansachs.com/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "barclays",
+      "name": "Barclays",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://home.barclays/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "bnpparibas",
+      "name": "BNP Paribas",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.bnpparibas.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "oracle",
+      "name": "Oracle",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.oracle.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Uses Oracle Taleo ATS. May not be auto-detected."
+    },
+    {
+      "id": "microsoft",
+      "name": "Microsoft",
+      "category": "SaaS",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://careers.microsoft.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": true,
+      "notes": "Custom careers platform. May not be auto-detected."
+    },
+    {
+      "id": "adobe",
+      "name": "Adobe",
+      "category": "SaaS",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://careers.adobe.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": true,
+      "notes": "Likely Workday ATS. May not be auto-detected."
+    },
+    {
+      "id": "salesforce",
+      "name": "Salesforce",
+      "category": "SaaS",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://careers.salesforce.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": true,
+      "notes": ""
+    },
+    {
+      "id": "freshworks",
+      "name": "Freshworks",
+      "category": "SaaS",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://careers.freshworks.com/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "inmobi",
+      "name": "InMobi",
+      "category": "AI",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://www.inmobi.com/company/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "navi",
+      "name": "Navi",
+      "category": "FinTech",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://navi.com/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "jupiter",
+      "name": "Jupiter",
+      "category": "FinTech",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://jupiter.money/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "coindcx",
+      "name": "CoinDCX",
+      "category": "FinTech",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://coindcx.com/careers/",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": ""
+    },
+    {
+      "id": "zepto",
+      "name": "Zepto",
+      "category": "E-Commerce",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://www.zeptonow.com/careers",
+      "provider": {
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
       "notes": ""
     }
   ]
