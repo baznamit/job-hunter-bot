@@ -9,9 +9,11 @@
       "enabled": true,
       "career_page": "https://www.postman.com/company/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "postman"
+        }
       },
       "locations": [],
       "roles": [],
@@ -43,9 +45,11 @@
       "enabled": true,
       "career_page": "https://www.coinbase.com/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "coinbase"
+        }
       },
       "locations": [],
       "roles": [],
@@ -79,9 +83,11 @@
       "enabled": true,
       "career_page": "https://stripe.com/jobs/search",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "stripe"
+        }
       },
       "locations": [],
       "roles": [],
