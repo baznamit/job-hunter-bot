@@ -60,9 +60,11 @@
       "enabled": true,
       "career_page": "https://www.figma.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "figma"
+        }
       },
       "locations": [],
       "roles": [],
