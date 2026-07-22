@@ -8,6 +8,7 @@ from .company import (
 )
 from .registry import CompanyRegistry, RegistryCache
 from .page import PageSnapshot
+from .detection import DetectionResult
 from .job import Job
 
 __all__ = [

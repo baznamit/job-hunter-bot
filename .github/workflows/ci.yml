@@ -42,6 +42,10 @@ jobs:
           test -d config
           test -d data
 
+      - name: Run Tests
+        run: |
+          python -m pytest -q
+
       - name: Run Research Pipeline
         run: |
             python -m research.main
