@@ -26,7 +26,7 @@ def test_includes_backend_engineer(f):
 
 
 def test_includes_java_developer(f):
-    assert f.should_include(_job("Java Developer", "Remote"))
+    assert f.should_include(_job("Java Developer", "Bangalore, India"))
 
 
 def test_includes_software_engineer(f):
