@@ -19,6 +19,7 @@ from research.fetcher import fetch_page
 from research.loader import load_registry
 from research.logger import get_logger
 from research.paths import COMPANIES_FILE
+from research.prober import probe_provider
 
 log = get_logger(__name__)
 
@@ -62,6 +63,12 @@ def run() -> int:
             continue
 
         result = detect_provider(snapshot)
+
+        # Many companies use JavaScript-rendered career pages; the static HTML
+        # has no ATS references. Fall back to direct API probing in that case.
+        if result.provider is ProviderType.UNKNOWN:
+            log.info(f"  {company.name}: page detection found nothing — trying API probe")
+            result = probe_provider(company)
 
         if result.provider is ProviderType.UNKNOWN:
             log.warning(
