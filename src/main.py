@@ -18,7 +18,7 @@ from models.company import ProviderType
 from research.loader import load_registry
 from src.filters import JobFilter
 from src.notifier import TelegramNotifier
-from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter
+from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter
 from src.store import SeenStore
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +29,7 @@ _ADAPTERS = {
     ProviderType.GREENHOUSE: GreenhouseAdapter(),
     ProviderType.LEVER: LeverAdapter(),
     ProviderType.ASHBY: AshbyAdapter(),
+    ProviderType.WORKDAY: WorkdayAdapter(),
 }
 
 

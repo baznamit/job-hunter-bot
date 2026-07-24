@@ -38,6 +38,7 @@ class ProviderConfig(BaseModel):
     board: str | None = None
     tenant: str | None = None
     organization: str | None = None
+    cluster: str | None = None
 
 
 class Provider(BaseModel):

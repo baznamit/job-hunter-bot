@@ -102,14 +102,18 @@
       "enabled": true,
       "career_page": "https://www.browserstack.com/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "browserstack",
+          "board": "External",
+          "cluster": "wd3"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": ""
+      "notes": "Uses Workday ATS (browserstack.wd3.myworkdayjobs.com)."
     },
     {
       "id": "fractal",
@@ -119,14 +123,18 @@
       "enabled": true,
       "career_page": "https://fractal.ai/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "fractal",
+          "board": "Careers",
+          "cluster": "wd1"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": ""
+      "notes": "Uses Workday ATS (fractal.wd1.myworkdayjobs.com)."
     },
     {
       "id": "atlassian",
@@ -200,7 +208,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Not auto-detected. Career page is JS-rendered. May use Workday or custom ATS — check manually."
+      "notes": "Uses SmartRecruiters ATS (careers.smartrecruiters.com/Canva). No adapter yet."
     },
     {
       "id": "coinbase",
@@ -274,7 +282,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Oracle Recruiting Cloud. No public API."
     },
     {
       "id": "amex",
@@ -291,7 +299,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Oracle Taleo. No public API."
     },
     {
       "id": "visa",
@@ -301,14 +309,18 @@
       "enabled": true,
       "career_page": "https://corporate.visa.com/en/jobs/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "visa",
+          "board": "Visa",
+          "cluster": "wd5"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Workday ATS (visa.wd5.myworkdayjobs.com)."
     },
     {
       "id": "mastercard",
@@ -318,14 +330,18 @@
       "enabled": true,
       "career_page": "https://careers.mastercard.com/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "mastercard",
+          "board": "CorporateCareers",
+          "cluster": "wd1"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Workday ATS (mastercard.wd1.myworkdayjobs.com)."
     },
     {
       "id": "deutschebank",
@@ -335,14 +351,18 @@
       "enabled": true,
       "career_page": "https://careers.db.com/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "db",
+          "board": "DBCareers",
+          "cluster": "wd3"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Workday ATS (db.wd3.myworkdayjobs.com)."
     },
     {
       "id": "morganstanley",
@@ -352,14 +372,18 @@
       "enabled": true,
       "career_page": "https://www.morganstanley.com/people",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "ms",
+          "board": "External",
+          "cluster": "wd5"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Workday ATS (ms.wd5.myworkdayjobs.com). Experienced hiring board only."
     },
     {
       "id": "goldmansachs",
@@ -376,7 +400,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses proprietary Goldman Sachs careers platform. No public API."
     },
     {
       "id": "barclays",
@@ -386,14 +410,18 @@
       "enabled": true,
       "career_page": "https://home.barclays/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "barclays",
+          "board": "External_Career_Site_Barclays",
+          "cluster": "wd3"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Workday ATS (barclays.wd3.myworkdayjobs.com)."
     },
     {
       "id": "bnpparibas",
@@ -437,14 +465,18 @@
       "enabled": true,
       "career_page": "https://careers.microsoft.com/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "microsoft",
+          "board": "Careers",
+          "cluster": "wd5"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Custom careers platform. May not be auto-detected."
+      "notes": "Uses Workday ATS (microsoft.wd5.myworkdayjobs.com)."
     },
     {
       "id": "adobe",
@@ -454,14 +486,18 @@
       "enabled": true,
       "career_page": "https://careers.adobe.com/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "adobe",
+          "board": "external_experienced",
+          "cluster": "wd5"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Uses Workday ATS (adobe.wd5.myworkdayjobs.com)."
     },
     {
       "id": "salesforce",
@@ -478,7 +514,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": ""
+      "notes": "Uses Phenom-based custom platform. No public API."
     },
     {
       "id": "freshworks",
@@ -545,9 +581,11 @@
       "enabled": true,
       "career_page": "https://jupiter.money/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "lever",
+        "status": "partial",
+        "config": {
+          "board": "jupiter"
+        }
       },
       "locations": [],
       "roles": [],
@@ -562,9 +600,11 @@
       "enabled": true,
       "career_page": "https://coindcx.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "greenhouse",
+        "status": "partial",
+        "config": {
+          "board": "coindcx"
+        }
       },
       "locations": [],
       "roles": [],
@@ -579,9 +619,11 @@
       "enabled": true,
       "career_page": "https://www.zeptonow.com/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "ashby",
+        "status": "partial",
+        "config": {
+          "organization": "zepto"
+        }
       },
       "locations": [],
       "roles": [],
