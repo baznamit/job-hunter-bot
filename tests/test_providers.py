@@ -13,6 +13,7 @@ from models.company import (
 from src.providers.greenhouse import GreenhouseAdapter
 from src.providers.lever import LeverAdapter
 from src.providers.ashby import AshbyAdapter
+from src.providers.workday import WorkdayAdapter
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -133,3 +134,36 @@ def test_ashby_null_location_defaults_to_unknown():
 
     assert remote_job.location == "Unknown"
     assert remote_job.remote is True
+
+# ── Workday ───────────────────────────────────────────────────────────────────
+
+def test_workday_builds_public_job_url():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="visa",
+        board="Visa",
+        cluster="wd5",
+    )
+
+    raw = {
+        "jobPostings": [
+            {
+                "title": "Software Engineer",
+                "externalPath": "/job/Bangalore-IND/Software-Engineer_R123456",
+                "locationsText": "Bangalore, India",
+            }
+        ]
+    }
+
+    jobs = WorkdayAdapter().parse(raw, company)
+
+    assert len(jobs) == 1
+
+    job = jobs[0]
+
+    assert job.title == "Software Engineer"
+    assert job.location == "Bangalore, India"
+    assert job.url == (
+        "https://visa.wd5.myworkdayjobs.com/"
+        "en-US/Visa/job/Bangalore-IND/Software-Engineer_R123456"
+    )

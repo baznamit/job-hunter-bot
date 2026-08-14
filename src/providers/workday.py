@@ -16,8 +16,10 @@ class WorkdayAdapter(ProviderAdapter):
         tenant = config.tenant
         board = config.board
         cluster = config.cluster
+
         base = f"https://{tenant}.{cluster}.myworkdayjobs.com"
         url = f"{base}/wday/cxs/{tenant}/{board}/jobs"
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -35,7 +37,13 @@ class WorkdayAdapter(ProviderAdapter):
                 "offset": offset,
                 "searchText": "",
             }
-            response = requests.post(url, json=body, headers=headers, timeout=_TIMEOUT)
+
+            response = requests.post(
+                url,
+                json=body,
+                headers=headers,
+                timeout=_TIMEOUT,
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -44,6 +52,7 @@ class WorkdayAdapter(ProviderAdapter):
 
             total = data.get("total", 0)
             offset += _PAGE_SIZE
+
             if offset >= total or not postings:
                 break
 
@@ -51,24 +60,52 @@ class WorkdayAdapter(ProviderAdapter):
 
     def parse(self, raw: dict, company: Company) -> list[Job]:
         config = company.provider.config
-        base = f"https://{config.tenant}.{config.cluster}.myworkdayjobs.com"
+
+        base = (
+            f"https://{config.tenant}."
+            f"{config.cluster}.myworkdayjobs.com"
+        )
+
         jobs = []
+
         for item in raw.get("jobPostings", []):
-            job = self._parse_item(item, company, base)
+            job = self._parse_item(
+                item=item,
+                company=company,
+                base_url=base,
+                board=config.board,
+            )
+
             if job is not None:
                 jobs.append(job)
+
         return jobs
 
-    def _parse_item(self, item: dict, company: Company, base_url: str) -> Job | None:
+    def _parse_item(
+        self,
+        item: dict,
+        company: Company,
+        base_url: str,
+        board: str,
+    ) -> Job | None:
         try:
             external_path = item.get("externalPath", "")
-            url = f"{base_url}{external_path}" if external_path else base_url
+
+            # Workday's API returns externalPath without the public
+            # career-site board prefix. Build the browser-facing URL
+            # using the configured Workday board.
+            if external_path:
+                external_path = external_path.lstrip("/")
+                url = f"{base_url}/en-US/{board}/{external_path}"
+            else:
+                url = f"{base_url}/en-US/{board}"
+
             location = item.get("locationsText") or "Unknown"
             department = item.get("businessTitle") or None
             employment_type = item.get("timeType") or None
 
             return Job(
-                id=external_path or item["title"],
+                id=item.get("externalPath") or item["title"],
                 title=item["title"],
                 company=company.name,
                 location=location,
@@ -77,5 +114,6 @@ class WorkdayAdapter(ProviderAdapter):
                 department=department,
                 employment_type=employment_type,
             )
+
         except Exception:
             return None
