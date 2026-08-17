@@ -31,7 +31,7 @@ class AshbyDetector(ProviderDetector):
                     reason=f"Found Ashby board reference for '{slug}'.",
                     identifier=slug,
                     config={
-                        "organization": org,
+                        "organization": slug,
                     },
                 )
 
