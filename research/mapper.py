@@ -22,12 +22,37 @@ from research.discovery import discover_provider
 log = get_logger(__name__)
 
 
-def _apply_config(raw_provider: dict, provider_type: ProviderType, identifier: str) -> None:
-    """Write the detected slug into the correct config field for the given ATS."""
-    if provider_type in (ProviderType.GREENHOUSE, ProviderType.LEVER):
-        raw_provider["config"]["board"] = identifier
+def _apply_config(
+    raw_provider: dict,
+    provider_type: ProviderType,
+    identifier: str | None,
+    config: dict[str, str],) -> None:
+    """
+    Apply discovered provider configuration to the registry.
+
+    Structured config takes priority. The legacy identifier is retained
+    as a fallback for Greenhouse, Lever, and Ashby detectors.
+    """
+
+    if config:
+        raw_provider["config"] = dict(config)
+        return
+
+    if identifier is None:
+        return
+
+    if provider_type in (
+        ProviderType.GREENHOUSE,
+        ProviderType.LEVER,
+    ):
+        raw_provider["config"] = {
+            "board": identifier,
+        }
+
     elif provider_type is ProviderType.ASHBY:
-        raw_provider["config"]["organization"] = identifier
+        raw_provider["config"] = {
+            "organization": identifier,
+        }
 
 
 def run() -> int:
@@ -80,7 +105,7 @@ def run() -> int:
         raw_provider["status"] = ProviderStatus.PARTIAL.value
 
         if result.identifier:
-            _apply_config(raw_provider, result.provider, result.identifier)
+            _apply_config(raw_provider, result.provider, result.identifier, result.config)
 
         mapped += 1
 

@@ -30,6 +30,9 @@ class AshbyDetector(ProviderDetector):
                     confidence=0.95,
                     reason=f"Found Ashby board reference for '{slug}'.",
                     identifier=slug,
+                    config={
+                        "organization": org,
+                    },
                 )
 
         return None

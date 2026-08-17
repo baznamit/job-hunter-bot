@@ -1,15 +1,26 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from .company import ProviderType
 
 
 class DetectionResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     provider: ProviderType
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
-
-    # ATS-specific slug extracted from the page (e.g. Greenhouse board name).
-    # Feeds directly into Company.provider.config during registry mapping.
     identifier: str | None = None
+
+    # Structured provider configuration.
+    #
+    # Greenhouse / Lever:
+    #   {"board": "..."}
+    #
+    # Ashby:
+    #   {"organization": "..."}
+    #
+    # Workday:
+    #   {
+    #       "tenant": "...",
+    #       "cluster": "wd5",
+    #       "board": "..."
+    #   }
+    config: dict[str, str] = Field(default_factory=dict)

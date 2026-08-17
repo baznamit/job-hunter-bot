@@ -35,6 +35,9 @@ class GreenhouseDetector(ProviderDetector):
             confidence=0.95,
             reason=f"Found Greenhouse board reference for '{slug}'.",
             identifier=slug,
+            config={
+                "board": slug,
+            },
         )
 
     def _extract_slug(self, haystack: str) -> str | None:

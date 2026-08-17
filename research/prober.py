@@ -91,11 +91,23 @@ def probe_provider(company: Company) -> DetectionResult:
     for slug in candidates:
         for provider_type, probe_fn in _PROBERS:
             if probe_fn(slug):
+                config: dict[str, str]
+
+                if provider_type is ProviderType.ASHBY:
+                    config = {
+                        "organization": slug,
+                    }
+                else:
+                    config = {
+                        "board": slug,
+                    }
+
                 return DetectionResult(
                     provider=provider_type,
                     confidence=0.85,
                     reason=f"ATS API responded 200 for slug '{slug}'.",
                     identifier=slug,
+                    config=config,
                 )
 
     return DetectionResult(

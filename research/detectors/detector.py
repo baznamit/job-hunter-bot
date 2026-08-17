@@ -5,6 +5,7 @@ from .ashby import AshbyDetector
 from .base import ProviderDetector
 from .greenhouse import GreenhouseDetector
 from .lever import LeverDetector
+from .workday import WorkdayDetector
 
 
 # Ordered by detection confidence / specificity. New ATS detectors are added
@@ -13,6 +14,7 @@ _DETECTORS: tuple[ProviderDetector, ...] = (
     GreenhouseDetector(),
     LeverDetector(),
     AshbyDetector(),
+    WorkdayDetector(),
 )
 
 

@@ -29,6 +29,9 @@ class LeverDetector(ProviderDetector):
                     confidence=0.95,
                     reason=f"Found Lever board reference for '{slug}'.",
                     identifier=slug,
+                    config={
+                        "board": slug,
+                    },
                 )
 
         return None
