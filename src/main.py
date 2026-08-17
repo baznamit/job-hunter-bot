@@ -15,7 +15,9 @@ from pathlib import Path
 
 from models import Job
 from models.company import ProviderType
+from research.discovery import discover_provider
 from research.loader import load_registry
+from research.validator import validate_candidate
 from src.filters import JobFilter
 from src.notifier import TelegramNotifier
 from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter
@@ -36,6 +38,72 @@ _ADAPTERS = {
     ProviderType.WORKDAY: WorkdayAdapter(),
 }
 
+def _recover_stale_provider(company):
+    """
+    Attempt to recover a stale ATS mapping.
+
+    Recovery flow:
+        official career page
+        -> discover ATS
+        -> validate discovered configuration
+        -> return temporary recovered Company
+
+    The registry and companies.json are not modified.
+    """
+
+    print(
+        f"  [RECOVERY] {company.name}: attempting ATS rediscovery...",
+        file=sys.stderr,
+    )
+
+    try:
+        result = discover_provider(company)
+    except Exception as exc:
+        print(
+            f"  [RECOVERY] {company.name}: discovery failed — {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    if result.provider == ProviderType.UNKNOWN:
+        print(
+            f"  [RECOVERY] {company.name}: no supported ATS discovered",
+            file=sys.stderr,
+        )
+        return None
+
+    print(
+        f"  [RECOVERY] {company.name}: discovered "
+        f"{result.provider.value} "
+        f"(confidence={result.confidence:.0%})",
+        file=sys.stderr,
+    )
+
+    try:
+        candidate = validate_candidate(company, result)
+    except Exception as exc:
+        print(
+            f"  [RECOVERY] {company.name}: candidate validation "
+            f"failed — {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    if candidate is None:
+        print(
+            f"  [RECOVERY] {company.name}: discovered ATS "
+            "failed validation",
+            file=sys.stderr,
+        )
+        return None
+
+    print(
+        f"  [RECOVERY] {company.name}: recovered using "
+        f"{candidate.provider.type.value}",
+        file=sys.stderr,
+    )
+
+    return candidate
 
 def _max_jobs() -> int:
     settings = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -89,7 +157,63 @@ def main() -> None:
                 f"  [STALE] {company.name}: ATS mapping appears invalid — {exc}",
                 file=sys.stderr,
             )
-            continue
+
+            recovered_company = _recover_stale_provider(company)
+
+            if recovered_company is None:
+                print(
+                    f"  [WARN] {company.name}: automatic ATS recovery failed",
+                    file=sys.stderr,
+                )
+                continue
+
+            recovered_adapter = _ADAPTERS.get(
+                recovered_company.provider.type
+            )
+
+            if recovered_adapter is None:
+                print(
+                    f"  [WARN] {company.name}: recovered provider "
+                    f"{recovered_company.provider.type.value} "
+                    "has no adapter",
+                    file=sys.stderr,
+                )
+                continue
+
+            try:
+                jobs = recovered_adapter.fetch_jobs(
+                    recovered_company
+                )
+
+            except ProviderNotFoundError as retry_exc:
+                print(
+                    f"  [WARN] {company.name}: recovered ATS became "
+                    f"invalid during retry — {retry_exc}",
+                    file=sys.stderr,
+                )
+                continue
+
+            except ProviderTemporaryError as retry_exc:
+                print(
+                    f"  [WARN] {company.name}: recovered ATS had a "
+                    f"temporary failure — {retry_exc}",
+                    file=sys.stderr,
+                )
+                continue
+
+            except Exception as retry_exc:
+                print(
+                    f"  [WARN] {company.name}: recovered ATS fetch "
+                    f"failed — {retry_exc}",
+                    file=sys.stderr,
+                )
+                continue
+
+            print(
+                f"  [RECOVERED] {company.name}: jobs fetched using "
+                f"{recovered_company.provider.type.value}",
+                file=sys.stderr,
+            )
 
         except ProviderTemporaryError as exc:
             print(
