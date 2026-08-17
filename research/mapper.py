@@ -14,12 +14,10 @@ Run via the map.yml workflow:
 import json
 
 from models.company import ProviderStatus, ProviderType
-from research.detectors import detect_provider
-from research.fetcher import fetch_page
 from research.loader import load_registry
 from research.logger import get_logger
 from research.paths import COMPANIES_FILE
-from research.prober import probe_provider
+from research.discovery import discover_provider
 
 log = get_logger(__name__)
 
@@ -60,18 +58,10 @@ def run() -> int:
         log.info(f"  {company.name}: fetching {company.career_page} ...")
 
         try:
-            snapshot = fetch_page(str(company.career_page))
+            result = discover_provider(company)
         except Exception as exc:
-            log.warning(f"  {company.name}: fetch failed — {exc}")
+            log.warning(f"  {company.name}: discovery failed — {exc}")
             continue
-
-        result = detect_provider(snapshot)
-
-        # Many companies use JavaScript-rendered career pages; the static HTML
-        # has no ATS references. Fall back to direct API probing in that case.
-        if result.provider is ProviderType.UNKNOWN:
-            log.info(f"  {company.name}: page detection found nothing — trying API probe")
-            result = probe_provider(company)
 
         if result.provider is ProviderType.UNKNOWN:
             log.warning(
