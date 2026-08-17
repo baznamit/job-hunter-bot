@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from models import DetectionResult
 from models.company import (
     Company,
+    CompanyRegistry,
     Provider,
     ProviderConfig,
     ProviderStatus,
@@ -142,3 +143,63 @@ def validate_candidate(
         return None
 
     return candidate
+
+def validate_registry(registry: CompanyRegistry) -> None:
+    """
+    Validate provider configuration for every company in the registry.
+
+    This performs structural validation only. It does not make network
+    requests to ATS providers.
+
+    Raises ValueError when a company has an invalid or incomplete
+    provider configuration.
+    """
+
+    for company in registry.companies:
+        provider = company.provider
+        config = provider.config
+
+        # Companies still awaiting ATS research are allowed to have
+        # incomplete provider configuration.
+        if provider.status == ProviderStatus.RESEARCH_PENDING:
+            continue
+
+        # Unknown providers are also allowed while research is pending
+        # or when no supported ATS has been identified.
+        if provider.type == ProviderType.UNKNOWN:
+            continue
+
+        if provider.type in (
+            ProviderType.GREENHOUSE,
+            ProviderType.LEVER,
+        ):
+            if not config.board:
+                raise ValueError(
+                    f"{company.name}: {provider.type.value} "
+                    "provider requires config.board"
+                )
+
+        elif provider.type == ProviderType.ASHBY:
+            if not config.organization:
+                raise ValueError(
+                    f"{company.name}: Ashby provider requires "
+                    "config.organization"
+                )
+
+        elif provider.type == ProviderType.WORKDAY:
+            missing = []
+
+            if not config.tenant:
+                missing.append("tenant")
+
+            if not config.cluster:
+                missing.append("cluster")
+
+            if not config.board:
+                missing.append("board")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: Workday provider is missing "
+                    f"config fields: {', '.join(missing)}"
+                )
