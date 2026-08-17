@@ -13,10 +13,9 @@ adapter can successfully fetch from it.
 
 from pydantic import ValidationError
 
-from models import DetectionResult
+from models import CompanyRegistry, DetectionResult
 from models.company import (
     Company,
-    CompanyRegistry,
     Provider,
     ProviderConfig,
     ProviderStatus,
@@ -146,26 +145,17 @@ def validate_candidate(
 
 def validate_registry(registry: CompanyRegistry) -> None:
     """
-    Validate provider configuration for every company in the registry.
-
-    This performs structural validation only. It does not make network
-    requests to ATS providers.
-
-    Raises ValueError when a company has an invalid or incomplete
-    provider configuration.
+    Validate that every company in the registry has a structurally
+    complete provider configuration for its provider type.
     """
 
     for company in registry.companies:
         provider = company.provider
         config = provider.config
 
-        # Companies still awaiting ATS research are allowed to have
-        # incomplete provider configuration.
         if provider.status == ProviderStatus.RESEARCH_PENDING:
             continue
 
-        # Unknown providers are also allowed while research is pending
-        # or when no supported ATS has been identified.
         if provider.type == ProviderType.UNKNOWN:
             continue
 
