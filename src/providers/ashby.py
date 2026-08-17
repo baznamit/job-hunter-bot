@@ -13,11 +13,13 @@ _TIMEOUT = 20
 
 class AshbyAdapter(ProviderAdapter):
 
+    provider_name = "Ashby"
+
     def _fetch_raw(self, company: Company) -> dict:
         org = company.provider.config.organization
         url = _BASE_URL.format(org=org)
         response = requests.get(url, timeout=_TIMEOUT)
-        response.raise_for_status()
+        self._check_response(response, company)
         return response.json()
 
     def parse(self, raw: dict, company: Company) -> list[Job]:

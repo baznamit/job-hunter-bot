@@ -163,7 +163,7 @@ def test_workday_builds_public_job_url():
 
     assert job.title == "Software Engineer"
     assert job.location == "Bangalore, India"
-    assert job.url == (
-        "https://visa.wd5.myworkdayjobs.com/"
-        "en-US/Visa/job/Bangalore-IND/Software-Engineer_R123456"
+    assert str(job.url) == (
+    "https://visa.wd5.myworkdayjobs.com/"
+    "en-US/Visa/job/Bangalore-IND/Software-Engineer_R123456"
     )

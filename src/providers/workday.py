@@ -11,6 +11,8 @@ _PAGE_SIZE = 20
 
 class WorkdayAdapter(ProviderAdapter):
 
+    provider_name = "Workday"
+
     def _fetch_raw(self, company: Company) -> dict:
         config = company.provider.config
         tenant = config.tenant
@@ -44,7 +46,7 @@ class WorkdayAdapter(ProviderAdapter):
                 headers=headers,
                 timeout=_TIMEOUT,
             )
-            response.raise_for_status()
+            self._check_response(response, company)
             data = response.json()
 
             postings = data.get("jobPostings", [])

@@ -14,11 +14,13 @@ _TIMEOUT = 20
 
 class LeverAdapter(ProviderAdapter):
 
+    provider_name = "Lever"
+
     def _fetch_raw(self, company: Company) -> list:
         slug = company.provider.config.board
         url = _BASE_URL.format(slug=slug)
         response = requests.get(url, timeout=_TIMEOUT)
-        response.raise_for_status()
+        self._check_response(response, company)
         return response.json()
 
     def parse(self, raw: list, company: Company) -> list[Job]:

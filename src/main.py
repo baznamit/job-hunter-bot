@@ -19,6 +19,10 @@ from research.loader import load_registry
 from src.filters import JobFilter
 from src.notifier import TelegramNotifier
 from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter
+from src.providers.exceptions import (
+    ProviderNotFoundError,
+    ProviderTemporaryError,
+)
 from src.store import SeenStore
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -79,8 +83,26 @@ def main() -> None:
 
         try:
             jobs = adapter.fetch_jobs(company)
+
+        except ProviderNotFoundError as exc:
+            print(
+                f"  [STALE] {company.name}: ATS mapping appears invalid — {exc}",
+                file=sys.stderr,
+            )
+            continue
+
+        except ProviderTemporaryError as exc:
+            print(
+                f"  [WARN] {company.name}: temporary ATS failure — {exc}",
+                file=sys.stderr,
+            )
+            continue
+
         except Exception as exc:
-            print(f"  [WARN] {company.name}: fetch failed — {exc}", file=sys.stderr)
+            print(
+                f"  [WARN] {company.name}: fetch failed — {exc}",
+                file=sys.stderr,
+            )
             continue
 
         matching = [job for job in jobs if job_filter.should_include(job)]

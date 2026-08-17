@@ -13,11 +13,13 @@ _TIMEOUT = 20
 
 class GreenhouseAdapter(ProviderAdapter):
 
+    provider_name = "Greenhouse"
+
     def _fetch_raw(self, company: Company) -> dict:
         board = company.provider.config.board
         url = _BASE_URL.format(board=board)
         response = requests.get(url, timeout=_TIMEOUT)
-        response.raise_for_status()
+        self._check_response(response, company)
         return response.json()
 
     def parse(self, raw: dict, company: Company) -> list[Job]:

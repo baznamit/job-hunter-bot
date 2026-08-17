@@ -49,8 +49,11 @@ def run() -> int:
             log.info(f"  {company.name}: skipped (disabled)")
             continue
 
-        if company.provider.status != ProviderStatus.RESEARCH_PENDING:
-            log.info(f"  {company.name}: skipped (status={company.provider.status.value})")
+        if company.provider.status == ProviderStatus.VERIFIED:
+            log.info(
+                f"  {company.name}: skipped "
+                f"(status={company.provider.status.value})"
+            )
             unchanged += 1
             continue
 
