@@ -26,7 +26,8 @@ def _apply_config(
     raw_provider: dict,
     provider_type: ProviderType,
     identifier: str | None,
-    config: dict[str, str],) -> None:
+    config: dict[str, str],
+    ) -> None:
     """
     Apply discovered provider configuration to the registry.
 
@@ -104,8 +105,7 @@ def run() -> int:
         raw_provider["type"] = result.provider.value
         raw_provider["status"] = ProviderStatus.PARTIAL.value
 
-        if result.identifier:
-            _apply_config(raw_provider, result.provider, result.identifier, result.config)
+        _apply_config(raw_provider,result.provider,result.identifier,result.config,)
 
         mapped += 1
 

@@ -119,3 +119,56 @@ class WorkdayAdapter(ProviderAdapter):
 
         except Exception:
             return None
+
+    def validate(self, company: Company) -> bool:
+        """
+        Validate a Workday tenant/cluster/board using one lightweight
+        jobs API request rather than fetching every page.
+        """
+
+        config = company.provider.config
+
+        if not config.tenant or not config.cluster or not config.board:
+            return False
+
+        base = (
+            f"https://{config.tenant}."
+            f"{config.cluster}.myworkdayjobs.com"
+        )
+
+        url = (
+            f"{base}/wday/cxs/"
+            f"{config.tenant}/{config.board}/jobs"
+        )
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Origin": base,
+            "Referer": f"{base}/en-US/{config.board}",
+        }
+
+        response = requests.post(
+            url,
+            json={
+                "appliedFacets": {},
+                "limit": 1,
+                "offset": 0,
+                "searchText": "",
+            },
+            headers=headers,
+            timeout=_TIMEOUT,
+        )
+
+        self._check_response(response, company)
+
+        data = response.json()
+
+        # A valid Workday jobs endpoint normally returns these fields.
+        if not isinstance(data, dict):
+            return False
+
+        if "jobPostings" not in data and "total" not in data:
+            return False
+
+        return True

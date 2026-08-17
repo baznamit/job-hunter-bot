@@ -25,6 +25,16 @@ class ProviderAdapter(ABC):
         raw = self._fetch_raw(company)
         return self.parse(raw, company)
 
+    def validate(self, company: Company) -> bool:
+        """
+        Validate that this provider configuration is reachable.
+
+        Providers may override this with a cheaper request when normal
+        fetching is expensive.
+        """
+        self._fetch_raw(company)
+        return True
+
     def _check_response(
         self,
         response: requests.Response,
