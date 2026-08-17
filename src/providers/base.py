@@ -43,8 +43,11 @@ class ProviderAdapter(ABC):
         """
         Classify provider HTTP failures.
 
-        404:
-            The configured ATS mapping is probably stale.
+        404 / 422:
+        The configured ATS mapping is probably stale.
+
+        Workday commonly returns 422 when the tenant exists but the
+        configured career-site board is invalid or stale.
 
         429 / 5xx:
             Temporary provider failure. This must NOT trigger ATS
@@ -54,7 +57,7 @@ class ProviderAdapter(ABC):
             Let requests raise its standard HTTPError.
         """
 
-        if response.status_code == 404:
+        if response.status_code == (404, 422):
             raise ProviderNotFoundError(
                 company=company.name,
                 provider=self.provider_name,

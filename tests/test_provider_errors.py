@@ -47,6 +47,14 @@ def test_404_is_classified_as_stale_mapping():
             _company(),
         )
 
+def test_422_is_classified_as_stale_mapping():
+    adapter = LeverAdapter()
+
+    with pytest.raises(ProviderNotFoundError):
+        adapter._check_response(
+            _response(422),
+            _company(),
+        )
 
 def test_429_is_classified_as_temporary_failure():
     adapter = LeverAdapter()

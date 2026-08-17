@@ -23,6 +23,7 @@ from research.detectors import detect_provider
 from research.fetcher import fetch_page
 from research.logger import get_logger
 from research.prober import probe_provider
+from research.links import extract_career_links
 
 log = get_logger(__name__)
 
@@ -64,6 +65,35 @@ def discover_provider(company: Company) -> DetectionResult:
             f"confidence={result.confidence:.0%})"
         )
         return result
+
+    linked_pages = extract_career_links(snapshot.html, snapshot.final_url)
+
+    if linked_pages:
+        log.info(
+            f"  {company.name}: checking "
+            f"{len(linked_pages)} linked career/job page(s)"
+        )
+
+    for linked_url in linked_pages:
+        try:
+            linked_snapshot = fetch_page(linked_url)
+        except Exception as exc:
+            log.info(
+                f"  {company.name}: linked page fetch failed "
+                f"for {linked_url} — {exc}"
+            )
+            continue
+
+        result = detect_provider(linked_snapshot)
+
+        if result.provider is not ProviderType.UNKNOWN:
+            log.info(
+                f"  {company.name}: linked page detected "
+                f"{result.provider.value} "
+                f"(identifier={result.identifier}, "
+                f"confidence={result.confidence:.0%})"
+            )
+            return result
 
     log.info(
         f"  {company.name}: career page detection found nothing — "
