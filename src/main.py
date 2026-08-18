@@ -18,7 +18,7 @@ from models.company import ProviderType
 from research.discovery import discover_provider
 from research.loader import load_registry
 from research.validator import validate_candidate
-from src.filters import JobFilter
+from src.filters import JobFilter, RejectionReason
 from src.notifier import TelegramNotifier
 from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter
 from src.providers.exceptions import (
@@ -229,8 +229,28 @@ def main() -> None:
             )
             continue
 
-        matching = [job for job in jobs if job_filter.should_include(job)]
-        print(f"  {company.name}: {len(jobs)} fetched, {len(matching)} matching")
+        matching = [
+            job
+            for job in jobs
+            if job_filter.should_include(job)
+        ]
+
+        diagnostics = job_filter.diagnose(
+            jobs,
+            sample_limit=5,
+        )
+
+        print(
+            f"  {company.name}: "
+            f"{len(jobs)} fetched, "
+            f"{len(matching)} matching"
+        )
+
+        _print_filter_diagnostics(
+            company.name,
+            diagnostics,
+        )
+
         all_matching.extend(matching)
 
     new_jobs = store.filter_new(all_matching)
@@ -255,6 +275,54 @@ def main() -> None:
         print(f"[ERROR] Notification failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
+def _print_filter_diagnostics(
+    company_name: str,
+    diagnostics,
+) -> None:
+    print()
+    print(f"  [FILTER-DIAG] {company_name}")
+    print(f"    Fetched             : {diagnostics.total}")
+    print(f"    Current matched     : {diagnostics.matched}")
+    print(
+        f"    Missing include     : "
+        f"{diagnostics.include_keyword}"
+    )
+    print(
+        f"    Excluded keyword    : "
+        f"{diagnostics.excluded_keyword}"
+    )
+    print(
+        f"    Location mismatch   : "
+        f"{diagnostics.location}"
+    )
+    print(
+        f"    Seniority mismatch  : "
+        f"{diagnostics.seniority}"
+    )
 
+    labels = {
+        RejectionReason.INCLUDE_KEYWORD:
+            "MISSING INCLUDE KEYWORD",
+        RejectionReason.EXCLUDED_KEYWORD:
+            "EXCLUDED KEYWORD",
+        RejectionReason.LOCATION:
+            "LOCATION",
+        RejectionReason.SENIORITY:
+            "SENIORITY",
+    }
+
+    for reason, label in labels.items():
+        samples = diagnostics.samples[reason]
+
+        if not samples:
+            continue
+
+        print(f"    Useful near misses — {label}:")
+
+        for index, job in enumerate(samples, 1):
+            print(
+                f"      {index}. {job.title} "
+                f"| {job.location}"
+            )
 if __name__ == "__main__":
     main()

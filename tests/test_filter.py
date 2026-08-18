@@ -1,7 +1,7 @@
 import pytest
 
 from models import Job
-from src.filters import JobFilter
+from src.filters import JobFilter, RejectionReason
 
 
 def _job(title: str, location: str) -> Job:
@@ -111,3 +111,114 @@ def test_excludes_lead(f):
 
 def test_excludes_vp(f):
     assert not f.should_include(_job("VP of Engineering", "India"))
+
+def test_diagnostic_reports_missing_include(f):
+    job = _job(
+        "Engineer II",
+        "Bengaluru",
+    )
+
+    result = f.evaluate(job)
+
+    assert not result.included
+    assert result.reason == RejectionReason.INCLUDE_KEYWORD
+
+
+def test_diagnostic_reports_excluded_keyword(f):
+    job = _job(
+        "Software Engineer Android",
+        "Bengaluru",
+    )
+
+    result = f.evaluate(job)
+
+    assert not result.included
+    assert result.reason == RejectionReason.EXCLUDED_KEYWORD
+
+
+def test_diagnostic_reports_location(f):
+    job = _job(
+        "Software Engineer",
+        "India",
+    )
+
+    result = f.evaluate(job)
+
+    assert not result.included
+    assert result.reason == RejectionReason.LOCATION
+
+
+def test_diagnostic_reports_seniority(f):
+    job = _job(
+        "Senior Software Engineer",
+        "Bengaluru",
+    )
+
+    result = f.evaluate(job)
+
+    assert not result.included
+    assert result.reason == RejectionReason.SENIORITY
+
+
+def test_engineer_ii_is_useful_near_miss(f):
+    job = _job(
+        "Engineer II",
+        "Bengaluru",
+    )
+
+    assert f.is_useful_near_miss(
+        job,
+        RejectionReason.INCLUDE_KEYWORD,
+    )
+
+
+def test_senior_software_engineer_is_useful_near_miss(f):
+    job = _job(
+        "Senior Software Engineer",
+        "Mumbai",
+    )
+
+    assert f.is_useful_near_miss(
+        job,
+        RejectionReason.SENIORITY,
+    )
+
+
+def test_marketing_role_is_not_useful_near_miss(f):
+    job = _job(
+        "Marketing Manager",
+        "Bengaluru",
+    )
+
+    assert not f.is_useful_near_miss(
+        job,
+        RejectionReason.INCLUDE_KEYWORD,
+    )
+
+
+def test_diagnostic_counts_add_up(f):
+    jobs = [
+        _job("Software Engineer", "Bengaluru"),
+        _job("Engineer II", "Bengaluru"),
+        _job("Software Engineer Android", "Bengaluru"),
+        _job("Software Engineer", "India"),
+        _job("Senior Software Engineer", "Mumbai"),
+    ]
+
+    diagnostics = f.diagnose(jobs)
+
+    assert diagnostics.total == 5
+    assert diagnostics.matched == 1
+    assert diagnostics.include_keyword == 1
+    assert diagnostics.excluded_keyword == 1
+    assert diagnostics.location == 1
+    assert diagnostics.seniority == 1
+
+    assert (
+        diagnostics.matched
+        + diagnostics.include_keyword
+        + diagnostics.excluded_keyword
+        + diagnostics.location
+        + diagnostics.seniority
+        == diagnostics.total
+    )
