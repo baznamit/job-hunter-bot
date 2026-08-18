@@ -1,4 +1,3 @@
-import sys
 import requests
 
 from models import Job
@@ -61,41 +60,15 @@ class WorkdayAdapter(ProviderAdapter):
             if reported_total is not None and reported_total > 0:
                 total = reported_total
 
-            print(
-                f"  [WORKDAY] {company.name}: "
-                f"offset={offset}, "
-                f"requested={_PAGE_SIZE}, "
-                f"returned={len(postings)}, "
-                f"reported_total={reported_total}, "
-                f"effective_total={total}",
-                file=sys.stderr,
-            )
-
             all_postings.extend(postings)
 
             if not postings:
-                print(
-                    f"  [WORKDAY] {company.name}: stopping — "
-                    "provider returned no postings",
-                    file=sys.stderr,
-                )
                 break
 
             offset += len(postings)
 
             if total is not None and offset >= total:
-                print(
-                    f"  [WORKDAY] {company.name}: stopping — "
-                    f"offset {offset} reached effective total {total}",
-                    file=sys.stderr,
-                )
                 break
-
-        print(
-            f"  [WORKDAY] {company.name}: "
-            f"pagination complete — {len(all_postings)} postings collected",
-            file=sys.stderr,
-        )
 
         return {"jobPostings": all_postings}
 

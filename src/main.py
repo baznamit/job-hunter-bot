@@ -279,6 +279,15 @@ def _print_filter_diagnostics(
     company_name: str,
     diagnostics,
 ) -> None:
+    if diagnostics.total == 0:
+        return
+    has_samples = any(
+        diagnostics.samples[reason]
+        for reason in RejectionReason
+    )
+
+    if not has_samples and diagnostics.matched > 0:
+        return
     print()
     print(f"  [FILTER-DIAG] {company_name}")
     print(f"    Fetched             : {diagnostics.total}")
