@@ -135,16 +135,38 @@ def _build_message(jobs: list[Job], limit: int) -> str:
     return "\n".join(lines)
 
 
-def _fetch_jobs_with_recovery(company, adapter) -> list[Job] | None:
-    """Fetch jobs from company, with automatic recovery on provider error."""
+def _fetch_jobs_with_recovery(
+    company,
+    adapter,
+) -> list[Job] | None:
+    """Fetch jobs, recovering automatically from a stale ATS mapping."""
+
     try:
         return adapter.fetch_jobs(company)
+
     except ProviderNotFoundError as exc:
         print(
-            f"  [STALE] {company.name}: ATS mapping appears invalid — {exc}",
+            f"  [STALE] {company.name}: "
+            f"ATS mapping appears invalid — {exc}",
             file=sys.stderr,
         )
         return _recover_and_retry_fetch(company)
+
+    except ProviderTemporaryError as exc:
+        print(
+            f"  [WARN] {company.name}: "
+            f"temporary ATS failure — {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    except Exception as exc:
+        print(
+            f"  [WARN] {company.name}: "
+            f"fetch failed — {exc}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def _recover_and_retry_fetch(company) -> list[Job] | None:
@@ -200,12 +222,7 @@ def _recover_and_retry_fetch(company) -> list[Job] | None:
         return None
 
 
-def _handle_fetch_error(company) -> bool:
-    """Handle non-provider fetch errors. Returns True if should continue."""
-    return False
-
-
-def _process_jobs_for_company(company, jobs, job_filter) -> tuple[list[Job], int, int]:
+def _process_jobs_for_company(jobs, job_filter) -> tuple[list[Job], int, int]:
     """Filter and promote jobs, returning matching jobs and counts."""
     matching = [
         job
@@ -284,22 +301,14 @@ def main() -> None:
 
         adapter = _ADAPTERS.get(company.provider.type)
         if adapter is None:
-            continue  # Provider not yet implemented (e.g. Workday).
+            continue  # Provider not implemented by this runtime.
 
-        jobs = _fetch_jobs_with_recovery(company, adapter)
+        jobs = _fetch_jobs_with_recovery(
+            company,
+            adapter,
+        )
+
         if jobs is None:
-            try:
-                adapter.fetch_jobs(company)
-            except ProviderTemporaryError as exc:
-                print(
-                    f"  [WARN] {company.name}: temporary ATS failure — {exc}",
-                    file=sys.stderr,
-                )
-            except Exception as exc:
-                print(
-                    f"  [WARN] {company.name}: fetch failed — {exc}",
-                    file=sys.stderr,
-                )
             continue
 
         matching, direct_count, promoted_count = _process_jobs_for_company(
