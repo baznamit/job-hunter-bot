@@ -32,6 +32,7 @@ class WorkdayAdapter(ProviderAdapter):
 
         all_postings: list[dict] = []
         offset = 0
+        total: int | None = None
 
         while True:
             body = {
@@ -51,14 +52,22 @@ class WorkdayAdapter(ProviderAdapter):
             data = response.json()
 
             postings = data.get("jobPostings", [])
-            total = data.get("total", 0)
+
+            reported_total = data.get("total")
+
+            # Some Workday tenants only include `total` on the first page.
+            # Preserve the last meaningful total instead of treating a missing
+            # value as zero.
+            if reported_total is not None and reported_total > 0:
+                total = reported_total
 
             print(
                 f"  [WORKDAY] {company.name}: "
                 f"offset={offset}, "
                 f"requested={_PAGE_SIZE}, "
                 f"returned={len(postings)}, "
-                f"total={total}",
+                f"reported_total={reported_total}, "
+                f"effective_total={total}",
                 file=sys.stderr,
             )
 
@@ -74,10 +83,10 @@ class WorkdayAdapter(ProviderAdapter):
 
             offset += len(postings)
 
-            if offset >= total:
+            if total is not None and offset >= total:
                 print(
                     f"  [WORKDAY] {company.name}: stopping — "
-                    f"offset {offset} reached reported total {total}",
+                    f"offset {offset} reached effective total {total}",
                     file=sys.stderr,
                 )
                 break
@@ -87,7 +96,7 @@ class WorkdayAdapter(ProviderAdapter):
             f"pagination complete — {len(all_postings)} postings collected",
             file=sys.stderr,
         )
-        
+
         return {"jobPostings": all_postings}
 
     def parse(self, raw: dict, company: Company) -> list[Job]:
