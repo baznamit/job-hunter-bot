@@ -39,6 +39,7 @@ class ProviderConfig(BaseModel):
     tenant: str | None = None
     organization: str | None = None
     cluster: str | None = None
+    company_identifier: str | None = None
 
 
 class Provider(BaseModel):

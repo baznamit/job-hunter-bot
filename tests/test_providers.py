@@ -14,6 +14,7 @@ from src.providers.greenhouse import GreenhouseAdapter
 from src.providers.lever import LeverAdapter
 from src.providers.ashby import AshbyAdapter
 from src.providers.workday import WorkdayAdapter
+from src.providers.smartrecruiters import SmartRecruitersAdapter
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -167,3 +168,67 @@ def test_workday_builds_public_job_url():
     "https://visa.wd5.myworkdayjobs.com/"
     "en-US/Visa/job/Bangalore-IND/Software-Engineer_R123456"
     )
+
+def test_smartrecruiters_parses_job():
+    company = _company(
+        ProviderType.SMARTRECRUITERS,
+        company_identifier="Canva",
+    )
+
+    raw = {
+        "content": [
+            {
+                "id": "6000000001224319",
+                "name": "Backend Engineer",
+                "location": {
+                    "city": "Bengaluru",
+                    "region": "Karnataka",
+                    "country": "India",
+                },
+                "department": {
+                    "label": "Engineering",
+                },
+            }
+        ]
+    }
+
+    jobs = SmartRecruitersAdapter().parse(
+        raw,
+        company,
+    )
+
+    assert len(jobs) == 1
+
+    job = jobs[0]
+
+    assert job.id == "6000000001224319"
+    assert job.title == "Backend Engineer"
+    assert job.location == "Bengaluru, Karnataka, India"
+    assert job.department == "Engineering"
+    assert str(job.url) == (
+        "https://jobs.smartrecruiters.com/"
+        "Canva/6000000001224319"
+    )
+
+def test_smartrecruiters_unknown_location():
+    company = _company(
+        ProviderType.SMARTRECRUITERS,
+        company_identifier="Canva",
+    )
+
+    raw = {
+        "content": [
+            {
+                "id": "123",
+                "name": "Software Engineer",
+                "location": {},
+            }
+        ]
+    }
+
+    job = SmartRecruitersAdapter().parse(
+        raw,
+        company,
+    )[0]
+
+    assert job.location == "Unknown"

@@ -26,6 +26,7 @@ from src.providers import (
     GreenhouseAdapter,
     LeverAdapter,
     WorkdayAdapter,
+    SmartRecruitersAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -35,6 +36,7 @@ _ADAPTERS = {
     ProviderType.LEVER: LeverAdapter(),
     ProviderType.ASHBY: AshbyAdapter(),
     ProviderType.WORKDAY: WorkdayAdapter(),
+    ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
 }
 
 
@@ -174,6 +176,13 @@ def validate_registry(registry: CompanyRegistry) -> None:
                 raise ValueError(
                     f"{company.name}: Ashby provider requires "
                     "config.organization"
+                )
+
+        elif provider.type == ProviderType.SMARTRECRUITERS:
+            if not config.company_identifier:
+                raise ValueError(
+                    f"{company.name}: SmartRecruiters provider "
+                    "requires config.company_identifier"
                 )
 
         elif provider.type == ProviderType.WORKDAY:

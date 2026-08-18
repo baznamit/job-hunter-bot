@@ -201,14 +201,16 @@
       "enabled": true,
       "career_page": "https://www.canva.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "smartrecruiters",
+        "status": "verified",
+        "config": {
+          "company_identifier": "Canva"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Uses SmartRecruiters ATS (careers.smartrecruiters.com/Canva). No adapter yet."
+      "notes": "Uses SmartRecruiters ATS (companyIdentifier=Canva)."
     },
     {
       "id": "coinbase",
