@@ -81,6 +81,15 @@ class JobFilter:
         "qa engineer",
         "test engineer",
         "support engineer",
+        "engineering manager",
+        "vice president",
+        "director",
+        "data engineer",
+        "ai engineer",
+        "site reliability",
+        "security engineer",
+        "network engineer",
+        "firmware",
     )
 
     def __init__(self) -> None:
@@ -226,9 +235,15 @@ class JobFilter:
         )
 
         broad_location = (
-            location == "india"
-            or "remote" in location
-            or location.endswith(", india")
+        location == "india"
+        or location.endswith(", india")
+        or (
+                "remote" in location
+                and (
+                    "india" in location
+                    or location.strip() == "remote"
+                )
+            )
         )
 
         if reason == RejectionReason.INCLUDE_KEYWORD:

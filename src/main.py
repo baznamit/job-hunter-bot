@@ -26,6 +26,7 @@ from src.providers.exceptions import (
     ProviderTemporaryError,
 )
 from src.store import SeenStore
+from src.description_diagnostics import enrich_near_misses
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SEEN_FILE = _PROJECT_ROOT / "data" / "seen.json"
@@ -251,6 +252,17 @@ def main() -> None:
             diagnostics,
         )
 
+        enriched_near_misses = enrich_near_misses(
+            jobs,
+            job_filter,
+            limit=20,
+        )
+
+        _print_enriched_near_misses(
+            company.name,
+            enriched_near_misses,
+        )
+
         all_matching.extend(matching)
 
     new_jobs = store.filter_new(all_matching)
@@ -333,5 +345,39 @@ def _print_filter_diagnostics(
                 f"      {index}. {job.title} "
                 f"| {job.location}"
             )
+
+def _print_enriched_near_misses(
+    company_name: str,
+    near_misses,
+) -> None:
+    strong = [
+        item
+        for item in near_misses
+        if item.strong
+    ]
+
+    if not strong:
+        return
+
+    print(
+        f"  [DESCRIPTION-DIAG] {company_name}: "
+        f"{len(strong)} strong near miss(es)"
+    )
+
+    for item in strong[:5]:
+        signals = ", ".join(item.signals[:8])
+
+        print(
+            f"    - {item.job.title} "
+            f"| {item.job.location}"
+        )
+        print(
+            f"      rejected_by="
+            f"{item.rejection_reason.value}"
+        )
+        print(
+            f"      signals={signals}"
+        )
+        
 if __name__ == "__main__":
     main()
