@@ -312,7 +312,7 @@ def main() -> None:
             continue
 
         matching, direct_count, promoted_count = _process_jobs_for_company(
-            company, jobs, job_filter
+            jobs, job_filter
         )
 
         _print_company_stats(
