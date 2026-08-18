@@ -78,10 +78,9 @@ def test_includes_hybrid_bengaluru(f):
     assert f.should_include(_job("Backend Engineer", "Hybrid - Bengaluru"))
 
 
-def test_excludes_generic_remote(f):
-    # Standalone "Remote" has no city — could be anywhere, exclude it.
-    assert not f.should_include(_job("Backend Engineer", "Remote"))
-
+def test_includes_generic_remote(f):
+    assert f.should_include(_job("Backend Engineer", "Remote")
+    )
 
 def test_excludes_remote_canada(f):
     assert not f.should_include(_job("Backend Engineer", "Remote - Canada"))
@@ -99,10 +98,8 @@ def test_excludes_new_york(f):
     assert not f.should_include(_job("Backend Engineer", "New York, NY"))
 
 
-# ── seniority ─────────────────────────────────────────────────────────────────
-
-def test_excludes_senior(f):
-    assert not f.should_include(_job("Senior Software Engineer", "Bangalore"))
+def test_includes_senior_software_engineer(f):
+    assert f.should_include(_job("Senior Software Engineer","Bangalore",))
 
 
 def test_excludes_lead(f):
@@ -136,7 +133,7 @@ def test_diagnostic_reports_excluded_keyword(f):
     assert result.reason == RejectionReason.EXCLUDED_KEYWORD
 
 
-def test_diagnostic_reports_location(f):
+def test_includes_india_location(f):
     job = _job(
         "Software Engineer",
         "India",
@@ -144,13 +141,13 @@ def test_diagnostic_reports_location(f):
 
     result = f.evaluate(job)
 
-    assert not result.included
-    assert result.reason == RejectionReason.LOCATION
+    assert result.included
+    assert result.reason is None
 
 
-def test_diagnostic_reports_seniority(f):
+def test_lead_is_still_rejected_by_seniority(f):
     job = _job(
-        "Senior Software Engineer",
+        "Lead Software Engineer",
         "Bengaluru",
     )
 
@@ -198,11 +195,26 @@ def test_marketing_role_is_not_useful_near_miss(f):
 
 def test_diagnostic_counts_add_up(f):
     jobs = [
-        _job("Software Engineer", "Bengaluru"),
-        _job("Engineer II", "Bengaluru"),
-        _job("Software Engineer Android", "Bengaluru"),
-        _job("Software Engineer", "India"),
-        _job("Senior Software Engineer", "Mumbai"),
+        _job(
+            "Software Engineer",
+            "Bengaluru",
+        ),
+        _job(
+            "Engineer II",
+            "Bengaluru",
+        ),
+        _job(
+            "Software Engineer Android",
+            "Bengaluru",
+        ),
+        _job(
+            "Software Engineer",
+            "Pune, India",
+        ),
+        _job(
+            "Lead Software Engineer",
+            "Mumbai",
+        ),
     ]
 
     diagnostics = f.diagnose(jobs)
@@ -222,3 +234,92 @@ def test_diagnostic_counts_add_up(f):
         + diagnostics.seniority
         == diagnostics.total
     )
+
+def test_internal_does_not_match_intern_exclusion(f):
+    job = _job(
+        "Software Engineer, Internal Systems",
+        "Bengaluru",
+    )
+
+    assert f.should_include(job)
+
+
+def test_intern_is_still_excluded(f):
+    job = _job(
+        "Software Engineer, Intern",
+        "Bengaluru",
+    )
+
+    assert not f.should_include(job)
+
+
+def test_ml_word_is_excluded(f):
+    job = _job(
+        "Backend ML Engineer",
+        "Bengaluru",
+    )
+
+    assert not f.should_include(job)
+
+
+def test_remote_india_is_included(f):
+    job = _job(
+        "Software Engineer",
+        "Remote - India",
+    )
+
+    assert f.should_include(job)
+
+
+def test_india_remote_is_included(f):
+    job = _job(
+        "Software Engineer",
+        "India - Remote",
+    )
+
+    assert f.should_include(job)
+
+
+def test_remote_usa_remains_excluded(f):
+    job = _job(
+        "Software Engineer",
+        "Remote - USA",
+    )
+
+    assert not f.should_include(job)
+
+
+def test_pune_india_remains_excluded(f):
+    job = _job(
+        "Software Engineer",
+        "Pune, India",
+    )
+
+    assert not f.should_include(job)
+
+
+def test_hyderabad_india_remains_excluded(f):
+    job = _job(
+        "Software Engineer",
+        "Hyderabad, India",
+    )
+
+    assert not f.should_include(job)
+
+
+def test_staff_software_engineer_remains_excluded(f):
+    job = _job(
+        "Staff Software Engineer",
+        "Bengaluru",
+    )
+
+    assert not f.should_include(job)
+
+
+def test_principal_software_engineer_remains_excluded(f):
+    job = _job(
+        "Principal Software Engineer",
+        "Bengaluru",
+    )
+
+    assert not f.should_include(job)

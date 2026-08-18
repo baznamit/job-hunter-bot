@@ -1,4 +1,3 @@
-from unittest import signals
 from unittest.mock import patch
 
 from models import Job
@@ -6,6 +5,7 @@ from src.description_diagnostics import (
     _candidate_score,
     enrich_near_misses,
     find_signals,
+    promotable_jobs,
     should_enrich,
 )
 from src.filters import JobFilter, RejectionReason
@@ -242,3 +242,87 @@ def test_enrichment_limit_is_applied_after_ranking(
         results[0].job.title
         == "Computer Scientist II"
     )
+
+def test_strong_include_miss_can_be_promoted():
+    job_filter = JobFilter()
+
+    job = _job(
+        "Senior Engineer, Messaging Platform",
+        "Bengaluru",
+    )
+
+    from src.description_diagnostics import EnrichedNearMiss
+
+    item = EnrichedNearMiss(
+        job=job,
+        rejection_reason=RejectionReason.INCLUDE_KEYWORD,
+        signals=[
+            "java",
+            "backend",
+            "distributed systems",
+        ],
+        strong=True,
+    )
+
+    promoted = promotable_jobs(
+        [item],
+        job_filter,
+    )
+
+    assert promoted == [job]
+
+
+def test_staff_role_is_not_promoted():
+    job_filter = JobFilter()
+
+    job = _job(
+        "Staff Engineer, Core Infrastructure",
+        "Bengaluru",
+    )
+
+    from src.description_diagnostics import EnrichedNearMiss
+
+    item = EnrichedNearMiss(
+        job=job,
+        rejection_reason=RejectionReason.INCLUDE_KEYWORD,
+        signals=[
+            "backend",
+            "distributed systems",
+        ],
+        strong=True,
+    )
+
+    promoted = promotable_jobs(
+        [item],
+        job_filter,
+    )
+
+    assert promoted == []
+
+
+def test_foreign_remote_role_is_not_promoted():
+    job_filter = JobFilter()
+
+    job = _job(
+        "Senior Engineer, Messaging Platform",
+        "Remote - USA",
+    )
+
+    from src.description_diagnostics import EnrichedNearMiss
+
+    item = EnrichedNearMiss(
+        job=job,
+        rejection_reason=RejectionReason.INCLUDE_KEYWORD,
+        signals=[
+            "java",
+            "backend",
+        ],
+        strong=True,
+    )
+
+    promoted = promotable_jobs(
+        [item],
+        job_filter,
+    )
+
+    assert promoted == []

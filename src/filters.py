@@ -1,3 +1,4 @@
+import re
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -165,10 +166,23 @@ class JobFilter:
         )
 
     def _exclude_keyword_match(self, title: str) -> bool:
+        """
+        Reject excluded words/phrases without accidental substring matches.
+
+        Examples:
+            "Software Engineer Intern"   -> rejected by "intern"
+            "Software Engineer Internal" -> NOT rejected by "intern"
+            "ML Engineer"                -> rejected by "ml"
+        """
+
         title = title.lower()
+
         return not any(
-            kw in title
-            for kw in self.exclude_keywords
+            re.search(
+                rf"(?<!\w){re.escape(keyword)}(?!\w)",
+                title,
+            )
+            for keyword in self.exclude_keywords
         )
 
     def _keyword_match(self, title: str) -> bool:
@@ -178,18 +192,43 @@ class JobFilter:
         )
 
     def _location_match(self, location: str) -> bool:
-        loc = location.lower()
-        # Component-aware matching: a city name must appear at a location
-        # boundary (start, after ", ", or after " - ") to prevent
-        # "Remote - Canada" from matching "Remote".
-        return any(
+        """
+        Accept:
+        - Mumbai / Bangalore / Bengaluru variants
+        - India-wide jobs
+        - Remote India
+        - plain Remote
+
+        Reject remote jobs explicitly tied to another country.
+        """
+
+        loc = location.lower().strip()
+
+        # Preferred physical locations.
+        if any(
             loc == allowed
             or loc.startswith(allowed + ",")
             or loc.startswith(allowed + " ")
             or (", " + allowed) in loc
             or (" - " + allowed) in loc
             for allowed in self.allowed_locations
-        )
+        ):
+            return True
+
+        # Country-wide India listings.
+        if loc == "india":
+            return True
+
+        # Explicit India remote roles.
+        if "remote" in loc and "india" in loc:
+            return True
+
+        # Provider explicitly says only "Remote", with no conflicting
+        # country information.
+        if loc == "remote":
+            return True
+
+        return False
 
     def _seniority_match(self, title: str) -> bool:
         title = title.lower()

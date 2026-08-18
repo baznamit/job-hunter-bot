@@ -26,7 +26,10 @@ from src.providers.exceptions import (
     ProviderTemporaryError,
 )
 from src.store import SeenStore
-from src.description_diagnostics import enrich_near_misses
+from src.description_diagnostics import (
+    enrich_near_misses,
+    promotable_jobs,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SEEN_FILE = _PROJECT_ROOT / "data" / "seen.json"
@@ -262,6 +265,28 @@ def main() -> None:
             company.name,
             enriched_near_misses,
         )
+
+        promoted = promotable_jobs(
+            enriched_near_misses,
+            job_filter,
+        )
+
+        if promoted:
+            print(
+                f"  [PROMOTED] {company.name}: "
+                f"{len(promoted)} description-verified job(s)"
+            )
+
+        # Avoid adding the same URL twice.
+        matching_urls = {
+            str(job.url)
+            for job in matching
+        }
+
+        for job in promoted:
+            if str(job.url) not in matching_urls:
+                matching.append(job)
+                matching_urls.add(str(job.url))
 
         all_matching.extend(matching)
 

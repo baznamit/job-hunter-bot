@@ -412,3 +412,45 @@ def enrich_near_misses(
         )
 
     return enriched
+
+def promotable_jobs(
+    near_misses: list[EnrichedNearMiss],
+    job_filter: JobFilter,
+) -> list[Job]:
+    """
+    Return description-verified near misses that are safe to promote
+    into the production matching set.
+
+    Promotion is deliberately conservative:
+    - description must have >= 2 strong backend signals
+    - location must satisfy the production location rule
+    - title must pass production exclusion rules
+    - title must pass production seniority rules
+    - original failure must be the narrow include-keyword rule
+
+    This prevents description enrichment from bypassing hard filters.
+    """
+
+    promoted: list[Job] = []
+
+    for item in near_misses:
+        job = item.job
+
+        if not item.strong:
+            continue
+
+        if item.rejection_reason != RejectionReason.INCLUDE_KEYWORD:
+            continue
+
+        if not job_filter._exclude_keyword_match(job.title):
+            continue
+
+        if not job_filter._location_match(job.location):
+            continue
+
+        if not job_filter._seniority_match(job.title):
+            continue
+
+        promoted.append(job)
+
+    return promoted
