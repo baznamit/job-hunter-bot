@@ -75,8 +75,18 @@ def discover_provider(company: Company) -> DetectionResult:
         )
 
     for linked_url in linked_pages:
+        log.info(
+            f"  {company.name}: inspecting linked page "
+            f"{linked_url}"
+        )
+
         try:
             linked_snapshot = fetch_page(linked_url)
+            log.info(
+            f"  {company.name}: linked page resolved to "
+            f"{linked_snapshot.final_url} "
+            f"(status={linked_snapshot.status_code})"
+        )
         except Exception as exc:
             log.info(
                 f"  {company.name}: linked page fetch failed "
