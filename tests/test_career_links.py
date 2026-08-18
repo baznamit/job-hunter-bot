@@ -151,3 +151,31 @@ def test_external_job_platform_is_ranked_highly():
     assert links[0] == (
         "https://example.keka.com/careers"
     )
+
+def test_excludes_social_share_links():
+    html = """
+    <a href="https://www.linkedin.com/shareArticle?url=https://example.com/careers">
+        Share jobs
+    </a>
+
+    <a href="https://www.facebook.com/sharer.php?u=https://example.com/careers">
+        Share careers
+    </a>
+
+    <a href="https://x.com/intent/tweet?url=https://example.com/careers">
+        Share jobs
+    </a>
+
+    <a href="/professionals/search-roles">
+        Search Roles
+    </a>
+    """
+
+    links = extract_career_links(
+        html,
+        "https://example.com/careers",
+    )
+
+    assert links == [
+        "https://example.com/professionals/search-roles"
+    ]

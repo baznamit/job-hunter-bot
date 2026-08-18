@@ -173,6 +173,23 @@ def _is_localised_career_copy(
 
     return False
 
+def _is_social_or_share_link(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+
+    social_hosts = (
+        "facebook.com",
+        "www.facebook.com",
+        "linkedin.com",
+        "www.linkedin.com",
+        "twitter.com",
+        "www.twitter.com",
+        "x.com",
+        "www.x.com",
+        "instagram.com",
+        "www.instagram.com",
+    )
+
+    return host in social_hosts
 
 def _score_link(
     href: str,
@@ -263,6 +280,9 @@ def extract_career_links(
             continue
 
         absolute = urljoin(base_url, href)
+
+        if _is_social_or_share_link(absolute):
+            continue
 
         if not absolute.startswith(("http://", "https://")):
             continue
