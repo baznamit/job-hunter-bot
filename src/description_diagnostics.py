@@ -244,6 +244,89 @@ def find_signals(text: str) -> list[str]:
 
     return found
 
+def _candidate_score(
+    job: Job,
+    reason: RejectionReason,
+) -> int:
+    """
+    Rank diagnostic candidates before description fetching.
+
+    Higher scores represent jobs that are more likely to be useful
+    backend/software-engineering near misses.
+    """
+
+    title = job.title.lower()
+    location = job.location.lower()
+
+    score = 0
+
+    # Prefer exact target cities over broad India/remote locations.
+    if any(city in location for city in _TARGET_CITIES):
+        score += 40
+    elif "remote" in location and "india" in location:
+        score += 25
+    elif location.strip() == "remote":
+        score += 15
+    elif location == "india" or location.endswith(", india"):
+        score += 10
+
+    # Strong software-development role families.
+    if "software development engineer" in title:
+        score += 100
+    elif "software engineer" in title:
+        score += 95
+    elif "software developer" in title:
+        score += 95
+    elif "backend engineer" in title:
+        score += 95
+    elif "backend developer" in title:
+        score += 95
+    elif "computer scientist" in title:
+        score += 90
+    elif "platform engineer" in title:
+        score += 85
+    elif "application engineer" in title:
+        score += 80
+    elif "application developer" in title:
+        score += 80
+    elif "member of technical staff" in title:
+        score += 80
+    elif "technical staff" in title:
+        score += 75
+    elif "forward deployed engineer" in title:
+        score += 70
+    elif "engineer" in title:
+        score += 50
+    elif "developer" in title:
+        score += 50
+
+    # Backend/platform hints already present in the title.
+    for term in (
+        "java",
+        "backend",
+        "platform",
+        "kafka",
+        "messaging",
+        "distributed",
+        "api",
+        "infrastructure",
+    ):
+        if term in title:
+            score += 15
+
+    # Senior SWE/SWD is explicitly acceptable for diagnostics.
+    if (
+        "senior software engineer" in title
+        or "senior software developer" in title
+    ):
+        score += 20
+
+    # Jobs rejected only because their title vocabulary is too narrow
+    # are especially useful for description analysis.
+    if reason == RejectionReason.INCLUDE_KEYWORD:
+        score += 20
+
+    return score
 
 def enrich_near_misses(
     jobs: list[Job],
@@ -256,25 +339,49 @@ def enrich_near_misses(
     Production filtering is not modified.
     """
 
-    candidates: list[tuple[Job, RejectionReason]] = []
+    ranked_candidates: list[
+        tuple[int, int, Job, RejectionReason]
+    ] = []
 
-    for job in jobs:
+    for index, job in enumerate(jobs):
         result = job_filter.evaluate(job)
 
         if result.included or result.reason is None:
             continue
 
-        if should_enrich(
+        if not should_enrich(
             job,
             result.reason,
             job_filter,
         ):
-            candidates.append(
-                (job, result.reason)
-            )
+            continue
 
-        if len(candidates) >= limit:
-            break
+        score = _candidate_score(
+            job,
+            result.reason,
+        )
+
+        ranked_candidates.append(
+            (
+                score,
+                index,
+                job,
+                result.reason,
+            )
+        )
+
+    ranked_candidates.sort(
+        key=lambda item: (
+            -item[0],
+            item[1],
+        )
+    )
+
+    candidates = [
+        (job, reason)
+        for _, _, job, reason
+        in ranked_candidates[:limit]
+    ]
 
     enriched: list[EnrichedNearMiss] = []
 

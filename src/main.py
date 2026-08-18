@@ -255,7 +255,7 @@ def main() -> None:
         enriched_near_misses = enrich_near_misses(
             jobs,
             job_filter,
-            limit=20,
+            limit=8,
         )
 
         _print_enriched_near_misses(
