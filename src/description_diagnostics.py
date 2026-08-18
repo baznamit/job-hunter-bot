@@ -214,11 +214,33 @@ def fetch_description_text(job: Job) -> str | None:
 
 
 def find_signals(text: str) -> list[str]:
+    """
+    Find relevant backend/platform technology signals.
+
+    Matching is case-insensitive and avoids reporting shorter signals
+    when a more specific equivalent signal is already present.
+    """
+
+    text = text.lower()
+
     found: list[str] = []
 
     for signal in _POSITIVE_SIGNALS:
-        if signal in text and signal not in found:
+        if signal in text:
             found.append(signal)
+
+    # Avoid duplicate-equivalent signals.
+    if "spring boot" in found and "spring" in found:
+        found.remove("spring")
+
+    if "microservices" in found and "microservice" in found:
+        found.remove("microservice")
+
+    if "back-end" in found and "backend" in found:
+        found.remove("back-end")
+
+    if "server-side" in found and "server side" in found:
+        found.remove("server side")
 
     return found
 
