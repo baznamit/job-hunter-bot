@@ -1,3 +1,4 @@
+import sys
 import requests
 
 from models import Job
@@ -50,14 +51,43 @@ class WorkdayAdapter(ProviderAdapter):
             data = response.json()
 
             postings = data.get("jobPostings", [])
+            total = data.get("total", 0)
+
+            print(
+                f"  [WORKDAY] {company.name}: "
+                f"offset={offset}, "
+                f"requested={_PAGE_SIZE}, "
+                f"returned={len(postings)}, "
+                f"total={total}",
+                file=sys.stderr,
+            )
+
             all_postings.extend(postings)
 
-            total = data.get("total", 0)
-            offset += _PAGE_SIZE
-
-            if offset >= total or not postings:
+            if not postings:
+                print(
+                    f"  [WORKDAY] {company.name}: stopping — "
+                    "provider returned no postings",
+                    file=sys.stderr,
+                )
                 break
 
+            offset += len(postings)
+
+            if offset >= total:
+                print(
+                    f"  [WORKDAY] {company.name}: stopping — "
+                    f"offset {offset} reached reported total {total}",
+                    file=sys.stderr,
+                )
+                break
+
+        print(
+            f"  [WORKDAY] {company.name}: "
+            f"pagination complete — {len(all_postings)} postings collected",
+            file=sys.stderr,
+        )
+        
         return {"jobPostings": all_postings}
 
     def parse(self, raw: dict, company: Company) -> list[Job]:
