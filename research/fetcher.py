@@ -23,6 +23,8 @@ def fetch_page(url: str) -> PageSnapshot:
         },
     )
 
+    response.raise_for_status()
+
     return PageSnapshot(
         original_url=url,
         final_url=str(response.url),
