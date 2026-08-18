@@ -18,7 +18,7 @@ from models.company import ProviderType
 from research.discovery import discover_provider
 from research.loader import load_registry
 from research.validator import validate_candidate
-from src.filters import JobFilter, RejectionReason
+from src.filters import JobFilter
 from src.notifier import TelegramNotifier
 from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter
 from src.providers.exceptions import (
@@ -135,6 +135,139 @@ def _build_message(jobs: list[Job], limit: int) -> str:
     return "\n".join(lines)
 
 
+def _fetch_jobs_with_recovery(company, adapter) -> list[Job] | None:
+    """Fetch jobs from company, with automatic recovery on provider error."""
+    try:
+        return adapter.fetch_jobs(company)
+    except ProviderNotFoundError as exc:
+        print(
+            f"  [STALE] {company.name}: ATS mapping appears invalid — {exc}",
+            file=sys.stderr,
+        )
+        return _recover_and_retry_fetch(company)
+
+
+def _recover_and_retry_fetch(company) -> list[Job] | None:
+    """Attempt to recover from stale provider and retry fetching jobs."""
+    recovered_company = _recover_stale_provider(company)
+
+    if recovered_company is None:
+        print(
+            f"  [WARN] {company.name}: automatic ATS recovery failed",
+            file=sys.stderr,
+        )
+        return None
+
+    recovered_adapter = _ADAPTERS.get(recovered_company.provider.type)
+
+    if recovered_adapter is None:
+        print(
+            f"  [WARN] {company.name}: recovered provider "
+            f"{recovered_company.provider.type.value} "
+            "has no adapter",
+            file=sys.stderr,
+        )
+        return None
+
+    try:
+        jobs = recovered_adapter.fetch_jobs(recovered_company)
+        print(
+            f"  [RECOVERED] {company.name}: jobs fetched using "
+            f"{recovered_company.provider.type.value}",
+            file=sys.stderr,
+        )
+        return jobs
+    except ProviderNotFoundError as exc:
+        print(
+            f"  [WARN] {company.name}: recovered ATS became "
+            f"invalid during retry — {exc}",
+            file=sys.stderr,
+        )
+        return None
+    except ProviderTemporaryError as exc:
+        print(
+            f"  [WARN] {company.name}: recovered ATS had a "
+            f"temporary failure — {exc}",
+            file=sys.stderr,
+        )
+        return None
+    except Exception as exc:
+        print(
+            f"  [WARN] {company.name}: recovered ATS fetch "
+            f"failed — {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _handle_fetch_error(company) -> bool:
+    """Handle non-provider fetch errors. Returns True if should continue."""
+    return False
+
+
+def _process_jobs_for_company(company, jobs, job_filter) -> tuple[list[Job], int, int]:
+    """Filter and promote jobs, returning matching jobs and counts."""
+    matching = [
+        job
+        for job in jobs
+        if job_filter.should_include(job)
+    ]
+
+    enriched_near_misses = enrich_near_misses(
+        jobs,
+        job_filter,
+        limit=8,
+    )
+
+    promoted = promotable_jobs(
+        enriched_near_misses,
+        job_filter,
+    )
+
+    direct_count = len(matching)
+    matching_urls = {str(job.url) for job in matching}
+    promoted_count = 0
+
+    for job in promoted:
+        if str(job.url) not in matching_urls:
+            matching.append(job)
+            matching_urls.add(str(job.url))
+            promoted_count += 1
+
+    return matching, direct_count, promoted_count
+
+
+def _print_company_stats(company, jobs_fetched, direct_count, promoted_count, total_matching) -> None:
+    """Print job processing statistics for a company."""
+    if promoted_count:
+        print(
+            f"  {company.name}: "
+            f"{jobs_fetched} fetched, "
+            f"{direct_count} direct + "
+            f"{promoted_count} promoted = "
+            f"{total_matching} matching"
+        )
+    else:
+        print(
+            f"  {company.name}: "
+            f"{jobs_fetched} fetched, "
+            f"{total_matching} matching"
+        )
+
+
+def _send_notifications(store, notifier, new_jobs) -> None:
+    """Send notification with new jobs and mark them as seen."""
+    try:
+        message = _build_message(new_jobs, _max_jobs())
+        notifier.send_message(message)
+        store.mark_seen(new_jobs)
+        print(f"Telegram notification sent ({len(new_jobs)} job(s)).")
+    except Exception as exc:
+        # Don't mark as seen — will retry on the next run.
+        print(f"[ERROR] Notification failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
 
     registry = load_registry()
@@ -153,140 +286,33 @@ def main() -> None:
         if adapter is None:
             continue  # Provider not yet implemented (e.g. Workday).
 
-        try:
-            jobs = adapter.fetch_jobs(company)
-
-        except ProviderNotFoundError as exc:
-            print(
-                f"  [STALE] {company.name}: ATS mapping appears invalid — {exc}",
-                file=sys.stderr,
-            )
-
-            recovered_company = _recover_stale_provider(company)
-
-            if recovered_company is None:
-                print(
-                    f"  [WARN] {company.name}: automatic ATS recovery failed",
-                    file=sys.stderr,
-                )
-                continue
-
-            recovered_adapter = _ADAPTERS.get(
-                recovered_company.provider.type
-            )
-
-            if recovered_adapter is None:
-                print(
-                    f"  [WARN] {company.name}: recovered provider "
-                    f"{recovered_company.provider.type.value} "
-                    "has no adapter",
-                    file=sys.stderr,
-                )
-                continue
-
+        jobs = _fetch_jobs_with_recovery(company, adapter)
+        if jobs is None:
             try:
-                jobs = recovered_adapter.fetch_jobs(
-                    recovered_company
-                )
-
-            except ProviderNotFoundError as retry_exc:
+                adapter.fetch_jobs(company)
+            except ProviderTemporaryError as exc:
                 print(
-                    f"  [WARN] {company.name}: recovered ATS became "
-                    f"invalid during retry — {retry_exc}",
+                    f"  [WARN] {company.name}: temporary ATS failure — {exc}",
                     file=sys.stderr,
                 )
-                continue
-
-            except ProviderTemporaryError as retry_exc:
+            except Exception as exc:
                 print(
-                    f"  [WARN] {company.name}: recovered ATS had a "
-                    f"temporary failure — {retry_exc}",
+                    f"  [WARN] {company.name}: fetch failed — {exc}",
                     file=sys.stderr,
                 )
-                continue
-
-            except Exception as retry_exc:
-                print(
-                    f"  [WARN] {company.name}: recovered ATS fetch "
-                    f"failed — {retry_exc}",
-                    file=sys.stderr,
-                )
-                continue
-
-            print(
-                f"  [RECOVERED] {company.name}: jobs fetched using "
-                f"{recovered_company.provider.type.value}",
-                file=sys.stderr,
-            )
-
-        except ProviderTemporaryError as exc:
-            print(
-                f"  [WARN] {company.name}: temporary ATS failure — {exc}",
-                file=sys.stderr,
-            )
             continue
 
-        except Exception as exc:
-            print(
-                f"  [WARN] {company.name}: fetch failed — {exc}",
-                file=sys.stderr,
-            )
-            continue
-
-        matching = [
-            job
-            for job in jobs
-            if job_filter.should_include(job)
-        ]
-
-        diagnostics = job_filter.diagnose(
-            jobs,
-            sample_limit=5,
+        matching, direct_count, promoted_count = _process_jobs_for_company(
+            company, jobs, job_filter
         )
 
-        print(
-            f"  {company.name}: "
-            f"{len(jobs)} fetched, "
-            f"{len(matching)} matching"
+        _print_company_stats(
+            company,
+            len(jobs),
+            direct_count,
+            promoted_count,
+            len(matching),
         )
-
-        _print_filter_diagnostics(
-            company.name,
-            diagnostics,
-        )
-
-        enriched_near_misses = enrich_near_misses(
-            jobs,
-            job_filter,
-            limit=8,
-        )
-
-        _print_enriched_near_misses(
-            company.name,
-            enriched_near_misses,
-        )
-
-        promoted = promotable_jobs(
-            enriched_near_misses,
-            job_filter,
-        )
-
-        if promoted:
-            print(
-                f"  [PROMOTED] {company.name}: "
-                f"{len(promoted)} description-verified job(s)"
-            )
-
-        # Avoid adding the same URL twice.
-        matching_urls = {
-            str(job.url)
-            for job in matching
-        }
-
-        for job in promoted:
-            if str(job.url) not in matching_urls:
-                matching.append(job)
-                matching_urls.add(str(job.url))
 
         all_matching.extend(matching)
 
@@ -301,108 +327,7 @@ def main() -> None:
         print("No new jobs to notify.")
         return
 
-    message = _build_message(new_jobs, _max_jobs())
-
-    try:
-        notifier.send_message(message)
-        store.mark_seen(new_jobs)
-        print(f"Telegram notification sent ({len(new_jobs)} job(s)).")
-    except Exception as exc:
-        # Don't mark as seen — will retry on the next run.
-        print(f"[ERROR] Notification failed: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-def _print_filter_diagnostics(
-    company_name: str,
-    diagnostics,
-) -> None:
-    if diagnostics.total == 0:
-        return
-    has_samples = any(
-        diagnostics.samples[reason]
-        for reason in RejectionReason
-    )
-
-    if not has_samples and diagnostics.matched > 0:
-        return
-    print()
-    print(f"  [FILTER-DIAG] {company_name}")
-    print(f"    Fetched             : {diagnostics.total}")
-    print(f"    Current matched     : {diagnostics.matched}")
-    print(
-        f"    Missing include     : "
-        f"{diagnostics.include_keyword}"
-    )
-    print(
-        f"    Excluded keyword    : "
-        f"{diagnostics.excluded_keyword}"
-    )
-    print(
-        f"    Location mismatch   : "
-        f"{diagnostics.location}"
-    )
-    print(
-        f"    Seniority mismatch  : "
-        f"{diagnostics.seniority}"
-    )
-
-    labels = {
-        RejectionReason.INCLUDE_KEYWORD:
-            "MISSING INCLUDE KEYWORD",
-        RejectionReason.EXCLUDED_KEYWORD:
-            "EXCLUDED KEYWORD",
-        RejectionReason.LOCATION:
-            "LOCATION",
-        RejectionReason.SENIORITY:
-            "SENIORITY",
-    }
-
-    for reason, label in labels.items():
-        samples = diagnostics.samples[reason]
-
-        if not samples:
-            continue
-
-        print(f"    Useful near misses — {label}:")
-
-        for index, job in enumerate(samples, 1):
-            print(
-                f"      {index}. {job.title} "
-                f"| {job.location}"
-            )
-
-def _print_enriched_near_misses(
-    company_name: str,
-    near_misses,
-) -> None:
-    strong = [
-        item
-        for item in near_misses
-        if item.strong
-    ]
-
-    if not strong:
-        return
-
-    print(
-        f"  [DESCRIPTION-DIAG] {company_name}: "
-        f"{len(strong)} strong near miss(es)"
-    )
-
-    for item in strong[:5]:
-        signals = ", ".join(item.signals[:8])
-
-        print(
-            f"    - {item.job.title} "
-            f"| {item.job.location}"
-        )
-        print(
-            f"      rejected_by="
-            f"{item.rejection_reason.value}"
-        )
-        print(
-            f"      signals={signals}"
-        )
+    _send_notifications(store, notifier, new_jobs)
         
 if __name__ == "__main__":
     main()
