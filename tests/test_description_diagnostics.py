@@ -33,8 +33,8 @@ def test_finds_backend_signals():
     )
 
     assert "java" in signals
-    assert "spring" in signals
     assert "spring boot" in signals
+    assert "spring" not in signals
     assert "backend" in signals
     assert "kafka" in signals
     assert "distributed systems" in signals
@@ -202,10 +202,15 @@ def test_strong_near_miss_is_detected(
         job_filter,
     )
 
-    assert "java" in signals
-    assert "spring boot" in signals
-    assert "spring" not in signals
-    assert "backend" in signals
+    assert len(results) == 1
+    assert results[0].strong
+    assert "java" in results[0].signals
+    assert "spring boot" in results[0].signals
+    assert "spring" not in results[0].signals
+    assert "backend" in results[0].signals
+    assert "microservices" in results[0].signals
+    assert "microservice" not in results[0].signals
+    assert "kafka" in results[0].signals
 
 @patch(
     "src.description_diagnostics.fetch_description_text"
