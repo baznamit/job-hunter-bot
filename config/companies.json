@@ -505,16 +505,20 @@
       "category": "SaaS",
       "priority": 3,
       "enabled": true,
-      "career_page": "https://careers.salesforce.com/",
+      "career_page": "https://www.salesforce.com/company/careers/jobs",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "salesforce",
+          "board": "External_Career_Site",
+          "cluster": "wd12"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Uses Phenom-based custom platform. No public API."
+      "notes": "Uses Workday ATS (salesforce.wd12.myworkdayjobs.com), board External_Career_Site."
     },
     {
       "id": "freshworks",
