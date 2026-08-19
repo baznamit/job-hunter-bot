@@ -15,6 +15,7 @@ from src.providers.lever import LeverAdapter
 from src.providers.ashby import AshbyAdapter
 from src.providers.workday import WorkdayAdapter
 from src.providers.smartrecruiters import SmartRecruitersAdapter
+from src.providers.oracle import OracleAdapter
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -232,3 +233,141 @@ def test_smartrecruiters_unknown_location():
     )[0]
 
     assert job.location == "Unknown"
+
+def test_oracle_parses_job():
+    company = _company(
+        ProviderType.ORACLE,
+        host="jpmc.fa.oraclecloud.com",
+        sites=[
+            {
+                "site_number": "CX_1001",
+                "site_path": "CX_1001",
+            }
+        ],
+    )
+
+    raw = {
+        "requisitions": [
+            {
+                "job": {
+                    "Id": "210756184",
+                    "Title": "Software Engineer II - Java",
+                    "PrimaryLocation":
+                        "Mumbai, Maharashtra, India",
+                    "PrimaryLocationCountry": "IN",
+                    "PostedDate":
+                        "2026-08-18T12:00:00+00:00",
+                    "Department": "Technology",
+                },
+                "site_path": "CX_1001",
+                "public_url_prefix": None,
+            }
+        ]
+    }
+
+    jobs = OracleAdapter().parse(
+        raw,
+        company,
+    )
+
+    assert len(jobs) == 1
+
+    job = jobs[0]
+
+    assert job.id == "210756184"
+    assert job.title == (
+        "Software Engineer II - Java"
+    )
+    assert job.location == (
+        "Mumbai, Maharashtra, India"
+    )
+    assert job.department == "Technology"
+    assert job.posted_at is not None
+
+    assert str(job.url) == (
+        "https://jpmc.fa.oraclecloud.com/"
+        "hcmUI/CandidateExperience/en/sites/"
+        "CX_1001/job/210756184"
+    )
+
+def test_oracle_site_path_is_independent_of_site_number():
+    company = _company(
+        ProviderType.ORACLE,
+        host="eeho.fa.us2.oraclecloud.com",
+        sites=[
+            {
+                "site_number": "CX_1",
+                "site_path": "jobsearch",
+            }
+        ],
+    )
+
+    raw = {
+        "requisitions": [
+            {
+                "job": {
+                    "Id": "331738",
+                    "Title": "Software Engineer",
+                    "PrimaryLocation":
+                        "Bengaluru, Karnataka, India",
+                },
+                "site_path": "jobsearch",
+                "public_url_prefix": None,
+            }
+        ]
+    }
+
+    job = OracleAdapter().parse(
+        raw,
+        company,
+    )[0]
+
+    assert str(job.url) == (
+        "https://eeho.fa.us2.oraclecloud.com/"
+        "hcmUI/CandidateExperience/en/sites/"
+        "jobsearch/job/331738"
+    )
+
+def test_oracle_supports_custom_public_url_prefix():
+    company = _company(
+        ProviderType.ORACLE,
+        host="careers.americanexpress.com",
+        sites=[
+            {
+                "site_number": "CX_1",
+                "site_path": "CX_1",
+                "public_url_prefix": (
+                    "https://careers.americanexpress.com/"
+                    "en/sites/CX_1/job/"
+                ),
+            }
+        ],
+    )
+
+    raw = {
+        "requisitions": [
+            {
+                "job": {
+                    "Id": "26010639",
+                    "Title": "Software Engineer III",
+                    "PrimaryLocation":
+                        "Bengaluru, Karnataka, India",
+                },
+                "site_path": "CX_1",
+                "public_url_prefix": (
+                    "https://careers.americanexpress.com/"
+                    "en/sites/CX_1/job/"
+                ),
+            }
+        ]
+    }
+
+    job = OracleAdapter().parse(
+        raw,
+        company,
+    )[0]
+
+    assert str(job.url) == (
+        "https://careers.americanexpress.com/"
+        "en/sites/CX_1/job/26010639"
+    )

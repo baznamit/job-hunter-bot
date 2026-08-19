@@ -27,6 +27,7 @@ from src.providers import (
     LeverAdapter,
     WorkdayAdapter,
     SmartRecruitersAdapter,
+    OracleAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -37,6 +38,7 @@ _ADAPTERS = {
     ProviderType.ASHBY: AshbyAdapter(),
     ProviderType.WORKDAY: WorkdayAdapter(),
     ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
+    ProviderType.ORACLE: OracleAdapter(),
 }
 
 
@@ -183,6 +185,33 @@ def validate_registry(registry: CompanyRegistry) -> None:
                 raise ValueError(
                     f"{company.name}: SmartRecruiters provider "
                     "requires config.company_identifier"
+                )
+
+        elif provider.type == ProviderType.ORACLE:
+            missing = []
+
+            if not config.host:
+                missing.append("host")
+
+            if not config.sites:
+                missing.append("sites")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: Oracle provider is missing "
+                    f"config fields: {', '.join(missing)}"
+                )
+
+            enabled_sites = [
+                site
+                for site in config.sites
+                if site.enabled
+            ]
+
+            if not enabled_sites:
+                raise ValueError(
+                    f"{company.name}: Oracle provider requires "
+                    "at least one enabled site"
                 )
 
         elif provider.type == ProviderType.WORKDAY:

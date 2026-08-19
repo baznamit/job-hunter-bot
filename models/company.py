@@ -21,6 +21,7 @@ class ProviderType(str, Enum):
     WORKDAY = "workday"
     ASHBY = "ashby"
     SMARTRECRUITERS = "smartrecruiters"
+    ORACLE = "oracle"
     CUSTOM = "custom"
 
 
@@ -31,6 +32,13 @@ class ProviderStatus(str, Enum):
     IMPLEMENTED = "implemented"
     TESTED = "tested"
 
+class OracleSiteConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    site_number: str
+    site_path: str
+    public_url_prefix: str | None = None
+    enabled: bool = True
 
 class ProviderConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -41,6 +49,8 @@ class ProviderConfig(BaseModel):
     cluster: str | None = None
     company_identifier: str | None = None
 
+    host: str | None = None
+    sites: list[OracleSiteConfig] = Field(default_factory=list)
 
 class Provider(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -4,6 +4,7 @@ from .greenhouse import GreenhouseAdapter
 from .lever import LeverAdapter
 from .workday import WorkdayAdapter
 from .smartrecruiters import SmartRecruitersAdapter
+from .oracle import OracleAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -12,4 +13,5 @@ __all__ = [
     "AshbyAdapter",
     "WorkdayAdapter",
     "SmartRecruitersAdapter",
+    "OracleAdapter",
 ]
