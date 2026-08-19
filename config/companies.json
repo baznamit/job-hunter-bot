@@ -275,16 +275,25 @@
       "category": "Banking",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://careers.jpmorgan.com/",
+      "career_page": "https://www.jpmorganchase.com/careers",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "oracle",
+        "status": "verified",
+        "config": {
+          "host": "jpmc.fa.oraclecloud.com",
+          "sites": [
+            {
+              "site_number": "CX_1001",
+              "site_path": "CX_1001",
+              "enabled": true
+            }
+          ]
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Uses Oracle Recruiting Cloud. No public API."
+      "notes": "Uses Oracle Recruiting Cloud. Primary current external site: CX_1001."
     },
     {
       "id": "amex",
