@@ -301,16 +301,26 @@
       "category": "Banking",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://careers.americanexpress.com/",
+      "career_page": "https://www.americanexpress.com/en-us/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "oracle",
+        "status": "verified",
+        "config": {
+          "host": "careers.americanexpress.com",
+          "sites": [
+            {
+              "site_number": "CX_1",
+              "site_path": "CX_1",
+              "public_url_prefix": "https://careers.americanexpress.com/en/sites/CX_1/job/",
+              "enabled": true
+            }
+          ]
+        }
       },
       "locations": [],
       "roles": [],
-      "supports_remote": false,
-      "notes": "Uses Oracle Taleo. No public API."
+      "supports_remote": true,
+      "notes": "Uses Oracle Recruiting Cloud. External Candidate Experience site: CX_1."
     },
     {
       "id": "visa",
