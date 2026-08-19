@@ -1,4 +1,3 @@
-import sys
 import uuid
 from datetime import datetime
 
@@ -104,28 +103,6 @@ class OracleAdapter(ProviderAdapter):
                 "TotalJobsCount"
             )
 
-            print(
-                f"  [ORACLE] {company.name}: "
-                f"site={site.site_number}, "
-                f"offset={offset}, "
-                f"returned={len(postings)}, "
-                f"reported_total={reported_total}",
-                file=sys.stderr,
-            )
-
-            page_ids = [
-                str(posting["Id"])
-                for posting in postings
-                if posting.get("Id") is not None
-            ]
-
-            if page_ids:
-                print(
-                    f"  [ORACLE] {company.name}: "
-                    f"page_ids={page_ids[0]}..{page_ids[-1]}",
-                    file=sys.stderr,
-                )
-
             if (
                 isinstance(reported_total, int)
                 and reported_total >= 0
@@ -170,13 +147,13 @@ class OracleAdapter(ProviderAdapter):
 
             all_jobs.extend(new_jobs)
 
+            offset += len(postings)
+
             if (
                 total is not None
-                and len(seen_ids) >= total
+                and offset >= total
             ):
                 break
-
-            offset += len(postings)
 
         else:
             raise RuntimeError(
@@ -184,13 +161,6 @@ class OracleAdapter(ProviderAdapter):
                 f"exceeded {_MAX_PAGES} pages "
                 f"for site {site.site_number}"
             )
-
-        print(
-            f"  [ORACLE] {company.name}: "
-            f"site={site.site_number} complete — "
-            f"{len(all_jobs)} unique postings collected",
-            file=sys.stderr,
-        )
         
         return all_jobs
 

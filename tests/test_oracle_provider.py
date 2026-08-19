@@ -162,3 +162,48 @@ def test_oracle_validate_uses_single_record(
 
     assert "limit=1" in finder
     assert "offset=0" in finder
+
+@patch("src.providers.oracle.requests.get")
+def test_oracle_stops_at_total_even_with_duplicate_ids(
+    mock_get,
+):
+    first_page = [
+        {
+            "Id": str(i),
+            "Title": f"Job {i}",
+            "PrimaryLocation": "Bengaluru",
+        }
+        for i in range(200)
+    ]
+
+    # One duplicate from page 1, plus 49 new jobs.
+    second_page = [
+        {
+            "Id": "199",
+            "Title": "Job 199",
+            "PrimaryLocation": "Bengaluru",
+        }
+    ] + [
+        {
+            "Id": str(i),
+            "Title": f"Job {i}",
+            "PrimaryLocation": "Bengaluru",
+        }
+        for i in range(200, 249)
+    ]
+
+    mock_get.side_effect = [
+        _response(first_page, 250),
+        _response(second_page, 250),
+    ]
+
+    jobs = OracleAdapter().fetch_jobs(
+        _company()
+    )
+
+    # Oracle reported 250 positions, but one requisition was duplicated.
+    assert len(jobs) == 249
+
+    # Most importantly, don't request a third page trying to make the
+    # unique-ID count reach TotalJobsCount.
+    assert mock_get.call_count == 2
