@@ -85,7 +85,26 @@ class OracleAdapter(ProviderAdapter):
                 company,
             )
 
-            data = response.json()
+            try:
+                data = response.json()
+            except requests.exceptions.JSONDecodeError as exc:
+                content_type = response.headers.get(
+                    "Content-Type",
+                    "unknown",
+                )
+                body_preview = response.text[:500].replace(
+                    "\n",
+                    " ",
+                )
+
+                raise RuntimeError(
+                    f"{company.name}: Oracle validation endpoint "
+                    f"returned non-JSON response "
+                    f"(status={response.status_code}, "
+                    f"content_type={content_type}, "
+                    f"url={response.url}, "
+                    f"body={body_preview!r})"
+                ) from exc
 
             items = data.get("items") or []
 
@@ -338,7 +357,27 @@ class OracleAdapter(ProviderAdapter):
             company,
         )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError as exc:
+            content_type = response.headers.get(
+                "Content-Type",
+                "unknown",
+            )
+
+            body_preview = response.text[:500].replace(
+                "\n",
+                " ",
+            )
+
+            raise RuntimeError(
+                f"{company.name}: Oracle API returned "
+                f"non-JSON response "
+                f"(status={response.status_code}, "
+                f"content_type={content_type}, "
+                f"url={response.url}, "
+                f"body={body_preview!r})"
+            ) from exc
         items = data.get("items") or []
 
         if not items:
