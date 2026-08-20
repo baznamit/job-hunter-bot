@@ -29,6 +29,10 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Verify Nomura careers feed
+        run: |
+          python -m research.nomura_probe
+
       - name: Run Bot
         run: |
           python -m src.main
