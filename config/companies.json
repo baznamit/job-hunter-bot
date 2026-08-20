@@ -818,7 +818,7 @@
       "name": "Citi",
       "category": "Banking",
       "priority": 1,
-      "enabled": true,
+      "enabled": false,
       "career_page": "https://jobs.citi.com/",
       "provider": {
         "type": "talentbrew",

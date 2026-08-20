@@ -116,11 +116,14 @@ class TalentBrewAdapter(ProviderAdapter):
                 "requires base_url"
             )
 
-        # Both verified TalentBrew sites expose each job as an
-        # anchor containing data-job-id and a /job/... URL.
-        anchors = re.findall(
-            r'<a\b([^>]*\bdata-job-id=["\'][^"\']+["\'][^>]*)>'
-            r'(.*?)</a>',
+        # TalentBrew search results are represented as <li>
+        # elements. Metadata such as location may be outside
+        # the job <a>, so parse the complete result item.
+        items = re.findall(
+            r'<li\b[^>]*class=["\'][^"\']*'
+            r'(?:sr-job-item|search-results-li)'
+            r'[^"\']*["\'][^>]*>'
+            r'(.*?)</li>',
             page_html,
             flags=(
                 re.IGNORECASE
@@ -131,7 +134,24 @@ class TalentBrewAdapter(ProviderAdapter):
         jobs: list[Job] = []
         seen: set[str] = set()
 
-        for attrs, body in anchors:
+        for item in items:
+            anchor = re.search(
+                r'<a\b([^>]*\bdata-job-id='
+                r'["\'][^"\']+["\'][^>]*)>'
+                r'(.*?)</a>',
+                item,
+                flags=(
+                    re.IGNORECASE
+                    | re.DOTALL
+                ),
+            )
+
+            if not anchor:
+                continue
+
+            attrs = anchor.group(1)
+            body = anchor.group(2)
+
             id_match = re.search(
                 r'data-job-id=["\']([^"\']+)["\']',
                 attrs,
@@ -172,12 +192,14 @@ class TalentBrewAdapter(ProviderAdapter):
                 body
             )
 
+            # Location/department can live outside the anchor,
+            # so inspect the complete result item.
             location = self._extract_location(
-                body
+                item
             )
 
             department = self._extract_department(
-                body
+                item
             )
 
             if not title:
