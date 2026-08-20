@@ -25,131 +25,163 @@ def _fetch(url: str) -> requests.Response:
     return response
 
 
-def _print_context(
+def _context(
     text: str,
     needle: str,
-    source: str,
-    radius: int = 700,
-) -> None:
-    lower = text.lower()
-    start = 0
-    found = 0
+    radius: int = 2500,
+) -> str | None:
+    index = text.find(needle)
 
-    while found < 5:
-        index = lower.find(
-            needle.lower(),
-            start,
-        )
+    if index == -1:
+        return None
 
-        if index == -1:
-            break
+    left = max(0, index - radius)
+    right = min(
+        len(text),
+        index + len(needle) + radius,
+    )
 
-        left = max(0, index - radius)
-        right = min(
-            len(text),
-            index + len(needle) + radius,
-        )
-
-        context = text[left:right]
-        context = context.replace("\n", " ")
-
-        print(
-            f"[GOLDMAN-PROBE] CONTEXT "
-            f"source={source} "
-            f"needle={needle!r}",
-            file=sys.stderr,
-        )
-        print(
-            f"[GOLDMAN-PROBE] {context}",
-            file=sys.stderr,
-        )
-
-        found += 1
-        start = index + len(needle)
+    return text[left:right].replace(
+        "\n",
+        " ",
+    )
 
 
 def probe_goldman() -> None:
     response = _fetch(_URL)
+    html = response.text
 
     print(
         f"[GOLDMAN-PROBE] final_url={response.url}",
         file=sys.stderr,
     )
 
-    html = response.text
+    # Next.js can load chunks both directly from script tags and
+    # indirectly through build manifests.
+    urls: set[str] = set()
 
-    script_sources = re.findall(
+    for src in re.findall(
         r'<script[^>]+src=["\']([^"\']+)["\']',
         html,
         flags=re.IGNORECASE,
+    ):
+        urls.add(
+            urljoin(response.url, src)
+        )
+
+    manifest_paths = re.findall(
+        r'["\']([^"\']*(?:_buildManifest|'
+        r'_ssgManifest)[^"\']*\.js)["\']',
+        html,
     )
 
+    for path in manifest_paths:
+        manifest_url = urljoin(
+            response.url,
+            path,
+        )
+
+        try:
+            manifest = _fetch(
+                manifest_url
+            ).text
+        except requests.RequestException:
+            continue
+
+        for chunk in re.findall(
+            r'["\']([^"\']+\.js)["\']',
+            manifest,
+        ):
+            urls.add(
+                urljoin(
+                    manifest_url,
+                    chunk,
+                )
+            )
+
     print(
-        f"[GOLDMAN-PROBE] "
-        f"scripts={len(script_sources)}",
+        f"[GOLDMAN-PROBE] inspecting "
+        f"{len(urls)} JS asset(s)",
         file=sys.stderr,
     )
 
     needles = (
-        "/gateway/api/v1/graphql",
-        "/api/v2/",
-        "operationName",
-        "query ",
-        "mutation ",
-        "roles",
-        "searchRoles",
-        "jobSearch",
-        "jobResults",
-        "pageSize",
-        "pageNumber",
-        "offset",
-        "limit",
+        "GetRoles",
+        "GetRoleFilters",
+        "GetRoleSearchFiltersCount",
     )
 
-    for src in script_sources:
-        script_url = urljoin(
-            response.url,
-            src,
-        )
-
+    for script_url in sorted(urls):
         try:
-            script_response = _fetch(
+            script = _fetch(
                 script_url
-            )
+            ).text
         except requests.RequestException as exc:
             print(
-                f"[GOLDMAN-PROBE] script failed "
+                f"[GOLDMAN-PROBE] fetch failed "
                 f"{script_url}: {exc}",
                 file=sys.stderr,
             )
             continue
 
-        script = script_response.text
-
-        interesting = any(
-            needle.lower() in script.lower()
-            for needle in (
-                "/gateway/api/v1/graphql",
-                "/api/v2/",
-            )
-        )
-
-        if not interesting:
-            continue
-
-        print(
-            f"[GOLDMAN-PROBE] "
-            f"interesting_script={script_url}",
-            file=sys.stderr,
-        )
+        matched = False
 
         for needle in needles:
-            if needle.lower() in script.lower():
-                _print_context(
-                    script,
-                    needle,
-                    script_url,
+            context = _context(
+                script,
+                needle,
+            )
+
+            if context is None:
+                continue
+
+            if not matched:
+                print(
+                    "[GOLDMAN-PROBE] "
+                    f"QUERY_SCRIPT={script_url}",
+                    file=sys.stderr,
                 )
+                matched = True
+
+            print(
+                f"[GOLDMAN-PROBE] "
+                f"QUERY_CONTEXT={needle}",
+                file=sys.stderr,
+            )
+
+            print(
+                f"[GOLDMAN-PROBE] {context}",
+                file=sys.stderr,
+            )
+
+        # Also specifically look for gql-tagged operations.
+        for match in re.finditer(
+            r'(?:query\s+GetRoles|'
+            r'GetRoles\s*\()',
+            script,
+        ):
+            left = max(
+                0,
+                match.start() - 3000,
+            )
+            right = min(
+                len(script),
+                match.end() + 5000,
+            )
+
+            print(
+                "[GOLDMAN-PROBE] "
+                "GET_ROLES_DEFINITION",
+                file=sys.stderr,
+            )
+            print(
+                "[GOLDMAN-PROBE] "
+                + script[left:right].replace(
+                    "\n",
+                    " ",
+                ),
+                file=sys.stderr,
+            )
 
 
 if __name__ == "__main__":
