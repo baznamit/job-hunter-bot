@@ -33,10 +33,15 @@ class OracleAdapter(ProviderAdapter):
         self,
         company: Company,
     ) -> str:
-        host = company.provider.config.host
+        config = company.provider.config
+
+        api_host = (
+            config.api_host
+            or config.host
+        )
 
         return (
-            f"https://{host}/"
+            f"https://{api_host}/"
             "hcmRestApi/resources/latest/"
             "recruitingCEJobRequisitions"
         )

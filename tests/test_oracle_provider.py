@@ -207,3 +207,43 @@ def test_oracle_stops_at_total_even_with_duplicate_ids(
     # Most importantly, don't request a third page trying to make the
     # unique-ID count reach TotalJobsCount.
     assert mock_get.call_count == 2
+
+def test_oracle_listing_url_uses_api_host_when_configured():
+    company = _company()
+
+    company.provider.config.host = (
+        "careers.americanexpress.com"
+    )
+
+    company.provider.config.api_host = (
+        "egug.fa.us2.oraclecloud.com"
+    )
+
+    url = OracleAdapter()._listing_url(
+        company
+    )
+
+    assert url == (
+        "https://egug.fa.us2.oraclecloud.com/"
+        "hcmRestApi/resources/latest/"
+        "recruitingCEJobRequisitions"
+    )
+
+def test_oracle_listing_url_falls_back_to_public_host():
+    company = _company()
+
+    company.provider.config.host = (
+        "jpmc.fa.oraclecloud.com"
+    )
+
+    company.provider.config.api_host = None
+
+    url = OracleAdapter()._listing_url(
+        company
+    )
+
+    assert url == (
+        "https://jpmc.fa.oraclecloud.com/"
+        "hcmRestApi/resources/latest/"
+        "recruitingCEJobRequisitions"
+    )

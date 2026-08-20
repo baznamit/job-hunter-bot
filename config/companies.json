@@ -307,6 +307,7 @@
         "status": "verified",
         "config": {
           "host": "careers.americanexpress.com",
+          "api_host": "egug.fa.us2.oraclecloud.com",
           "sites": [
             {
               "site_number": "CX_1",
@@ -320,7 +321,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Uses Oracle Recruiting Cloud. External Candidate Experience site: CX_1."
+      "notes": "Uses Oracle Recruiting Cloud. Public host careers.americanexpress.com; backend API host egug.fa.us2.oraclecloud.com; external site CX_1."
     },
     {
       "id": "visa",

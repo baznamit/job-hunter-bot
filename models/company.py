@@ -50,6 +50,7 @@ class ProviderConfig(BaseModel):
     company_identifier: str | None = None
 
     host: str | None = None
+    api_host: str | None = None
     sites: list[OracleSiteConfig] = Field(default_factory=list)
 
 class Provider(BaseModel):
