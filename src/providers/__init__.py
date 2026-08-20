@@ -5,6 +5,7 @@ from .lever import LeverAdapter
 from .workday import WorkdayAdapter
 from .smartrecruiters import SmartRecruitersAdapter
 from .oracle import OracleAdapter
+from .higher import HigherAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -14,4 +15,5 @@ __all__ = [
     "WorkdayAdapter",
     "SmartRecruitersAdapter",
     "OracleAdapter",
+    "HigherAdapter",
 ]

@@ -28,6 +28,7 @@ from src.providers import (
     WorkdayAdapter,
     SmartRecruitersAdapter,
     OracleAdapter,
+    HigherAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -39,6 +40,7 @@ _ADAPTERS = {
     ProviderType.WORKDAY: WorkdayAdapter(),
     ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
     ProviderType.ORACLE: OracleAdapter(),
+    ProviderType.HIGHER: HigherAdapter(),
 }
 
 
@@ -185,6 +187,21 @@ def validate_registry(registry: CompanyRegistry) -> None:
                 raise ValueError(
                     f"{company.name}: SmartRecruiters provider "
                     "requires config.company_identifier"
+                )
+
+        elif provider.type == ProviderType.HIGHER:
+            missing = []
+
+            if not config.graphql_url:
+                missing.append("graphql_url")
+
+            if not config.public_base_url:
+                missing.append("public_base_url")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: Higher provider is missing "
+                    f"config fields: {', '.join(missing)}"
                 )
 
         elif provider.type == ProviderType.ORACLE:

@@ -16,6 +16,7 @@ from src.providers.ashby import AshbyAdapter
 from src.providers.workday import WorkdayAdapter
 from src.providers.smartrecruiters import SmartRecruitersAdapter
 from src.providers.oracle import OracleAdapter
+from src.providers.higher import HigherAdapter
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -370,4 +371,93 @@ def test_oracle_supports_custom_public_url_prefix():
     assert str(job.url) == (
         "https://careers.americanexpress.com/"
         "en/sites/CX_1/job/26010639"
+    )
+
+def test_higher_parses_goldman_job():
+    company = _company(
+        ProviderType.HIGHER,
+        graphql_url=(
+            "https://api-higher.gs.com/"
+            "gateway/api/v1/graphql"
+        ),
+        public_base_url="https://higher.gs.com",
+    )
+
+    raw = {
+        "items": [
+            {
+                "roleId": "175255_GS_MID_CAREER",
+                "corporateTitle": "Associate",
+                "jobTitle": (
+                    "Corporate Treasury - Liquidity "
+                    "Management - Associate - Bengaluru"
+                ),
+                "jobFunction": "Liquidity Execution",
+                "locations": [
+                    {
+                        "primary": True,
+                        "state": "Karnataka",
+                        "country": "India",
+                        "city": "Bengaluru",
+                    }
+                ],
+                "status": "POSTED",
+                "division": "Corporate Treasury",
+                "skills": [],
+                "externalSource": {
+                    "sourceId": "175255",
+                },
+            }
+        ],
+        "total": 1,
+    }
+
+    jobs = HigherAdapter().parse(
+        raw,
+        company,
+    )
+
+    assert len(jobs) == 1
+
+    job = jobs[0]
+
+    assert job.id == "175255_GS_MID_CAREER"
+    assert job.location == (
+        "Bengaluru, Karnataka, India"
+    )
+    assert job.department == "Corporate Treasury"
+
+    assert str(job.url) == (
+        "https://higher.gs.com/roles/175255"
+    )
+
+def test_higher_uses_external_source_for_public_url():
+    company = _company(
+        ProviderType.HIGHER,
+        graphql_url="https://api-higher.gs.com/graphql",
+        public_base_url="https://higher.gs.com",
+    )
+
+    raw = {
+        "items": [
+            {
+                "roleId": "168761_GS_MID_CAREER",
+                "jobTitle": "Data Engineering",
+                "locations": [],
+                "externalSource": {
+                    "sourceId": "168761",
+                },
+            }
+        ]
+    }
+
+    job = HigherAdapter().parse(
+        raw,
+        company,
+    )[0]
+
+    assert job.id == "168761_GS_MID_CAREER"
+
+    assert str(job.url) == (
+        "https://higher.gs.com/roles/168761"
     )

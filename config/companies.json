@@ -413,16 +413,19 @@
       "category": "Banking",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://www.goldmansachs.com/careers/",
+      "career_page": "https://higher.gs.com/results",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "higher",
+        "status": "verified",
+        "config": {
+          "graphql_url": "https://api-higher.gs.com/gateway/api/v1/graphql",
+          "public_base_url": "https://higher.gs.com"
+        }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Uses proprietary Goldman Sachs careers platform. No public API."
+      "notes": "Uses Goldman Sachs Higher careers platform. Anonymous GetRoles GraphQL API verified."
     },
     {
       "id": "barclays",

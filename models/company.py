@@ -22,6 +22,7 @@ class ProviderType(str, Enum):
     ASHBY = "ashby"
     SMARTRECRUITERS = "smartrecruiters"
     ORACLE = "oracle"
+    HIGHER = "higher"
     CUSTOM = "custom"
 
 
@@ -52,6 +53,9 @@ class ProviderConfig(BaseModel):
     host: str | None = None
     api_host: str | None = None
     sites: list[OracleSiteConfig] = Field(default_factory=list)
+
+    graphql_url: str | None = None
+    public_base_url: str | None = None
 
 class Provider(BaseModel):
     model_config = ConfigDict(extra="forbid")

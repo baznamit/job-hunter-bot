@@ -20,7 +20,7 @@ from research.loader import load_registry
 from research.validator import validate_candidate
 from src.filters import JobFilter
 from src.notifier import TelegramNotifier
-from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter, SmartRecruitersAdapter, OracleAdapter
+from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter, SmartRecruitersAdapter, OracleAdapter, HigherAdapter
 from src.providers.exceptions import (
     ProviderNotFoundError,
     ProviderTemporaryError,
@@ -42,6 +42,7 @@ _ADAPTERS = {
     ProviderType.WORKDAY: WorkdayAdapter(),
     ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
     ProviderType.ORACLE: OracleAdapter(),
+    ProviderType.HIGHER: HigherAdapter(),
 }
 
 def _recover_stale_provider(company):
