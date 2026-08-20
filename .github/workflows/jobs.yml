@@ -28,6 +28,10 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+        
+      - name: Probe Goldman Sachs careers platform
+        run: |
+          python -m research.goldman_probe
 
       - name: Run Bot
         run: |
