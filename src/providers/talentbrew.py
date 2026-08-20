@@ -347,30 +347,48 @@ class TalentBrewAdapter(ProviderAdapter):
 
             if not page_jobs:
                 break
+            else:
+                new_jobs = [
+                    job
+                    for job in page_jobs
+                    if job.id not in seen_ids
+                ]
 
-            new_jobs = [
-                job
-                for job in page_jobs
-                if job.id not in seen_ids
-            ]
+                if company.id == "citi" and (
+                    page <= 2
+                    or page >= 23
+                    or not new_jobs
+                ):
+                    print(
+                        "  [TB-PAGE] "
+                        f"{company.name}: "
+                        f"page={page}, "
+                        f"total={total}, "
+                        f"page_jobs={len(page_jobs)}, "
+                        f"new_jobs={len(new_jobs)}, "
+                        f"first_id="
+                        f"{page_jobs[0].id if page_jobs else None}, "
+                        f"last_id="
+                        f"{page_jobs[-1].id if page_jobs else None}"
+                    )
 
-            if not new_jobs:
-                break
-
-            for job in new_jobs:
-                seen_ids.add(job.id)
-                jobs.append(job)
-
-            if total is not None:
-                expected_pages = math.ceil(
-                    total / page_size
-                )
-
-                if page >= expected_pages:
+                if not new_jobs:
                     break
 
-            elif len(page_jobs) < page_size:
-                break
+                for job in new_jobs:
+                    seen_ids.add(job.id)
+                    jobs.append(job)
+
+                if total is not None:
+                    expected_pages = math.ceil(
+                        total / page_size
+                    )
+
+                    if page >= expected_pages:
+                        break
+
+                elif len(page_jobs) < page_size:
+                    break
 
         else:
             raise RuntimeError(

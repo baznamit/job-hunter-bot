@@ -233,6 +233,64 @@ class AlgoliaAdapter(ProviderAdapter):
                 )
             )
 
+        if company.id == "msci":
+            india_jobs = [
+                job
+                for job in jobs
+                if any(
+                    marker in job.location.lower()
+                    for marker in (
+                        "india",
+                        "mumbai",
+                        "bengaluru",
+                        "bangalore",
+                        "goregaon",
+                    )
+                )
+            ]
+
+            software_jobs = [
+                job
+                for job in jobs
+                if any(
+                    marker in job.title.lower()
+                    for marker in (
+                        "software",
+                        "developer",
+                        "engineer",
+                        "backend",
+                        "java",
+                        "platform",
+                    )
+                )
+            ]
+
+            print(
+                "  [ALGOLIA-DIAG] "
+                f"{company.name}: "
+                f"parsed={len(jobs)}, "
+                f"india_jobs={len(india_jobs)}, "
+                f"software_jobs={len(software_jobs)}"
+            )
+
+            for job in india_jobs[:10]:
+                print(
+                    "  [ALGOLIA-DIAG] "
+                    f"{company.name}: INDIA "
+                    f"title={job.title!r}, "
+                    f"location={job.location!r}, "
+                    f"id={job.id!r}"
+                )
+
+            for job in software_jobs[:10]:
+                print(
+                    "  [ALGOLIA-DIAG] "
+                    f"{company.name}: SOFTWARE "
+                    f"title={job.title!r}, "
+                    f"location={job.location!r}, "
+                    f"id={job.id!r}"
+                )
+
         return jobs
 
     def validate(
