@@ -29,6 +29,7 @@ from src.providers import (
     SmartRecruitersAdapter,
     OracleAdapter,
     HigherAdapter,
+    SuccessFactorsAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -41,6 +42,7 @@ _ADAPTERS = {
     ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
     ProviderType.ORACLE: OracleAdapter(),
     ProviderType.HIGHER: HigherAdapter(),
+    ProviderType.SUCCESSFACTORS: SuccessFactorsAdapter(),
 }
 
 
@@ -202,6 +204,22 @@ def validate_registry(registry: CompanyRegistry) -> None:
                 raise ValueError(
                     f"{company.name}: Higher provider is missing "
                     f"config fields: {', '.join(missing)}"
+                )
+
+        elif provider.type == ProviderType.SUCCESSFACTORS:
+            missing = []
+
+            if not config.base_url:
+                missing.append("base_url")
+
+            if not config.listing_path:
+                missing.append("listing_path")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: SuccessFactors provider "
+                    f"is missing config fields: "
+                    f"{', '.join(missing)}"
                 )
 
         elif provider.type == ProviderType.ORACLE:

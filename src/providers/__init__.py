@@ -6,6 +6,7 @@ from .workday import WorkdayAdapter
 from .smartrecruiters import SmartRecruitersAdapter
 from .oracle import OracleAdapter
 from .higher import HigherAdapter
+from .successfactors import SuccessFactorsAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -16,4 +17,5 @@ __all__ = [
     "SmartRecruitersAdapter",
     "OracleAdapter",
     "HigherAdapter",
+    "SuccessFactorsAdapter",
 ]

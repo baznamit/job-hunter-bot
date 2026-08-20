@@ -791,6 +791,27 @@
       "roles": [],
       "supports_remote": false,
       "notes": "SmartRecruiters feed verified from GitHub Actions. India software engineering roles confirmed."
+    },
+    {
+      "id": "nomura",
+      "name": "Nomura",
+      "category": "Banking",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.nomura.com/",
+      "provider": {
+        "type": "successfactors",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.nomura.com",
+          "listing_path": "/Nomura/go/Career-Opportunities-India/9050900/",
+          "page_size": 100
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "SAP SuccessFactors Recruiting Marketing careers site. India listing pagination and job-detail access verified from GitHub Actions."
     }
   ]
 }

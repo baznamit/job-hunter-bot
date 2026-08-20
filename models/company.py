@@ -23,6 +23,7 @@ class ProviderType(str, Enum):
     SMARTRECRUITERS = "smartrecruiters"
     ORACLE = "oracle"
     HIGHER = "higher"
+    SUCCESSFACTORS = "successfactors"
     CUSTOM = "custom"
 
 
@@ -56,6 +57,10 @@ class ProviderConfig(BaseModel):
 
     graphql_url: str | None = None
     public_base_url: str | None = None
+
+    base_url: str | None = None
+    listing_path: str | None = None
+    page_size: int | None = None
 
 class Provider(BaseModel):
     model_config = ConfigDict(extra="forbid")
