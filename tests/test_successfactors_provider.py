@@ -1,5 +1,6 @@
 from models.company import (
     Company,
+    CompanyCategory,
     Provider,
     ProviderConfig,
     ProviderStatus,
@@ -17,18 +18,14 @@ def _company(
     return Company(
         id="test",
         name="Test Co",
-        category="Banking",
+        category=CompanyCategory.SAAS,
         priority=1,
-        enabled=True,
-        career_page="https://careers.nomura.com/",
+        career_page="https://example.com/careers",
         provider=Provider(
             type=provider_type,
-            status=ProviderStatus.VERIFIED,
+            status=ProviderStatus.PARTIAL,
             config=ProviderConfig(**config),
         ),
-        locations=[],
-        roles=[],
-        supports_remote=False,
     )
 
 
