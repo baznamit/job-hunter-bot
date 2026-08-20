@@ -751,6 +751,46 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Workday external board. Live CXS API, pagination and public job URLs verified from GitHub Actions. Powai/Mumbai technology roles confirmed."
+    },
+    {
+      "id": "spglobal",
+      "name": "S&P Global",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.spglobal.com/en/explore-s-p-global/careers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "spgi",
+          "board": "spgi_careers",
+          "cluster": "wd5"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday external careers board. Live CXS API, pagination and public job URLs verified from GitHub Actions."
+    },
+    {
+      "id": "necsws",
+      "name": "NEC Software Solutions India",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://jobs.smartrecruiters.com/NECSWS",
+      "provider": {
+        "type": "smartrecruiters",
+        "status": "verified",
+        "config": {
+          "company_identifier": "NECSWS"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "SmartRecruiters feed verified from GitHub Actions. India software engineering roles confirmed."
     }
   ]
 }
