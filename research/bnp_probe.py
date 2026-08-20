@@ -1,12 +1,13 @@
 import re
 import sys
+from urllib.parse import urljoin
 
 import requests
 
 
 _URL = (
     "https://bwelcome.hr.bnpparibas/"
-    "en_US/externalcareers/SearchJobs"
+    "en_US/externalcareers/"
 )
 
 _TIMEOUT = 30
@@ -15,10 +16,6 @@ _TIMEOUT = 30
 def probe_bnp() -> None:
     response = requests.get(
         _URL,
-        params={
-            "search": "Java",
-            "jobOffset": 0,
-        },
         headers={
             "User-Agent": (
                 "Mozilla/5.0 "
@@ -54,65 +51,157 @@ def probe_bnp() -> None:
     )
 
     print(
-        f"[BNP-PROBE] server="
-        f"{response.headers.get('Server')}",
-        file=sys.stderr,
-    )
-
-    print(
         f"[BNP-PROBE] body_length="
         f"{len(response.content)}",
         file=sys.stderr,
     )
 
-    body = response.text
+    html = response.text
+
+    # ---------------------------------------------------------
+    # Extract links
+    # ---------------------------------------------------------
+
+    hrefs = re.findall(
+        r'href=["\']([^"\']+)["\']',
+        html,
+        flags=re.IGNORECASE,
+    )
+
+    links = {
+        urljoin(response.url, href)
+        for href in hrefs
+    }
+
+    interesting_links = [
+        link
+        for link in links
+        if any(
+            word in link.lower()
+            for word in (
+                "job",
+                "career",
+                "search",
+                "position",
+                "vacan",
+                "detail",
+            )
+        )
+    ]
 
     print(
-        "[BNP-PROBE] body_preview="
-        + repr(body[:1000]),
+        "[BNP-PROBE] "
+        f"interesting_links={len(interesting_links)}",
         file=sys.stderr,
     )
 
-    if response.status_code != 200:
-        return
-
-    job_ids = set(
-        re.findall(
-            r'jobId[=/?:&]+(\d+)',
-            body,
-            flags=re.IGNORECASE,
+    for link in sorted(interesting_links)[:50]:
+        print(
+            f"[BNP-PROBE] LINK={link}",
+            file=sys.stderr,
         )
-    )
 
-    detail_links = re.findall(
-        r'href=["\']([^"\']*'
-        r'(?:JobDetail|JobDetails)'
-        r'[^"\']*)["\']',
-        body,
+    # ---------------------------------------------------------
+    # Extract forms
+    # ---------------------------------------------------------
+
+    forms = re.findall(
+        r'<form\b[^>]*>',
+        html,
         flags=re.IGNORECASE,
     )
 
     print(
-        f"[BNP-PROBE] job_ids_found="
-        f"{len(job_ids)}",
+        f"[BNP-PROBE] forms={len(forms)}",
         file=sys.stderr,
     )
 
-    print(
-        f"[BNP-PROBE] detail_links_found="
-        f"{len(detail_links)}",
-        file=sys.stderr,
-    )
-
-    for job_id in list(job_ids)[:5]:
+    for form in forms[:20]:
         print(
-            f"[BNP-PROBE] JOB_ID={job_id}",
+            "[BNP-PROBE] FORM="
+            + form[:1000],
             file=sys.stderr,
         )
 
-    for link in detail_links[:5]:
+    # ---------------------------------------------------------
+    # Look specifically for Avature routes
+    # ---------------------------------------------------------
+
+    route_patterns = (
+        r'["\']([^"\']*SearchJobs[^"\']*)["\']',
+        r'["\']([^"\']*JobDetail[^"\']*)["\']',
+        r'["\']([^"\']*JobDetails[^"\']*)["\']',
+        r'["\']([^"\']*Search[^"\']*Job[^"\']*)["\']',
+    )
+
+    routes: set[str] = set()
+
+    for pattern in route_patterns:
+        for match in re.findall(
+            pattern,
+            html,
+            flags=re.IGNORECASE,
+        ):
+            routes.add(
+                urljoin(
+                    response.url,
+                    match,
+                )
+            )
+
+    print(
+        f"[BNP-PROBE] routes={len(routes)}",
+        file=sys.stderr,
+    )
+
+    for route in sorted(routes):
         print(
-            f"[BNP-PROBE] DETAIL_LINK={link}",
+            f"[BNP-PROBE] ROUTE={route[:1000]}",
+            file=sys.stderr,
+        )
+
+    # ---------------------------------------------------------
+    # Search useful words with context
+    # ---------------------------------------------------------
+
+    for needle in (
+        "SearchJobs",
+        "JobDetail",
+        "JobDetails",
+        "jobId",
+        "jobOffset",
+        "externalcareers",
+    ):
+        lower = html.lower()
+        index = lower.find(
+            needle.lower()
+        )
+
+        if index == -1:
+            continue
+
+        left = max(
+            0,
+            index - 1000,
+        )
+
+        right = min(
+            len(html),
+            index + len(needle) + 2000,
+        )
+
+        context = (
+            html[left:right]
+            .replace("\n", " ")
+        )
+
+        print(
+            f"[BNP-PROBE] CONTEXT={needle}",
+            file=sys.stderr,
+        )
+
+        print(
+            f"[BNP-PROBE] {context}",
             file=sys.stderr,
         )
 
