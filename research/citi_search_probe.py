@@ -64,17 +64,45 @@ def _probe(
             )
             break
 
-    jobs = re.findall(
-        r'<a\b[^>]*'
-        r'data-job-id=["\']([^"\']+)["\']'
-        r'[^>]*href=["\']([^"\']+)["\']'
-        r'[^>]*>(.*?)</a>',
+    anchors = re.findall(
+        r'<a\b([^>]*)>(.*?)</a>',
         text,
         flags=(
             re.IGNORECASE
             | re.DOTALL
         ),
     )
+
+    jobs = []
+
+    for attrs, body in anchors:
+        id_match = re.search(
+            r'data-job-id=["\']([^"\']+)["\']',
+            attrs,
+            flags=re.IGNORECASE,
+        )
+
+        href_match = re.search(
+            r'href=["\']([^"\']+)["\']',
+            attrs,
+            flags=re.IGNORECASE,
+        )
+
+        if not id_match or not href_match:
+            continue
+
+        href = href_match.group(1)
+
+        if "/job/" not in href.lower():
+            continue
+
+        jobs.append(
+            (
+                id_match.group(1),
+                href,
+                body,
+            )
+        )
 
     print(
         f"[CITI-SEARCH] {label}: "
