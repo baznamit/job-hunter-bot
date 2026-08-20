@@ -315,10 +315,17 @@ class SuccessFactorsAdapter(ProviderAdapter):
 
         return None
 
-    def fetch_jobs(
+    def _fetch_raw(
         self,
         company: Company,
-    ) -> list[Job]:
+    ) -> list[str]:
+        """
+        Fetch all unique job-detail URLs from the configured
+        SuccessFactors RMK listing pages.
+
+        SuccessFactors RMK exposes server-rendered HTML rather than
+        the JSON payload used by most other provider adapters.
+        """
         config = company.provider.config
 
         if not config.base_url:
@@ -335,13 +342,8 @@ class SuccessFactorsAdapter(ProviderAdapter):
         job_urls: list[str] = []
         seen_urls: set[str] = set()
 
-        for page_number in range(
-            _MAX_PAGES
-        ):
-            offset = (
-                page_number
-                * page_size
-            )
+        for page_number in range(_MAX_PAGES):
+            offset = page_number * page_size
 
             listing_url = self._listing_url(
                 company,
@@ -383,6 +385,16 @@ class SuccessFactorsAdapter(ProviderAdapter):
                 f"pagination exceeded "
                 f"{_MAX_PAGES} pages"
             )
+
+        return job_urls
+
+    def fetch_jobs(
+        self,
+        company: Company,
+    ) -> list[Job]:
+        job_urls = self._fetch_raw(
+            company
+        )
 
         jobs: list[Job] = []
 
