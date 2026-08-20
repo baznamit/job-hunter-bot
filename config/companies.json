@@ -667,6 +667,90 @@
       "roles": [],
       "supports_remote": false,
       "notes": ""
+    },
+    {
+      "id": "nasdaq",
+      "name": "Nasdaq",
+      "category": "SaaS",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.nasdaq.com/about/careers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "nasdaq",
+          "board": "Global_External_Site",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday external board. Live CXS API, pagination and public job URLs verified from GitHub Actions."
+    },
+    {
+      "id": "ssctech",
+      "name": "SS&C Technologies",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.ssctech.com/careers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "ssctech",
+          "board": "SSCTechnologies",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday external board. Live CXS API, pagination and public job URLs verified from GitHub Actions. Mumbai, Thane and Navi Mumbai coverage."
+    },
+    {
+      "id": "morningstar",
+      "name": "Morningstar",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.morningstar.com/company/careers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "morningstar",
+          "board": "Americas",
+          "cluster": "wd5"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday Americas external board. Live CXS API, pagination and public job URLs verified from GitHub Actions. Mumbai software roles confirmed."
+    },
+    {
+      "id": "generalmills",
+      "name": "General Mills",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://www.careers.generalmills.com/",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "genmills",
+          "board": "GMI_External_Careers",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday external board. Live CXS API, pagination and public job URLs verified from GitHub Actions. Powai/Mumbai technology roles confirmed."
     }
   ]
 }
