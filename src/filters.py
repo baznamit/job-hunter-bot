@@ -52,6 +52,7 @@ class JobFilter:
         "application engineer",
         "application developer",
         "platform engineer",
+        "platform automation engineer",
         "product engineer",
         "api engineer",
         "cloud engineer",

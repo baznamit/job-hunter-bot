@@ -354,24 +354,6 @@ class TalentBrewAdapter(ProviderAdapter):
                     if job.id not in seen_ids
                 ]
 
-                if company.id == "citi" and (
-                    page <= 2
-                    or page >= 23
-                    or not new_jobs
-                ):
-                    print(
-                        "  [TB-PAGE] "
-                        f"{company.name}: "
-                        f"page={page}, "
-                        f"total={total}, "
-                        f"page_jobs={len(page_jobs)}, "
-                        f"new_jobs={len(new_jobs)}, "
-                        f"first_id="
-                        f"{page_jobs[0].id if page_jobs else None}, "
-                        f"last_id="
-                        f"{page_jobs[-1].id if page_jobs else None}"
-                    )
-
                 if not new_jobs:
                     break
 
