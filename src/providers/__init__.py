@@ -8,6 +8,7 @@ from .oracle import OracleAdapter
 from .higher import HigherAdapter
 from .successfactors import SuccessFactorsAdapter
 from .talentbrew import TalentBrewAdapter
+from .algolia import AlgoliaAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -20,4 +21,5 @@ __all__ = [
     "HigherAdapter",
     "SuccessFactorsAdapter",
     "TalentBrewAdapter",
+    "AlgoliaAdapter",
 ]

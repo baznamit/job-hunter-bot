@@ -852,6 +852,29 @@
       "roles": [],
       "supports_remote": false,
       "notes": "TalentBrew/Radancy public careers search. Server-rendered pagination and detail URLs verified from GitHub Actions. Mumbai Software Engineering roles confirmed."
+    },
+    {
+      "id": "msci",
+      "name": "MSCI",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.msci.com/",
+      "provider": {
+        "type": "algolia",
+        "status": "verified",
+        "config": {
+          "app_id": "RVMOB42DFH",
+          "api_key": "629e647c6a9a8b542fb1022001313a7e",
+          "index_name": "production__mscicare2201__sort-rank",
+          "base_url": "https://careers.msci.com",
+          "page_size": 20
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Public careers search backed by Algolia. Anonymous API, pagination and structured job records verified from GitHub Actions. iCIMS is used downstream for applications."
     }
   ]
 }

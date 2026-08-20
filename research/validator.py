@@ -31,6 +31,7 @@ from src.providers import (
     HigherAdapter,
     SuccessFactorsAdapter,
     TalentBrewAdapter,
+    AlgoliaAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -45,6 +46,7 @@ _ADAPTERS = {
     ProviderType.HIGHER: HigherAdapter(),
     ProviderType.SUCCESSFACTORS: SuccessFactorsAdapter(),
     ProviderType.TALENTBREW: TalentBrewAdapter(),
+    ProviderType.ALGOLIA: AlgoliaAdapter(),
 }
 
 
@@ -236,6 +238,28 @@ def validate_registry(registry: CompanyRegistry) -> None:
             if missing:
                 raise ValueError(
                     f"{company.name}: TalentBrew provider "
+                    f"is missing config fields: "
+                    f"{', '.join(missing)}"
+                )
+            
+        elif provider.type == ProviderType.ALGOLIA:
+            missing = []
+
+            if not config.app_id:
+                missing.append("app_id")
+
+            if not config.api_key:
+                missing.append("api_key")
+
+            if not config.index_name:
+                missing.append("index_name")
+
+            if not config.base_url:
+                missing.append("base_url")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: Algolia provider "
                     f"is missing config fields: "
                     f"{', '.join(missing)}"
                 )

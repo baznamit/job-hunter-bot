@@ -25,6 +25,7 @@ class ProviderType(str, Enum):
     HIGHER = "higher"
     SUCCESSFACTORS = "successfactors"
     TALENTBREW = "talentbrew"
+    ALGOLIA = "algolia"
     CUSTOM = "custom"
 
 
@@ -62,6 +63,10 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     listing_path: str | None = None
     page_size: int | None = None
+
+    app_id: str | None = None
+    api_key: str | None = None
+    index_name: str | None = None
 
 class Provider(BaseModel):
     model_config = ConfigDict(extra="forbid")
