@@ -29,10 +29,6 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Probe Citi targeted search
-        run: |
-          python -m research.citi_search_probe
-
       - name: Run Bot
         run: |
           python -m src.main

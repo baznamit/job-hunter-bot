@@ -818,14 +818,15 @@
       "name": "Citi",
       "category": "Banking",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://jobs.citi.com/",
       "provider": {
         "type": "talentbrew",
         "status": "verified",
         "config": {
           "base_url": "https://jobs.citi.com",
-          "page_size": 15
+          "page_size": 15,
+          "search_terms": ["Mumbai", "India", "Remote"]
         }
       },
       "locations": [],

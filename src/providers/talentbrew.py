@@ -342,47 +342,62 @@ class TalentBrewAdapter(ProviderAdapter):
             + "/search-jobs"
         )
 
+        search_terms = (
+            config.search_terms
+            or [None]
+        )
+
         jobs: list[Job] = []
         seen_ids: set[str] = set()
 
-        total: int | None = None
+        for search_term in search_terms:
+            total: int | None = None
 
-        for page in range(
-            1,
-            _MAX_PAGES + 1,
-        ):
-            page_html = self._fetch_html(
-                search_url,
-                company,
-                params={"p": page},
-            )
+            for page in range(
+                1,
+                _MAX_PAGES + 1,
+            ):
+                params = {
+                    "p": page,
+                }
 
-            if total is None:
-                total = self._extract_total(
-                    page_html
+                if search_term:
+                    params["k"] = search_term
+
+                page_html = self._fetch_html(
+                    search_url,
+                    company,
+                    params=params,
                 )
 
-            page_jobs = self._extract_jobs(
-                page_html,
-                company,
-            )
+                if total is None:
+                    total = self._extract_total(
+                        page_html
+                    )
 
-            if not page_jobs:
-                break
-            else:
+                page_jobs = self._extract_jobs(
+                    page_html,
+                    company,
+                )
+
+                if not page_jobs:
+                    break
+
+                # Deduplicate both across pages and across
+                # multiple TalentBrew search terms.
                 new_jobs = [
                     job
                     for job in page_jobs
                     if job.id not in seen_ids
                 ]
 
-                if not new_jobs:
-                    break
-
                 for job in new_jobs:
                     seen_ids.add(job.id)
                     jobs.append(job)
 
+                # Do NOT stop merely because every job on this
+                # page was already seen through another search
+                # term. Later pages can still contain new jobs.
                 if total is not None:
                     expected_pages = math.ceil(
                         total / page_size
@@ -394,12 +409,12 @@ class TalentBrewAdapter(ProviderAdapter):
                 elif len(page_jobs) < page_size:
                     break
 
-        else:
-            raise RuntimeError(
-                f"{company.name}: TalentBrew "
-                f"pagination exceeded "
-                f"{_MAX_PAGES} pages"
-            )
+            else:
+                raise RuntimeError(
+                    f"{company.name}: TalentBrew "
+                    f"pagination exceeded "
+                    f"{_MAX_PAGES} pages"
+                )
 
         return jobs
 

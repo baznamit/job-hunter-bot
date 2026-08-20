@@ -10,6 +10,8 @@ from src.providers.talentbrew import (
     TalentBrewAdapter,
 )
 
+from unittest.mock import patch
+
 
 def _company(
     base_url: str,
@@ -151,3 +153,78 @@ def test_extracts_total_results():
             '</h1>'
         )
     ) == 310
+
+def test_search_terms_are_sent_as_keyword_queries():
+    adapter = TalentBrewAdapter()
+
+    company = Company(
+        id="citi",
+        name="Citi",
+        category=CompanyCategory.BANKING,
+        priority=1,
+        career_page="https://jobs.citi.com/",
+        provider=Provider(
+            type=ProviderType.TALENTBREW,
+            status=ProviderStatus.PARTIAL,
+            config=ProviderConfig(
+                base_url="https://jobs.citi.com",
+                page_size=15,
+                search_terms=[
+                    "India",
+                    "Remote",
+                ],
+            ),
+        ),
+    )
+
+    page_html = """
+    <h2 class="sr-heading">1 Results</h2>
+
+    <li class="sr-job-item">
+        <h3 class="sr-job-item__title">
+            <a
+                href="/job/mumbai/software-engineer/287/123"
+                data-job-id="123"
+            >
+                Software Engineer
+            </a>
+        </h3>
+
+        <span class="sr-job-location">
+            Mumbai, Maharashtra, India
+        </span>
+    </li>
+    """
+
+    with patch.object(
+        adapter,
+        "_fetch_html",
+        return_value=page_html,
+    ) as mock_fetch:
+        jobs = adapter._fetch_raw(
+            company
+        )
+
+    assert len(jobs) == 1
+
+    assert mock_fetch.call_count == 2
+
+    first_params = (
+        mock_fetch.call_args_list[0]
+        .kwargs["params"]
+    )
+
+    second_params = (
+        mock_fetch.call_args_list[1]
+        .kwargs["params"]
+    )
+
+    assert first_params == {
+        "p": 1,
+        "k": "India",
+    }
+
+    assert second_params == {
+        "p": 1,
+        "k": "Remote",
+    }
