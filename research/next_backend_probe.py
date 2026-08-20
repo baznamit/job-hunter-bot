@@ -8,388 +8,390 @@ import requests
 
 _TIMEOUT = 30
 
-_TARGETS = [
+_TALENTBREW = [
     {
         "name": "Citi",
-        "url": "https://jobs.citi.com/search-jobs",
+        "base": "https://jobs.citi.com",
     },
     {
         "name": "BlackRock",
-        "url": "https://careers.blackrock.com/search-jobs",
-    },
-    {
-        "name": "MSCI",
-        "url": "https://careers.msci.com/",
+        "base": "https://careers.blackrock.com",
     },
 ]
 
+_MSCI_BASE = "https://careers.msci.com"
 
-def _fetch(url: str) -> requests.Response:
-    return requests.get(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/127.0.0.0 Safari/537.36"
-            ),
-            "Accept": (
-                "text/html,application/xhtml+xml,"
-                "application/xml;q=0.9,*/*;q=0.8"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        },
-        timeout=_TIMEOUT,
-        allow_redirects=True,
+_MSCI_APP_ID = "RVMOB42DFH"
+_MSCI_API_KEY = "629e647c6a9a8b542fb1022001313a7e"
+_MSCI_INDEX = "production__mscicare2201__sort-rank"
+
+
+def _headers() -> dict[str, str]:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(compatible; JobHunterBot/1.0)"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/json;q=0.9,*/*;q=0.8"
+        ),
+    }
+
+
+def _clean(value: str) -> str:
+    value = re.sub(
+        r"<[^>]+>",
+        " ",
+        value,
     )
 
-
-def _interesting_urls(
-    text: str,
-    base_url: str,
-) -> set[str]:
-    results: set[str] = set()
-
-    # Absolute URLs.
-    for value in re.findall(
-        r'https?://[^"\'\s<>\\]+',
-        text,
-        flags=re.IGNORECASE,
-    ):
-        lower = value.lower()
-
-        if any(
-            marker in lower
-            for marker in (
-                "/api/",
-                "graphql",
-                "search",
-                "jobs",
-                "careers",
-                "eightfold",
-                "phenom",
-                "avature",
-                "workday",
-                "icims",
-            )
-        ):
-            results.add(
-                html_unescape(value)
-            )
-
-    # Interesting relative URLs.
-    for value in re.findall(
-        r'["\']([^"\']+)["\']',
-        text,
-    ):
-        lower = value.lower()
-
-        if any(
-            marker in lower
-            for marker in (
-                "/api/",
-                "/search",
-                "graphql",
-                "/jobs",
-                "jobsearch",
-            )
-        ):
-            if len(value) <= 1000:
-                results.add(
-                    urljoin(
-                        base_url,
-                        html_unescape(value),
-                    )
-                )
-
-    return results
-
-
-def html_unescape(value: str) -> str:
-    return (
+    value = (
         value
         .replace("&amp;", "&")
-        .replace("\\u0026", "&")
-        .replace("\\/", "/")
+        .replace("&#39;", "'")
+        .replace("&quot;", '"')
     )
 
-
-def _print_context(
-    name: str,
-    source: str,
-    text: str,
-    needle: str,
-    max_matches: int = 3,
-) -> None:
-    lower = text.lower()
-    target = needle.lower()
-
-    start = 0
-    found = 0
-
-    while found < max_matches:
-        index = lower.find(
-            target,
-            start,
-        )
-
-        if index == -1:
-            break
-
-        left = max(
-            0,
-            index - 700,
-        )
-        right = min(
-            len(text),
-            index + len(needle) + 1200,
-        )
-
-        context = (
-            text[left:right]
-            .replace("\n", " ")
-        )
-
-        print(
-            f"[BACKEND-PROBE] {name}: "
-            f"CONTEXT source={source} "
-            f"needle={needle!r}",
-            file=sys.stderr,
-        )
-
-        print(
-            f"[BACKEND-PROBE] {name}: "
-            f"{context[:2500]}",
-            file=sys.stderr,
-        )
-
-        found += 1
-        start = index + len(needle)
+    return re.sub(
+        r"\s+",
+        " ",
+        value,
+    ).strip()
 
 
-def _inspect_text(
-    name: str,
-    source: str,
-    text: str,
-) -> None:
-    urls = _interesting_urls(
-        text,
-        source,
-    )
-
-    for url in sorted(urls):
-        print(
-            f"[BACKEND-PROBE] {name}: "
-            f"CANDIDATE_URL={url[:1200]}",
-            file=sys.stderr,
-        )
-
-    needles = (
-        "fetch(",
-        "axios",
-        "XMLHttpRequest",
-        "/api/",
-        "graphql",
-        "search-jobs",
-        "job-search",
-        "jobSearch",
-        "searchJobs",
-        "eightfold",
-        "phenom",
-        "avature",
-        "workday",
-        "icims",
-    )
-
-    for needle in needles:
-        if needle.lower() in text.lower():
-            _print_context(
-                name,
-                source,
-                text,
-                needle,
-            )
-
-
-def _inspect_embedded_json(
-    name: str,
+def _extract_talentbrew_jobs(
     html: str,
-) -> None:
-    patterns = (
-        (
-            "NEXT_DATA",
-            r'<script[^>]+id=["\']__NEXT_DATA__["\']'
-            r'[^>]*>(.*?)</script>',
-        ),
-        (
-            "APPLICATION_JSON",
-            r'<script[^>]+type=["\']application/json["\']'
-            r'[^>]*>(.*?)</script>',
+    base: str,
+) -> list[tuple[str, str]]:
+    links = re.findall(
+        r'<a\b([^>]+)>(.*?)</a>',
+        html,
+        flags=(
+            re.IGNORECASE
+            | re.DOTALL
         ),
     )
 
-    for label, pattern in patterns:
-        matches = re.findall(
-            pattern,
-            html,
-            flags=(
-                re.IGNORECASE
-                | re.DOTALL
-            ),
+    jobs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for attrs, body in links:
+        href_match = re.search(
+            r'href=["\']([^"\']+)["\']',
+            attrs,
+            flags=re.IGNORECASE,
         )
 
-        for index, raw in enumerate(
-            matches[:5]
+        if not href_match:
+            continue
+
+        href = href_match.group(1)
+
+        # TalentBrew job detail URLs commonly contain /job/
+        # or /job-detail/. Capture both for this probe.
+        lower = href.lower()
+
+        if (
+            "/job/" not in lower
+            and "/job-detail/" not in lower
         ):
-            raw = raw.strip()
+            continue
 
-            try:
-                parsed = json.loads(raw)
+        url = urljoin(
+            base,
+            href,
+        )
 
-                serialized = json.dumps(
-                    parsed,
-                    ensure_ascii=False,
-                )
+        if url in seen:
+            continue
 
-            except json.JSONDecodeError:
-                serialized = raw
+        seen.add(url)
 
+        title = _clean(body)
+
+        jobs.append(
+            (
+                title,
+                url,
+            )
+        )
+
+    return jobs
+
+
+def probe_talentbrew(
+    target: dict,
+) -> None:
+    name = target["name"]
+    base = target["base"]
+
+    page_jobs = []
+
+    for page in (1, 2):
+        response = requests.get(
+            f"{base}/search-jobs",
+            params={
+                "p": page,
+            },
+            headers=_headers(),
+            timeout=_TIMEOUT,
+            allow_redirects=True,
+        )
+
+        print(
+            f"[FINAL-PROBE] {name}: "
+            f"page={page} "
+            f"status={response.status_code} "
+            f"url={response.url} "
+            f"length={len(response.content)}",
+            file=sys.stderr,
+        )
+
+        if response.status_code != 200:
+            continue
+
+        jobs = _extract_talentbrew_jobs(
+            response.text,
+            base,
+        )
+
+        page_jobs.append(jobs)
+
+        print(
+            f"[FINAL-PROBE] {name}: "
+            f"page={page} "
+            f"job_links={len(jobs)}",
+            file=sys.stderr,
+        )
+
+        for title, url in jobs[:5]:
             print(
-                f"[BACKEND-PROBE] {name}: "
-                f"{label}[{index}]="
-                f"{serialized[:5000]}",
+                f"[FINAL-PROBE] {name}: "
+                f"JOB title={title!r} "
+                f"url={url}",
                 file=sys.stderr,
             )
 
+        # Useful structural snippets around the actual results.
+        for marker in (
+            'id="search-results-list"',
+            "search-results-list",
+            "TotalPages",
+            "TotalResults",
+            "data-job-id",
+        ):
+            index = response.text.find(
+                marker
+            )
 
-def probe(target: dict) -> None:
-    name = target["name"]
-    url = target["url"]
+            if index == -1:
+                continue
 
-    print(
-        f"[BACKEND-PROBE] {name}: "
-        f"START url={url}",
-        file=sys.stderr,
+            context = response.text[
+                max(0, index - 500):
+                index + 2500
+            ].replace(
+                "\n",
+                " ",
+            )
+
+            print(
+                f"[FINAL-PROBE] {name}: "
+                f"CONTEXT marker={marker!r} "
+                f"{context[:3000]}",
+                file=sys.stderr,
+            )
+
+    if len(page_jobs) == 2:
+        urls_1 = {
+            url
+            for _, url in page_jobs[0]
+        }
+
+        urls_2 = {
+            url
+            for _, url in page_jobs[1]
+        }
+
+        print(
+            f"[FINAL-PROBE] {name}: "
+            f"pages_different="
+            f"{urls_1 != urls_2} "
+            f"overlap={len(urls_1 & urls_2)}",
+            file=sys.stderr,
+        )
+
+    if page_jobs and page_jobs[0]:
+        detail_url = page_jobs[0][0][1]
+
+        response = requests.get(
+            detail_url,
+            headers=_headers(),
+            timeout=_TIMEOUT,
+            allow_redirects=True,
+        )
+
+        print(
+            f"[FINAL-PROBE] {name}: "
+            f"detail_status="
+            f"{response.status_code} "
+            f"detail_url={response.url} "
+            f"detail_length="
+            f"{len(response.content)}",
+            file=sys.stderr,
+        )
+
+
+def probe_msci() -> None:
+    endpoint = (
+        "https://"
+        f"{_MSCI_APP_ID.lower()}-dsn.algolia.net/"
+        "1/indexes/*/queries"
     )
 
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Algolia-Application-Id": (
+            _MSCI_APP_ID
+        ),
+        "X-Algolia-API-Key": (
+            _MSCI_API_KEY
+        ),
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(compatible; JobHunterBot/1.0)"
+        ),
+    }
+
+    payload = {
+        "requests": [
+            {
+                "indexName": _MSCI_INDEX,
+                "params": (
+                    "query="
+                    "&hitsPerPage=20"
+                    "&page=0"
+                ),
+            },
+            {
+                "indexName": _MSCI_INDEX,
+                "params": (
+                    "query="
+                    "&hitsPerPage=20"
+                    "&page=1"
+                ),
+            },
+        ]
+    }
+
     try:
-        response = _fetch(url)
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            json=payload,
+            timeout=_TIMEOUT,
+        )
+
     except requests.RequestException as exc:
         print(
-            f"[BACKEND-PROBE] {name}: "
-            f"FETCH_FAILED "
-            f"{type(exc).__name__}: {exc}",
+            "[FINAL-PROBE] MSCI: "
+            f"FAILED {type(exc).__name__}: "
+            f"{exc}",
             file=sys.stderr,
         )
         return
 
     print(
-        f"[BACKEND-PROBE] {name}: "
+        "[FINAL-PROBE] MSCI: "
         f"status={response.status_code} "
-        f"final_url={response.url} "
         f"content_type="
         f"{response.headers.get('Content-Type')} "
-        f"body_length={len(response.content)}",
+        f"length={len(response.content)}",
         file=sys.stderr,
     )
 
     if response.status_code != 200:
         print(
-            f"[BACKEND-PROBE] {name}: "
-            f"body={response.text[:1000]!r}",
+            "[FINAL-PROBE] MSCI: "
+            f"body={response.text[:2000]!r}",
             file=sys.stderr,
         )
         return
 
-    html = response.text
+    data = response.json()
 
-    _inspect_embedded_json(
-        name,
-        html,
+    results = data.get(
+        "results",
+        [],
     )
-
-    _inspect_text(
-        name,
-        response.url,
-        html,
-    )
-
-    scripts = re.findall(
-        r'<script[^>]+src=["\']([^"\']+)["\']',
-        html,
-        flags=re.IGNORECASE,
-    )
-
-    script_urls = []
-
-    for src in scripts:
-        script_url = urljoin(
-            response.url,
-            html_unescape(src),
-        )
-
-        if script_url not in script_urls:
-            script_urls.append(script_url)
 
     print(
-        f"[BACKEND-PROBE] {name}: "
-        f"scripts={len(script_urls)}",
+        "[FINAL-PROBE] MSCI: "
+        f"result_sets={len(results)}",
         file=sys.stderr,
     )
 
-    # Avoid turning the research run into hundreds of requests.
-    for script_url in script_urls[:30]:
-        try:
-            script_response = _fetch(
-                script_url
-            )
-        except requests.RequestException:
-            continue
+    page_hits = []
 
-        if script_response.status_code != 200:
-            continue
-
-        script = script_response.text
-        lower = script.lower()
-
-        interesting = any(
-            marker in lower
-            for marker in (
-                "/api/",
-                "graphql",
-                "search-jobs",
-                "jobsearch",
-                "searchjobs",
-                "eightfold",
-                "phenom",
-                "avature",
-                "workday",
-                "icims",
-            )
+    for index, result in enumerate(
+        results
+    ):
+        hits = result.get(
+            "hits",
+            [],
         )
 
-        if not interesting:
-            continue
+        page_hits.append(hits)
 
         print(
-            f"[BACKEND-PROBE] {name}: "
-            f"INTERESTING_SCRIPT="
-            f"{script_url}",
+            "[FINAL-PROBE] MSCI: "
+            f"page={index} "
+            f"nbHits={result.get('nbHits')} "
+            f"nbPages={result.get('nbPages')} "
+            f"returned={len(hits)}",
             file=sys.stderr,
         )
 
-        _inspect_text(
-            name,
-            script_url,
-            script,
+        for hit in hits[:3]:
+            print(
+                "[FINAL-PROBE] MSCI: "
+                "HIT="
+                + json.dumps(
+                    hit,
+                    ensure_ascii=False,
+                )[:5000],
+                file=sys.stderr,
+            )
+
+    if len(page_hits) == 2:
+        ids_1 = {
+            hit.get("objectID")
+            for hit in page_hits[0]
+        }
+
+        ids_2 = {
+            hit.get("objectID")
+            for hit in page_hits[1]
+        }
+
+        print(
+            "[FINAL-PROBE] MSCI: "
+            f"pages_different="
+            f"{ids_1 != ids_2} "
+            f"overlap={len(ids_1 & ids_2)}",
+            file=sys.stderr,
         )
 
 
 def main() -> None:
-    for target in _TARGETS:
-        probe(target)
+    for target in _TALENTBREW:
+        probe_talentbrew(
+            target
+        )
+
+    probe_msci()
 
 
 if __name__ == "__main__":
