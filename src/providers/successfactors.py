@@ -1,6 +1,5 @@
 import html
 import re
-from collections import Counter
 from urllib.parse import urljoin
 
 import requests
@@ -209,20 +208,21 @@ class SuccessFactorsAdapter(ProviderAdapter):
     def _extract_location(
         self,
         page_html: str,
+        url: str,
     ) -> str:
         text = self._extract_text(
             page_html
         )
 
         patterns = (
-            r"Location\s*:?\s*"
+            r"Primary Location\s*:?\s*"
             r"(.{1,120}?)"
             r"(?=\s+(?:Job Code|"
             r"Requisition|Division|"
             r"Department|Job Type|"
             r"Date|Apply|$))",
 
-            r"Primary Location\s*:?\s*"
+            r"Location\s*:?\s*"
             r"(.{1,120}?)"
             r"(?=\s+(?:Job Code|"
             r"Requisition|Division|"
@@ -237,11 +237,64 @@ class SuccessFactorsAdapter(ProviderAdapter):
                 flags=re.IGNORECASE,
             )
 
-            if match:
-                return (
-                    match.group(1)
-                    .strip(" :-|")
+            if not match:
+                continue
+
+            location = (
+                match.group(1)
+                .strip(" :-|")
+            )
+
+            # Only trust short, plausible location values.
+            if (
+                location
+                and len(location) <= 80
+                and not any(
+                    marker in location.lower()
+                    for marker in (
+                        "knowledge of",
+                        "experience in",
+                        "responsibilities",
+                        "requirements",
+                        "python",
+                        "java",
+                        "spring",
+                    )
                 )
+            ):
+                return location
+
+        # SuccessFactors RMK/Nomura puts the location at the
+        # beginning of the canonical job URL:
+        #
+        # /Nomura/job/Mumbai-Software-Engineer/1421393100/
+        #
+        # Use that as the stable fallback when the detail HTML
+        # doesn't expose a clean Location field.
+        match = re.search(
+            r"/Nomura/job/([^/]+)/\d+/?$",
+            url,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            slug = html.unescape(
+                match.group(1)
+            )
+
+            first_part = slug.split(
+                "-",
+                1,
+            )[0]
+
+            first_part = (
+                first_part
+                .replace("_", " ")
+                .strip()
+            )
+
+            if first_part:
+                return first_part
 
         return "Unknown"
 
@@ -398,9 +451,6 @@ class SuccessFactorsAdapter(ProviderAdapter):
         )
 
         jobs: list[Job] = []
-        location_counts: Counter[str] = Counter()
-
-        diagnostic_examples = 0
 
         for url in job_urls:
             try:
@@ -417,15 +467,14 @@ class SuccessFactorsAdapter(ProviderAdapter):
                     continue
 
                 location = self._extract_location(
-                    page_html
+                    page_html,
+                    url,
                 )
 
                 job_id = self._extract_job_code(
                     page_html,
                     url,
                 )
-
-                location_counts[location] += 1
 
                 job = Job(
                     id=job_id,
@@ -442,55 +491,8 @@ class SuccessFactorsAdapter(ProviderAdapter):
 
                 jobs.append(job)
 
-                # Temporary diagnostics:
-                # show only potentially relevant software jobs.
-                title_lower = title.lower()
-
-                if (
-                    diagnostic_examples < 10
-                    and any(
-                        keyword in title_lower
-                        for keyword in (
-                            "software",
-                            "developer",
-                            "engineer",
-                            "backend",
-                            "java",
-                        )
-                    )
-                ):
-                    print(
-                        "  [SF-PARSE] "
-                        f"{company.name}: "
-                        f"title={title!r}, "
-                        f"location={location!r}, "
-                        f"id={job_id!r}, "
-                        f"url={url}"
-                    )
-
-                    diagnostic_examples += 1
-
             except requests.RequestException:
                 continue
-
-        unknown_count = location_counts.get(
-            "Unknown",
-            0,
-        )
-
-        print(
-            "  [SF-PARSE] "
-            f"{company.name}: "
-            f"parsed={len(jobs)}, "
-            f"unknown_locations={unknown_count}"
-        )
-
-        print(
-            "  [SF-PARSE] "
-            f"{company.name}: "
-            f"top_locations="
-            f"{location_counts.most_common(10)}"
-        )
 
         return jobs
 

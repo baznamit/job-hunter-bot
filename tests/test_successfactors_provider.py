@@ -87,3 +87,44 @@ def test_successfactors_listing_pagination_url():
         "Career-Opportunities-India/"
         "9050900/100/"
     )
+
+def test_extract_location_falls_back_to_nomura_url():
+    adapter = SuccessFactorsAdapter()
+
+    location = adapter._extract_location(
+        "<html><body>No location field</body></html>",
+        (
+            "https://careers.nomura.com/"
+            "Nomura/job/"
+            "Mumbai-Software-Engineer/"
+            "1421393100/"
+        ),
+    )
+
+    assert location == "Mumbai"
+
+def test_extract_location_rejects_job_description_text():
+    adapter = SuccessFactorsAdapter()
+
+    page_html = """
+    <html>
+        <body>
+            Location:
+            Knowledge of Equity Trading Markets –
+            especially Compliance related issues and
+            challenges Python
+        </body>
+    </html>
+    """
+
+    location = adapter._extract_location(
+        page_html,
+        (
+            "https://careers.nomura.com/"
+            "Nomura/job/"
+            "Mumbai-Software-Engineer/"
+            "1421393100/"
+        ),
+    )
+
+    assert location == "Mumbai"
