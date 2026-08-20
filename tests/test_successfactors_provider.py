@@ -1,10 +1,39 @@
+from models.company import (
+    Company,
+    Provider,
+    ProviderConfig,
+    ProviderStatus,
+    ProviderType,
+)
 from src.providers.successfactors import (
     SuccessFactorsAdapter,
 )
 
 
+def _company(
+    provider_type: ProviderType,
+    **config,
+) -> Company:
+    return Company(
+        id="test",
+        name="Test Co",
+        category="Banking",
+        priority=1,
+        enabled=True,
+        career_page="https://careers.nomura.com/",
+        provider=Provider(
+            type=provider_type,
+            status=ProviderStatus.VERIFIED,
+            config=ProviderConfig(**config),
+        ),
+        locations=[],
+        roles=[],
+        supports_remote=False,
+    )
+
+
 def test_extract_job_urls_decodes_html_entities():
-    html = """
+    page_html = """
     <a href="/Nomura/job/Mumbai-FIN_Business-Finance-&amp;-Control_AN/1418555300/">
         Job
     </a>
@@ -13,7 +42,7 @@ def test_extract_job_urls_decodes_html_entities():
     urls = (
         SuccessFactorsAdapter()
         ._extract_job_urls(
-            html,
+            page_html,
             "https://careers.nomura.com",
         )
     )
@@ -27,10 +56,10 @@ def test_extract_job_urls_decodes_html_entities():
         )
     ]
 
+
 def test_successfactors_listing_pagination_url():
     adapter = SuccessFactorsAdapter()
 
-    # Use your existing test company helper here.
     company = _company(
         ProviderType.SUCCESSFACTORS,
         base_url="https://careers.nomura.com",
