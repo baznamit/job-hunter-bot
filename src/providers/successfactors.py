@@ -1,5 +1,6 @@
 import html
 import re
+from collections import Counter
 from urllib.parse import urljoin
 
 import requests
@@ -397,6 +398,9 @@ class SuccessFactorsAdapter(ProviderAdapter):
         )
 
         jobs: list[Job] = []
+        location_counts: Counter[str] = Counter()
+
+        diagnostic_examples = 0
 
         for url in job_urls:
             try:
@@ -412,28 +416,81 @@ class SuccessFactorsAdapter(ProviderAdapter):
                 if not title:
                     continue
 
-                jobs.append(
-                    Job(
-                        id=self._extract_job_code(
-                            page_html,
-                            url,
-                        ),
-                        title=title,
-                        company=company.name,
-                        location=self._extract_location(
-                            page_html
-                        ),
-                        url=url,
-                        department=(
-                            self._extract_department(
-                                page_html
-                            )
-                        ),
-                    )
+                location = self._extract_location(
+                    page_html
                 )
+
+                job_id = self._extract_job_code(
+                    page_html,
+                    url,
+                )
+
+                location_counts[location] += 1
+
+                job = Job(
+                    id=job_id,
+                    title=title,
+                    company=company.name,
+                    location=location,
+                    url=url,
+                    department=(
+                        self._extract_department(
+                            page_html
+                        )
+                    ),
+                )
+
+                jobs.append(job)
+
+                # Temporary diagnostics:
+                # show only potentially relevant software jobs.
+                title_lower = title.lower()
+
+                if (
+                    diagnostic_examples < 10
+                    and any(
+                        keyword in title_lower
+                        for keyword in (
+                            "software",
+                            "developer",
+                            "engineer",
+                            "backend",
+                            "java",
+                        )
+                    )
+                ):
+                    print(
+                        "  [SF-PARSE] "
+                        f"{company.name}: "
+                        f"title={title!r}, "
+                        f"location={location!r}, "
+                        f"id={job_id!r}, "
+                        f"url={url}"
+                    )
+
+                    diagnostic_examples += 1
 
             except requests.RequestException:
                 continue
+
+        unknown_count = location_counts.get(
+            "Unknown",
+            0,
+        )
+
+        print(
+            "  [SF-PARSE] "
+            f"{company.name}: "
+            f"parsed={len(jobs)}, "
+            f"unknown_locations={unknown_count}"
+        )
+
+        print(
+            "  [SF-PARSE] "
+            f"{company.name}: "
+            f"top_locations="
+            f"{location_counts.most_common(10)}"
+        )
 
         return jobs
 
