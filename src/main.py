@@ -277,7 +277,6 @@ def _print_company_stats(company, jobs_fetched, direct_count, promoted_count, to
             f"{total_matching} matching"
         )
 
-
 def _send_notifications(store, notifier, new_jobs) -> None:
     """Send notification with new jobs and mark them as seen."""
     try:
@@ -318,7 +317,8 @@ def main() -> None:
             continue
 
         matching, direct_count, promoted_count = _process_jobs_for_company(
-            jobs, job_filter
+            jobs,
+            job_filter,
         )
 
         _print_company_stats(
