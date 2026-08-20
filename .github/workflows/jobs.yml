@@ -29,10 +29,6 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Probe American Express Oracle configuration
-        run: |
-          python -m research.oracle_probe
-
       - name: Run Bot
         run: |
           python -m src.main
