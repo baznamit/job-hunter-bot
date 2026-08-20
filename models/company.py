@@ -24,6 +24,7 @@ class ProviderType(str, Enum):
     ORACLE = "oracle"
     HIGHER = "higher"
     SUCCESSFACTORS = "successfactors"
+    TALENTBREW = "talentbrew"
     CUSTOM = "custom"
 
 

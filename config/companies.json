@@ -812,6 +812,46 @@
       "roles": [],
       "supports_remote": false,
       "notes": "SAP SuccessFactors Recruiting Marketing careers site. India listing pagination and job-detail access verified from GitHub Actions."
+    },
+    {
+      "id": "citi",
+      "name": "Citi",
+      "category": "Banking",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://jobs.citi.com/",
+      "provider": {
+        "type": "talentbrew",
+        "status": "verified",
+        "config": {
+          "base_url": "https://jobs.citi.com",
+          "page_size": 15
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "TalentBrew/Radancy public careers search. Server-rendered search pagination, job IDs, locations and detail URLs verified from GitHub Actions."
+    },
+    {
+      "id": "blackrock",
+      "name": "BlackRock",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.blackrock.com/",
+      "provider": {
+        "type": "talentbrew",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.blackrock.com",
+          "page_size": 10
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "TalentBrew/Radancy public careers search. Server-rendered pagination and detail URLs verified from GitHub Actions. Mumbai Software Engineering roles confirmed."
     }
   ]
 }

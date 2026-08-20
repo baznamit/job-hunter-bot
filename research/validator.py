@@ -30,6 +30,7 @@ from src.providers import (
     OracleAdapter,
     HigherAdapter,
     SuccessFactorsAdapter,
+    TalentBrewAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -43,6 +44,7 @@ _ADAPTERS = {
     ProviderType.ORACLE: OracleAdapter(),
     ProviderType.HIGHER: HigherAdapter(),
     ProviderType.SUCCESSFACTORS: SuccessFactorsAdapter(),
+    ProviderType.TALENTBREW: TalentBrewAdapter(),
 }
 
 
@@ -218,6 +220,22 @@ def validate_registry(registry: CompanyRegistry) -> None:
             if missing:
                 raise ValueError(
                     f"{company.name}: SuccessFactors provider "
+                    f"is missing config fields: "
+                    f"{', '.join(missing)}"
+                )
+
+        elif provider.type == ProviderType.TALENTBREW:
+            missing = []
+
+            if not config.base_url:
+                missing.append("base_url")
+
+            if not config.page_size:
+                missing.append("page_size")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: TalentBrew provider "
                     f"is missing config fields: "
                     f"{', '.join(missing)}"
                 )

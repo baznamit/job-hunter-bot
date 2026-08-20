@@ -7,6 +7,7 @@ from .smartrecruiters import SmartRecruitersAdapter
 from .oracle import OracleAdapter
 from .higher import HigherAdapter
 from .successfactors import SuccessFactorsAdapter
+from .talentbrew import TalentBrewAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -18,4 +19,5 @@ __all__ = [
     "OracleAdapter",
     "HigherAdapter",
     "SuccessFactorsAdapter",
+    "TalentBrewAdapter",
 ]
