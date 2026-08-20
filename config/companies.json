@@ -468,16 +468,25 @@
       "category": "SaaS",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://careers.oracle.com/",
+      "career_page": "https://www.oracle.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "oracle",
+        "status": "verified",
+        "config": {
+          "host": "eeho.fa.us2.oraclecloud.com",
+          "sites": [
+            {
+              "site_number": "CX_1",
+              "site_path": "jobsearch",
+              "enabled": true
+            }
+          ]
+        }
       },
       "locations": [],
       "roles": [],
-      "supports_remote": false,
-      "notes": "Uses Oracle Taleo ATS. May not be auto-detected."
+      "supports_remote": true,
+      "notes": "Uses Oracle Recruiting Cloud. API site CX_1; public Candidate Experience site path jobsearch."
     },
     {
       "id": "microsoft",
