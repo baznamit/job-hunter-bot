@@ -18,15 +18,54 @@ def _fetch(url: str) -> requests.Response:
             "User-Agent": (
                 "Mozilla/5.0 (compatible; JobHunterBot/1.0)"
             ),
-            "Accept": (
-                "text/html,application/xhtml+xml,"
-                "application/json"
-            ),
+            "Accept": "*/*",
         },
     )
-
     response.raise_for_status()
     return response
+
+
+def _print_context(
+    text: str,
+    needle: str,
+    source: str,
+    radius: int = 700,
+) -> None:
+    lower = text.lower()
+    start = 0
+    found = 0
+
+    while found < 5:
+        index = lower.find(
+            needle.lower(),
+            start,
+        )
+
+        if index == -1:
+            break
+
+        left = max(0, index - radius)
+        right = min(
+            len(text),
+            index + len(needle) + radius,
+        )
+
+        context = text[left:right]
+        context = context.replace("\n", " ")
+
+        print(
+            f"[GOLDMAN-PROBE] CONTEXT "
+            f"source={source} "
+            f"needle={needle!r}",
+            file=sys.stderr,
+        )
+        print(
+            f"[GOLDMAN-PROBE] {context}",
+            file=sys.stderr,
+        )
+
+        found += 1
+        start = index + len(needle)
 
 
 def probe_goldman() -> None:
@@ -36,53 +75,8 @@ def probe_goldman() -> None:
         f"[GOLDMAN-PROBE] final_url={response.url}",
         file=sys.stderr,
     )
-    print(
-        f"[GOLDMAN-PROBE] status={response.status_code}",
-        file=sys.stderr,
-    )
-    print(
-        "[GOLDMAN-PROBE] "
-        f"content_type={response.headers.get('Content-Type')}",
-        file=sys.stderr,
-    )
 
     html = response.text
-
-    patterns = (
-        r'https?://[^"\'\s<>]+/api/[^"\'\s<>]*',
-        r'https?://[^"\'\s<>]+graphql[^"\'\s<>]*',
-        r'https?://[^"\'\s<>]+jobs?[^"\'\s<>]*',
-        r'https?://[^"\'\s<>]+roles?[^"\'\s<>]*',
-        r'["\'](/[^"\']*api[^"\']*)["\']',
-        r'["\'](/[^"\']*graphql[^"\']*)["\']',
-    )
-
-    matches: set[str] = set()
-
-    for pattern in patterns:
-        for match in re.findall(
-            pattern,
-            html,
-            flags=re.IGNORECASE,
-        ):
-            matches.add(
-                urljoin(
-                    response.url,
-                    match,
-                )
-            )
-
-    print(
-        f"[GOLDMAN-PROBE] found "
-        f"{len(matches)} API/reference candidate(s)",
-        file=sys.stderr,
-    )
-
-    for match in sorted(matches):
-        print(
-            f"[GOLDMAN-PROBE] {match[:500]}",
-            file=sys.stderr,
-        )
 
     script_sources = re.findall(
         r'<script[^>]+src=["\']([^"\']+)["\']',
@@ -91,14 +85,28 @@ def probe_goldman() -> None:
     )
 
     print(
-        f"[GOLDMAN-PROBE] found "
-        f"{len(script_sources)} script(s)",
+        f"[GOLDMAN-PROBE] "
+        f"scripts={len(script_sources)}",
         file=sys.stderr,
     )
 
-    # Inspect only a limited number of JS assets so the research
-    # Action doesn't become excessively expensive.
-    for src in script_sources[:15]:
+    needles = (
+        "/gateway/api/v1/graphql",
+        "/api/v2/",
+        "operationName",
+        "query ",
+        "mutation ",
+        "roles",
+        "searchRoles",
+        "jobSearch",
+        "jobResults",
+        "pageSize",
+        "pageNumber",
+        "offset",
+        "limit",
+    )
+
+    for src in script_sources:
         script_url = urljoin(
             response.url,
             src,
@@ -110,7 +118,7 @@ def probe_goldman() -> None:
             )
         except requests.RequestException as exc:
             print(
-                f"[GOLDMAN-PROBE] script fetch failed "
+                f"[GOLDMAN-PROBE] script failed "
                 f"{script_url}: {exc}",
                 file=sys.stderr,
             )
@@ -118,35 +126,30 @@ def probe_goldman() -> None:
 
         script = script_response.text
 
-        script_matches: set[str] = set()
+        interesting = any(
+            needle.lower() in script.lower()
+            for needle in (
+                "/gateway/api/v1/graphql",
+                "/api/v2/",
+            )
+        )
 
-        for pattern in patterns:
-            for match in re.findall(
-                pattern,
-                script,
-                flags=re.IGNORECASE,
-            ):
-                script_matches.add(
-                    urljoin(
-                        script_url,
-                        match,
-                    )
-                )
-
-        if not script_matches:
+        if not interesting:
             continue
 
         print(
-            f"[GOLDMAN-PROBE] script={script_url}",
+            f"[GOLDMAN-PROBE] "
+            f"interesting_script={script_url}",
             file=sys.stderr,
         )
 
-        for match in sorted(script_matches):
-            print(
-                f"[GOLDMAN-PROBE] "
-                f"candidate={match[:500]}",
-                file=sys.stderr,
-            )
+        for needle in needles:
+            if needle.lower() in script.lower():
+                _print_context(
+                    script,
+                    needle,
+                    script_url,
+                )
 
 
 if __name__ == "__main__":
