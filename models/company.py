@@ -26,6 +26,7 @@ class ProviderType(str, Enum):
     SUCCESSFACTORS = "successfactors"
     TALENTBREW = "talentbrew"
     ALGOLIA = "algolia"
+    BANKOFAMERICA = "bankofamerica"
     CUSTOM = "custom"
 
 

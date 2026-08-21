@@ -1065,6 +1065,32 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Workday CXS endpoint and pagination verified from GitHub Actions; previous Mumbai Java/Python cloud engineering evidence."
+    },
+    {
+      "id": "bank-of-america",
+      "name": "Bank of America",
+      "category": "Banking",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.bankofamerica.com/en-us/job-search/india",
+      "provider": {
+        "type": "bankofamerica",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.bankofamerica.com",
+          "search_terms": [
+            "software developer",
+            "software engineer",
+            "java",
+            "backend",
+            "spring boot"
+          ]
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "First-party server-rendered Bank of America careers search. India keyword routes, job-card structure, numeric IDs and public detail URLs verified. Pagination follows the emitted Next href rather than assuming query parameters."
     }
   ]
 }

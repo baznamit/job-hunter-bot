@@ -9,6 +9,7 @@ from .higher import HigherAdapter
 from .successfactors import SuccessFactorsAdapter
 from .talentbrew import TalentBrewAdapter
 from .algolia import AlgoliaAdapter
+from .bankofamerica import BankOfAmericaAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -22,4 +23,5 @@ __all__ = [
     "SuccessFactorsAdapter",
     "TalentBrewAdapter",
     "AlgoliaAdapter",
+    "BankOfAmericaAdapter",
 ]

@@ -32,6 +32,7 @@ from src.providers import (
     SuccessFactorsAdapter,
     TalentBrewAdapter,
     AlgoliaAdapter,
+    BankOfAmericaAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -47,6 +48,7 @@ _ADAPTERS = {
     ProviderType.SUCCESSFACTORS: SuccessFactorsAdapter(),
     ProviderType.TALENTBREW: TalentBrewAdapter(),
     ProviderType.ALGOLIA: AlgoliaAdapter(),
+    ProviderType.BANKOFAMERICA: BankOfAmericaAdapter(),
 }
 
 
@@ -262,6 +264,13 @@ def validate_registry(registry: CompanyRegistry) -> None:
                     f"{company.name}: Algolia provider "
                     f"is missing config fields: "
                     f"{', '.join(missing)}"
+                )
+
+        elif provider.type == ProviderType.BANKOFAMERICA:
+            if not config.base_url:
+                raise ValueError(
+                    f"{company.name}: Bank of America "
+                    "provider requires config.base_url"
                 )
 
         elif provider.type == ProviderType.ORACLE:
