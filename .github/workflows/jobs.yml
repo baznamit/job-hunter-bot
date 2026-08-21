@@ -29,6 +29,10 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Probe next company batch
+        run: |
+          python -m research.company_batch_probe
+
       - name: Run Bot
         run: |
           python -m src.main
