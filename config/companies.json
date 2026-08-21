@@ -876,6 +876,195 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Public careers search backed by Algolia. Anonymous API, pagination and structured job records verified from GitHub Actions. iCIMS is used downstream for applications."
+    },
+    {
+      "id": "broadridge",
+      "name": "Broadridge",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://broadridge.wd5.myworkdayjobs.com/Careers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "broadridge",
+          "board": "Careers",
+          "cluster": "wd5"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions."
+    },
+    {
+      "id": "priceline",
+      "name": "Priceline",
+      "category": "SaaS",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://priceline.wd1.myworkdayjobs.com/Priceline",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "priceline",
+          "board": "Priceline",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions."
+    },
+    {
+      "id": "lexisnexis-risk-solutions",
+      "name": "LexisNexis Risk Solutions",
+      "category": "SaaS",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://relx.wd3.myworkdayjobs.com/RiskSolutions",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "relx",
+          "board": "RiskSolutions",
+          "cluster": "wd3"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "RELX RiskSolutions Workday CXS endpoint and pagination verified from GitHub Actions."
+    },
+    {
+      "id": "ares-management",
+      "name": "Ares Management",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://aresmgmt.wd1.myworkdayjobs.com/External",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "aresmgmt",
+          "board": "External",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions."
+    },
+    {
+      "id": "husqvarna-group",
+      "name": "Husqvarna Group",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://husqvarnagroup.wd3.myworkdayjobs.com/External_Career_Site",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "husqvarnagroup",
+          "board": "External_Career_Site",
+          "cluster": "wd3"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions; previous Navi Mumbai software engineering evidence."
+    },
+    {
+      "id": "dentsu",
+      "name": "Dentsu",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://dentsuaegis.wd3.myworkdayjobs.com/DAN_GLOBAL",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "dentsuaegis",
+          "board": "DAN_GLOBAL",
+          "cluster": "wd3"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions."
+    },
+    {
+      "id": "rxo",
+      "name": "RXO",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://rxo.wd501.myworkdayjobs.com/rxojobs",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "rxo",
+          "board": "rxojobs",
+          "cluster": "wd501"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions; prior Mumbai software engineering evidence."
+    },
+    {
+      "id": "sulzer",
+      "name": "Sulzer",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://sulzer.wd502.myworkdayjobs.com/SulzerJobs",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "sulzer",
+          "board": "SulzerJobs",
+          "cluster": "wd502"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions; Navi Mumbai presence confirmed."
+    },
+    {
+      "id": "applied-materials",
+      "name": "Applied Materials",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://amat.wd1.myworkdayjobs.com/External",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "amat",
+          "board": "External",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS endpoint and pagination verified from GitHub Actions; previous Mumbai Java/Python cloud engineering evidence."
     }
   ]
 }
