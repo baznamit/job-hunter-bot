@@ -11,6 +11,11 @@ Run via the Job Hunter workflow:
 
 import json
 import sys
+import time
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
 from pathlib import Path
 
 from models import Job
@@ -18,6 +23,10 @@ from models.company import ProviderType
 from research.discovery import discover_provider
 from research.loader import load_registry
 from research.validator import validate_candidate
+from src.description_diagnostics import (
+    enrich_near_misses,
+    promotable_jobs,
+)
 from src.filters import JobFilter
 from src.notifier import TelegramNotifier
 from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter, SmartRecruitersAdapter, OracleAdapter, HigherAdapter, SuccessFactorsAdapter, TalentBrewAdapter, AlgoliaAdapter, BankOfAmericaAdapter
@@ -25,14 +34,17 @@ from src.providers.exceptions import (
     ProviderNotFoundError,
     ProviderTemporaryError,
 )
+from src.recovery_store import RecoveryStore
+from src.run_result import CompanyRunResult
 from src.store import SeenStore
-from src.description_diagnostics import (
-    enrich_near_misses,
-    promotable_jobs,
-)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SEEN_FILE = _PROJECT_ROOT / "data" / "seen.json"
+_RECOVERY_FILE = (
+    _PROJECT_ROOT
+    / "data"
+    / "recovery.json"
+)
 _SETTINGS_FILE = _PROJECT_ROOT / "config" / "settings.json"
 
 _ADAPTERS = {
@@ -48,6 +60,7 @@ _ADAPTERS = {
     ProviderType.ALGOLIA: AlgoliaAdapter(),
     ProviderType.BANKOFAMERICA: BankOfAmericaAdapter(),
 }
+
 
 def _recover_stale_provider(company):
     """
@@ -116,9 +129,51 @@ def _recover_stale_provider(company):
 
     return candidate
 
-def _max_jobs() -> int:
-    settings = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
-    return settings["telegram"]["max_jobs_per_message"]
+
+def _settings() -> dict:
+    return json.loads(
+        _SETTINGS_FILE.read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+def _max_jobs(
+    settings: dict,
+) -> int:
+    return settings[
+        "telegram"
+    ][
+        "max_jobs_per_message"
+    ]
+
+
+def _max_workers(
+    settings: dict,
+) -> int:
+    return int(
+        settings.get(
+            "runtime",
+            {},
+        ).get(
+            "max_workers",
+            6,
+        )
+    )
+
+
+def _performance_top_n(
+    settings: dict,
+) -> int:
+    return int(
+        settings.get(
+            "runtime",
+            {},
+        ).get(
+            "performance_top_n",
+            10,
+        )
+    )
 
 
 def _build_message(jobs: list[Job], limit: int) -> str:
@@ -145,11 +200,26 @@ def _build_message(jobs: list[Job], limit: int) -> str:
 def _fetch_jobs_with_recovery(
     company,
     adapter,
+    recovery_store: RecoveryStore,
+    recovery_settings: dict,
 ) -> list[Job] | None:
-    """Fetch jobs, recovering automatically from a stale ATS mapping."""
+    """
+    Fetch jobs and recover stale ATS mappings.
+
+    Repeated failed rediscovery attempts are subject
+    to exponential cooldown.
+    """
 
     try:
-        return adapter.fetch_jobs(company)
+        jobs = adapter.fetch_jobs(
+            company
+        )
+
+        recovery_store.clear(
+            company.id
+        )
+
+        return jobs
 
     except ProviderNotFoundError as exc:
         print(
@@ -157,7 +227,51 @@ def _fetch_jobs_with_recovery(
             f"ATS mapping appears invalid — {exc}",
             file=sys.stderr,
         )
-        return _recover_and_retry_fetch(company)
+
+        should_attempt, retry_at = (
+            recovery_store.should_attempt(
+                company.id
+            )
+        )
+
+        if not should_attempt:
+            print(
+                f"  [RECOVERY] {company.name}: "
+                f"skipped — retry after "
+                f"{retry_at.isoformat()}",
+                file=sys.stderr,
+            )
+
+            return None
+
+        jobs = _recover_and_retry_fetch(
+            company
+        )
+
+        if jobs is None:
+            recovery_store.record_failure(
+                company.id,
+                base_hours=int(
+                    recovery_settings.get(
+                        "base_cooldown_hours",
+                        6,
+                    )
+                ),
+                max_hours=int(
+                    recovery_settings.get(
+                        "max_cooldown_hours",
+                        72,
+                    )
+                ),
+            )
+
+            return None
+
+        recovery_store.clear(
+            company.id
+        )
+
+        return jobs
 
     except ProviderTemporaryError as exc:
         print(
@@ -165,6 +279,7 @@ def _fetch_jobs_with_recovery(
             f"temporary ATS failure — {exc}",
             file=sys.stderr,
         )
+
         return None
 
     except Exception as exc:
@@ -173,6 +288,7 @@ def _fetch_jobs_with_recovery(
             f"fetch failed — {exc}",
             file=sys.stderr,
         )
+
         return None
 
 
@@ -278,10 +394,19 @@ def _print_company_stats(company, jobs_fetched, direct_count, promoted_count, to
             f"{total_matching} matching"
         )
 
-def _send_notifications(store, notifier, new_jobs) -> None:
+
+def _send_notifications(
+    store,
+    notifier,
+    new_jobs,
+    max_jobs: int,
+) -> None:
     """Send notification with new jobs and mark them as seen."""
     try:
-        message = _build_message(new_jobs, _max_jobs())
+        message = _build_message(
+            new_jobs,
+            max_jobs,
+        )
         notifier.send_message(message)
         store.mark_seen(new_jobs)
         print(f"Telegram notification sent ({len(new_jobs)} job(s)).")
@@ -291,59 +416,353 @@ def _send_notifications(store, notifier, new_jobs) -> None:
         sys.exit(1)
 
 
-def main() -> None:
+def _run_company(
+    company,
+    adapter,
+    job_filter: JobFilter,
+    recovery_store: RecoveryStore,
+    recovery_settings: dict,
+) -> CompanyRunResult:
+    started = time.perf_counter()
 
-    registry = load_registry()
-    job_filter = JobFilter()
-    store = SeenStore(_SEEN_FILE)
-    notifier = TelegramNotifier()
+    result = CompanyRunResult(
+        company_id=company.id,
+        company_name=company.name,
+        provider=(
+            company.provider.type.value
+        ),
+    )
 
-    all_matching: list[Job] = []
-
-    print()
-    for company in registry.companies:
-        if not company.enabled:
-            continue
-
-        adapter = _ADAPTERS.get(company.provider.type)
-        if adapter is None:
-            continue  # Provider not implemented by this runtime.
-
+    try:
         jobs = _fetch_jobs_with_recovery(
             company,
             adapter,
+            recovery_store,
+            recovery_settings,
         )
 
         if jobs is None:
-            continue
+            result.success = False
+            return result
 
-        matching, direct_count, promoted_count = _process_jobs_for_company(
+        result.jobs_fetched = len(
+            jobs
+        )
+
+        (
+            matching,
+            direct_count,
+            promoted_count,
+        ) = _process_jobs_for_company(
             jobs,
             job_filter,
         )
 
-        _print_company_stats(
-            company,
-            len(jobs),
-            direct_count,
-            promoted_count,
-            len(matching),
+        result.matching = matching
+        result.direct_count = (
+            direct_count
+        )
+        result.promoted_count = (
+            promoted_count
         )
 
-        all_matching.extend(matching)
+        return result
 
-    new_jobs = store.filter_new(all_matching)
+    except Exception as exc:
+        result.success = False
+        result.error = (
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        print(
+            f"  [WARN] {company.name}: "
+            f"worker failed — {exc}",
+            file=sys.stderr,
+        )
+
+        return result
+
+    finally:
+        result.elapsed_seconds = (
+            time.perf_counter()
+            - started
+        )
+
+
+def _print_performance_summary(
+    results: list[CompanyRunResult],
+    total_seconds: float,
+    top_n: int,
+) -> None:
+    completed = [
+        result
+        for result in results
+        if result.success
+    ]
+
+    failed = [
+        result
+        for result in results
+        if not result.success
+    ]
+
+    jobs_fetched = sum(
+        result.jobs_fetched
+        for result in completed
+    )
+
+    matching = sum(
+        len(result.matching)
+        for result in completed
+    )
+
+    slowest = sorted(
+        results,
+        key=lambda item: (
+            item.elapsed_seconds
+        ),
+        reverse=True,
+    )[:top_n]
 
     print()
-    print(f"  Matching : {len(all_matching)}")
-    print(f"  New      : {len(new_jobs)}")
+    print("Performance")
+    print("-----------")
+
+    print(
+        f"Companies processed : "
+        f"{len(results)}"
+    )
+
+    print(
+        f"Successful          : "
+        f"{len(completed)}"
+    )
+
+    print(
+        f"Failed/skipped      : "
+        f"{len(failed)}"
+    )
+
+    print(
+        f"Jobs fetched        : "
+        f"{jobs_fetched}"
+    )
+
+    print(
+        f"Matching            : "
+        f"{matching}"
+    )
+
+    print(
+        f"Total runtime       : "
+        f"{total_seconds:.1f}s"
+    )
+
+    print()
+    print("Slowest companies:")
+
+    for index, result in enumerate(
+        slowest,
+        1,
+    ):
+        status = (
+            "ok"
+            if result.success
+            else "failed"
+        )
+
+        print(
+            f"{index:>2}. "
+            f"{result.company_name:<28} "
+            f"{result.elapsed_seconds:>7.1f}s "
+            f"{result.jobs_fetched:>6} jobs "
+            f"[{result.provider}, {status}]"
+        )
+
+
+def main() -> None:
+    run_started = time.perf_counter()
+
+    settings = _settings()
+
+    registry = load_registry()
+
+    job_filter = JobFilter()
+
+    store = SeenStore(
+        _SEEN_FILE
+    )
+
+    recovery_store = RecoveryStore(
+        _RECOVERY_FILE
+    )
+
+    notifier = TelegramNotifier()
+
+    recovery_settings = settings.get(
+        "recovery",
+        {},
+    )
+
+    max_workers = _max_workers(
+        settings
+    )
+
+    companies = []
+
+    for company in registry.companies:
+        if not company.enabled:
+            continue
+
+        adapter = _ADAPTERS.get(
+            company.provider.type
+        )
+
+        if adapter is None:
+            continue
+
+        companies.append(
+            (
+                company,
+                adapter,
+            )
+        )
+
+    print()
+    print(
+        f"Processing "
+        f"{len(companies)} companies "
+        f"with {max_workers} workers..."
+    )
+    print()
+
+    results: list[
+        CompanyRunResult
+    ] = []
+
+    with ThreadPoolExecutor(
+        max_workers=max_workers
+    ) as executor:
+
+        future_map = {
+            executor.submit(
+                _run_company,
+                company,
+                adapter,
+                job_filter,
+                recovery_store,
+                recovery_settings,
+            ): company
+            for company, adapter
+            in companies
+        }
+
+        for future in as_completed(
+            future_map
+        ):
+            company = future_map[
+                future
+            ]
+
+            try:
+                result = future.result()
+
+            except Exception as exc:
+                print(
+                    f"  [WARN] "
+                    f"{company.name}: "
+                    f"unexpected worker "
+                    f"failure — {exc}",
+                    file=sys.stderr,
+                )
+
+                continue
+
+            results.append(
+                result
+            )
+
+            if not result.success:
+                continue
+
+            _print_company_stats(
+                company,
+                result.jobs_fetched,
+                result.direct_count,
+                result.promoted_count,
+                len(result.matching),
+            )
+
+            print(
+                f"    [TIME] "
+                f"{result.elapsed_seconds:.1f}s "
+                f"via {result.provider}"
+            )
+
+    order = {
+        company.id: index
+        for index, (
+            company,
+            _,
+        ) in enumerate(companies)
+    }
+
+    results.sort(
+        key=lambda result: order.get(
+            result.company_id,
+            10**9,
+        )
+    )
+
+    all_matching = [
+        job
+        for result in results
+        if result.success
+        for job in result.matching
+    ]
+
+    new_jobs = store.filter_new(
+        all_matching
+    )
+
+    total_seconds = (
+        time.perf_counter()
+        - run_started
+    )
+
+    print()
+    print(
+        f"  Matching : "
+        f"{len(all_matching)}"
+    )
+    print(
+        f"  New      : "
+        f"{len(new_jobs)}"
+    )
+
+    _print_performance_summary(
+        results,
+        total_seconds,
+        _performance_top_n(
+            settings
+        ),
+    )
+
     print()
 
     if not new_jobs:
-        print("No new jobs to notify.")
+        print(
+            "No new jobs to notify."
+        )
         return
 
-    _send_notifications(store, notifier, new_jobs)
-        
+    _send_notifications(
+        store,
+        notifier,
+        new_jobs,
+        _max_jobs(settings),
+    )
+
+
 if __name__ == "__main__":
     main()

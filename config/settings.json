@@ -17,6 +17,16 @@
         "Vice President"
     ],
 
+    "runtime": {
+        "max_workers": 6,
+        "performance_top_n": 10
+    },
+
+    "recovery": {
+        "base_cooldown_hours": 6,
+        "max_cooldown_hours": 72
+    },
+
     "telegram": {
         "max_jobs_per_message": 25
     }
