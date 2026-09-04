@@ -158,10 +158,10 @@ class BankOfAmericaAdapter(ProviderAdapter):
 
         cards = re.findall(
             r'<div\b[^>]*class=["\'][^"\']*'
-            r'job-search-tile[^"\']*["\'][^>]*>'
+            r'\bjob-search-tile\b[^"\']*["\'][^>]*>'
             r'(.*?)'
             r'(?=<div\b[^>]*class=["\'][^"\']*'
-            r'job-search-tile[^"\']*["\']|$)',
+            r'\bjob-search-tile\b[^"\']*["\']|$)',
             page_html,
             flags=(
                 re.IGNORECASE
