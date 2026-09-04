@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from models import Job
 from models.company import (
@@ -170,6 +171,273 @@ def test_workday_builds_public_job_url():
     "https://visa.wd5.myworkdayjobs.com/"
     "en-US/Visa/job/Bangalore-IND/Software-Engineer_R123456"
     )
+
+
+class _FakeResponse:
+    def __init__(
+        self,
+        payload: dict,
+        url: str = (
+            "https://example.com/jobs"
+        ),
+    ):
+        self._payload = payload
+        self.url = url
+        self.status_code = 200
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        return None
+
+
+def _workday_posting(
+    number: int,
+) -> dict:
+    return {
+        "title":
+            f"Software Engineer {number}",
+        "externalPath":
+            f"/job/Test/Engineer_R{number}",
+        "locationsText":
+            "Mumbai, India",
+    }
+
+
+def test_workday_parallel_pagination_fetches_all_pages():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+
+    def fake_post(
+        url,
+        *,
+        json,
+        headers,
+        timeout,
+    ):
+        offset = json["offset"]
+
+        if offset == 0:
+            payload = {
+                "total": 45,
+                "jobPostings": [
+                    _workday_posting(i)
+                    for i in range(
+                        0,
+                        20,
+                    )
+                ],
+            }
+
+        elif offset == 20:
+            payload = {
+                "total": 0,
+                "jobPostings": [
+                    _workday_posting(i)
+                    for i in range(
+                        20,
+                        40,
+                    )
+                ],
+            }
+
+        elif offset == 40:
+            payload = {
+                "total": 0,
+                "jobPostings": [
+                    _workday_posting(i)
+                    for i in range(
+                        40,
+                        45,
+                    )
+                ],
+            }
+
+        else:
+            raise AssertionError(
+                f"unexpected offset {offset}"
+            )
+
+        return _FakeResponse(
+            payload,
+            url,
+        )
+
+    with patch(
+        "src.providers.workday.requests.post",
+        side_effect=fake_post,
+    ) as mock_post:
+        raw = WorkdayAdapter()._fetch_raw(
+            company
+        )
+
+    postings = raw[
+        "jobPostings"
+    ]
+
+    assert len(postings) == 45
+
+    assert [
+        item["externalPath"]
+        for item in postings
+    ] == [
+        (
+            f"/job/Test/"
+            f"Engineer_R{i}"
+        )
+        for i in range(45)
+    ]
+
+    offsets = sorted(
+        call.kwargs["json"]["offset"]
+        for call in mock_post.call_args_list
+    )
+
+    assert offsets == [
+        0,
+        20,
+        40,
+    ]
+
+
+def test_workday_parallel_pagination_deduplicates_jobs():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+
+    duplicate = (
+        _workday_posting(19)
+    )
+
+    def fake_post(
+        url,
+        *,
+        json,
+        headers,
+        timeout,
+    ):
+        offset = json["offset"]
+
+        if offset == 0:
+            return _FakeResponse(
+                {
+                    "total": 21,
+                    "jobPostings": [
+                        _workday_posting(i)
+                        for i in range(20)
+                    ],
+                },
+                url,
+            )
+
+        return _FakeResponse(
+            {
+                "total": 0,
+                "jobPostings": [
+                    duplicate,
+                    _workday_posting(20),
+                ],
+            },
+            url,
+        )
+
+    with patch(
+        "src.providers.workday.requests.post",
+        side_effect=fake_post,
+    ):
+        raw = WorkdayAdapter()._fetch_raw(
+            company
+        )
+
+    paths = [
+        item["externalPath"]
+        for item in raw[
+            "jobPostings"
+        ]
+    ]
+
+    assert len(paths) == 21
+    assert len(set(paths)) == 21
+
+
+def test_workday_missing_total_uses_sequential_fallback():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+
+    def fake_post(
+        url,
+        *,
+        json,
+        headers,
+        timeout,
+    ):
+        offset = json["offset"]
+
+        if offset == 0:
+            return _FakeResponse(
+                {
+                    "jobPostings": [
+                        _workday_posting(i)
+                        for i in range(20)
+                    ],
+                },
+                url,
+            )
+
+        if offset == 20:
+            return _FakeResponse(
+                {
+                    "jobPostings": [
+                        _workday_posting(20)
+                    ],
+                },
+                url,
+            )
+
+        if offset == 21:
+            return _FakeResponse(
+                {
+                    "jobPostings": [],
+                },
+                url,
+            )
+
+        raise AssertionError(
+            f"unexpected offset {offset}"
+        )
+
+    with patch(
+        "src.providers.workday.requests.post",
+        side_effect=fake_post,
+    ) as mock_post:
+        raw = WorkdayAdapter()._fetch_raw(
+            company
+        )
+
+    assert len(
+        raw["jobPostings"]
+    ) == 21
+
+    assert [
+        call.kwargs["json"]["offset"]
+        for call in mock_post.call_args_list
+    ] == [
+        0,
+        20,
+        21,
+    ]
 
 def test_smartrecruiters_parses_job():
     company = _company(
