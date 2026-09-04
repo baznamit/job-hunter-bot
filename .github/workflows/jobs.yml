@@ -2,11 +2,15 @@ name: Job Hunter
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: job-hunter
+  cancel-in-progress: false
 
 jobs:
   run:
