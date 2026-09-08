@@ -21,6 +21,7 @@ class ProviderType(str, Enum):
     WORKDAY = "workday"
     ASHBY = "ashby"
     SMARTRECRUITERS = "smartrecruiters"
+    EIGHTFOLD = "eightfold"
     ORACLE = "oracle"
     HIGHER = "higher"
     SUCCESSFACTORS = "successfactors"

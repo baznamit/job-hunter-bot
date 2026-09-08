@@ -33,9 +33,8 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Probe stale company ATS mappings
-        run: |
-          python -m research.targeted_backend_probe
+      - name: Probe Microsoft Eightfold
+        run: python -m research.microsoft_eightfold_probe
 
       - name: Run Bot
         run: |

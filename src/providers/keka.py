@@ -70,6 +70,35 @@ class KekaAdapter(ProviderAdapter):
                 "returned non-JSON response"
             ) from exc
 
+        # TEMPORARY: inspect the real Keka response shape.
+        print(
+            f"  [KEKA-DEBUG] {company.name}: "
+            f"type={type(data).__name__}"
+        )
+
+        if isinstance(data, list):
+            print(
+                f"  [KEKA-DEBUG] {company.name}: "
+                f"items={len(data)}"
+            )
+
+            if data:
+                print(
+                    f"  [KEKA-DEBUG] {company.name}: "
+                    f"first_item={data[0]!r}"
+                )
+
+        elif isinstance(data, dict):
+            print(
+                f"  [KEKA-DEBUG] {company.name}: "
+                f"keys={list(data.keys())}"
+            )
+
+            print(
+                f"  [KEKA-DEBUG] {company.name}: "
+                f"sample={data!r}"
+            )
+
         if not isinstance(
             data,
             (dict, list),
