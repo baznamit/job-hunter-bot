@@ -134,6 +134,17 @@ def _interesting_urls(
         text,
         flags=re.IGNORECASE,
     ):
+        if href.startswith(
+            (
+                "data:",
+                "javascript:",
+                "mailto:",
+                "tel:",
+                "#",
+            )
+        ):
+            continue
+
         url = urljoin(
             base_url,
             href,
@@ -180,7 +191,19 @@ def _probe_linked_pages(
     name: str,
     urls: list[str],
 ) -> None:
-    for url in urls[:10]:
+    page_urls = [
+        url
+        for url in urls
+        if not re.search(
+            r"\.(?:png|jpg|jpeg|gif|svg|webp|"
+            r"css|woff2?|ttf|ico)"
+            r"(?:\?|$)",
+            url,
+            flags=re.IGNORECASE,
+        )
+    ]
+
+    for url in page_urls[:10]:
         try:
             response = _fetch(url)
 
