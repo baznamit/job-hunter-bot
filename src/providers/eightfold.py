@@ -1,7 +1,5 @@
-from concurrent.futures import (
-    ThreadPoolExecutor,
-    as_completed,
-)
+import random
+import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
@@ -14,8 +12,11 @@ from .base import ProviderAdapter
 
 _TIMEOUT = 20
 _PAGE_SIZE = 10
-_PAGE_WORKERS = 3
 _MAX_PAGES = 500
+
+_MAX_RETRIES = 5
+_RETRY_BASE_SECONDS = 2.0
+_REQUEST_DELAY_SECONDS = 0.20
 
 class EightfoldAdapter(ProviderAdapter):
     """
@@ -65,23 +66,76 @@ class EightfoldAdapter(ProviderAdapter):
                 "config.domain"
             )
 
-        response = requests.get(
-            self._endpoint(company),
-            params={
-                "domain": domain,
-                "query": query,
-                "location": "",
-                "start": start,
-            },
-            headers={
-                "Accept": "application/json",
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(compatible; JobHunterBot/1.0)"
-                ),
-            },
-            timeout=_TIMEOUT,
-        )
+        params = {
+            "domain": domain,
+            "query": query,
+            "location": "",
+            "start": start,
+        }
+
+        for attempt in range(
+            _MAX_RETRIES + 1
+        ):
+            response = requests.get(
+                self._endpoint(company),
+                params=params,
+                headers={
+                    "Accept":
+                        "application/json",
+                    "User-Agent": (
+                        "Mozilla/5.0 "
+                        "(compatible; "
+                        "JobHunterBot/1.0)"
+                    ),
+                },
+                timeout=_TIMEOUT,
+            )
+
+            if response.status_code != 429:
+                break
+
+            if attempt >= _MAX_RETRIES:
+                self._check_response(
+                    response,
+                    company,
+                )
+
+            retry_after = (
+                response.headers.get(
+                    "Retry-After"
+                )
+            )
+
+            try:
+                delay = float(
+                    retry_after
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                delay = (
+                    _RETRY_BASE_SECONDS
+                    * (2 ** attempt)
+                )
+
+            # Small jitter prevents retries from
+            # repeatedly landing on the same boundary.
+            delay += random.uniform(
+                0.0,
+                0.5,
+            )
+
+            print(
+                f"  [EIGHTFOLD] "
+                f"{company.name}: "
+                f"HTTP 429 at start={start}; "
+                f"retry {attempt + 1}/"
+                f"{_MAX_RETRIES} in "
+                f"{delay:.1f}s"
+            )
+
+            time.sleep(delay)
 
         self._check_response(
             response,
@@ -126,8 +180,13 @@ class EightfoldAdapter(ProviderAdapter):
                 "is not a list"
             )
 
-        if not isinstance(count, int):
-            count = len(positions)
+        if not isinstance(
+            count,
+            int,
+        ):
+            count = len(
+                positions
+            )
 
         return positions, count
 
@@ -147,71 +206,20 @@ class EightfoldAdapter(ProviderAdapter):
                 "positions": [],
             }
 
-        if total <= len(first_page):
-            return {
-                "positions": first_page,
-            }
-
-        page_size = len(first_page)
+        page_size = len(
+            first_page
+        )
 
         if page_size <= 0:
             page_size = _PAGE_SIZE
 
-        offsets = list(
-            range(
-                page_size,
-                total,
-                page_size,
-            )
-        )
-
-        if len(offsets) >= _MAX_PAGES:
-            raise RuntimeError(
-                f"{company.name}: Eightfold "
-                f"pagination exceeded {_MAX_PAGES} pages"
-            )
-
-        pages: dict[
-            int,
-            list[dict],
-        ] = {
-            0: first_page,
-        }
-
-        with ThreadPoolExecutor(
-            max_workers=_PAGE_WORKERS
-        ) as executor:
-            future_offsets = {
-                executor.submit(
-                    self._request_page,
-                    company,
-                    start=offset,
-                ): offset
-                for offset in offsets
-            }
-
-            for future in as_completed(
-                future_offsets
-            ):
-                offset = future_offsets[
-                    future
-                ]
-
-                positions, _ = (
-                    future.result()
-                )
-
-                pages[offset] = positions
-
-        positions: list[dict] = []
+        all_positions: list[dict] = []
         seen_ids: set[str] = set()
 
-        for offset in sorted(pages):
-            page = pages[offset]
-
-            previous_count = len(
-                seen_ids
-            )
+        def add_page(
+            page: list[dict],
+        ) -> int:
+            added = 0
 
             for position in page:
                 if not isinstance(
@@ -227,30 +235,83 @@ class EightfoldAdapter(ProviderAdapter):
                 if position_id is None:
                     continue
 
-                key = str(position_id)
+                key = str(
+                    position_id
+                )
 
                 if key in seen_ids:
                     continue
 
                 seen_ids.add(key)
-                positions.append(position)
+                all_positions.append(
+                    position
+                )
+                added += 1
 
-            # Protect against an endpoint ignoring `start`
-            # and repeatedly returning page 1.
-            if (
-                offset > 0
-                and page
-                and len(seen_ids)
-                == previous_count
-            ):
+            return added
+
+        add_page(
+            first_page
+        )
+
+        if total <= page_size:
+            return {
+                "positions":
+                    all_positions,
+            }
+
+        offset = page_size
+        page_number = 1
+
+        while offset < total:
+            if page_number >= _MAX_PAGES:
+                raise RuntimeError(
+                    f"{company.name}: Eightfold "
+                    "pagination exceeded "
+                    f"{_MAX_PAGES} pages"
+                )
+
+            # Keep normal traffic below Eightfold's
+            # observed rate limit rather than relying
+            # entirely on reactive 429 retries.
+            time.sleep(
+                _REQUEST_DELAY_SECONDS
+            )
+
+            page, reported_total = (
+                self._request_page(
+                    company,
+                    start=offset,
+                )
+            )
+
+            if not page:
+                break
+
+            added = add_page(
+                page
+            )
+
+            if added == 0:
                 raise RuntimeError(
                     f"{company.name}: Eightfold "
                     "pagination stalled at "
                     f"start={offset}"
                 )
 
+            # Inventory can change while crawling.
+            if reported_total > 0:
+                total = reported_total
+
+            offset += len(
+                page
+            )
+
+            page_number += 1
+
         return {
-            "positions": positions,
+            "positions":
+                all_positions,
         }
 
     @staticmethod

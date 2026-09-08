@@ -559,18 +559,18 @@
       "category": "SaaS",
       "priority": 3,
       "enabled": true,
-      "career_page": "https://careers.freshworks.com/",
+      "career_page": "https://careers.smartrecruiters.com/Freshworks",
       "provider": {
-        "type": "lever",
-        "status": "partial",
+        "type": "smartrecruiters",
+        "status": "implemented",
         "config": {
-          "board": "freshworks"
+          "company_identifier": "Freshworks"
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": ""
+      "notes": "Uses SmartRecruiters. Previous Lever board is obsolete."
     },
     {
       "id": "inmobi",
@@ -599,16 +599,14 @@
       "enabled": true,
       "career_page": "https://navi.com/careers/",
       "provider": {
-        "type": "ashby",
-        "status": "partial",
-        "config": {
-          "organization": "navi"
-        }
+        "type": "unknown",
+        "status": "research_pending",
+        "config": {}
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": ""
+      "notes": "Previous Ashby organization 'navi' belongs to an unrelated aviation company. Navi Technologies ATS requires rediscovery."
     },
     {
       "id": "jupiter",

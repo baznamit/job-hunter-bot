@@ -206,11 +206,17 @@ def test_eightfold_fetches_all_pages():
             )
         )
 
-    with patch(
-        "src.providers.eightfold."
-        "requests.get",
-        side_effect=fake_get,
-    ) as mock_get:
+    with (
+        patch(
+            "src.providers.eightfold."
+            "requests.get",
+            side_effect=fake_get,
+        ) as mock_get,
+        patch(
+            "src.providers.eightfold."
+            "time.sleep",
+        ),
+    ):
         raw = (
             EightfoldAdapter()
             ._fetch_raw(company)
@@ -233,3 +239,62 @@ def test_eightfold_fetches_all_pages():
         10,
         20,
     ]
+
+def test_eightfold_retries_429():
+    company = _company()
+
+    rate_limited = _Response(
+        {}
+    )
+
+    rate_limited.status_code = 429
+    rate_limited.headers = {
+        "Retry-After": "1"
+    }
+
+    successful = _Response(
+        {
+            "status": 200,
+            "data": {
+                "positions": [
+                    {
+                        "id": 123,
+                        "name":
+                            "Software Engineer",
+                        "positionUrl":
+                            "/careers/job/123",
+                    }
+                ],
+                "count": 1,
+            },
+        }
+    )
+
+    with (
+        patch(
+            "src.providers.eightfold."
+            "requests.get",
+            side_effect=[
+                rate_limited,
+                successful,
+            ],
+        ) as mock_get,
+        patch(
+            "src.providers.eightfold."
+            "time.sleep",
+        ) as mock_sleep,
+    ):
+        positions, total = (
+            EightfoldAdapter()
+            ._request_page(
+                company,
+                start=0,
+            )
+        )
+
+    assert total == 1
+    assert len(positions) == 1
+
+    assert mock_get.call_count == 2
+
+    mock_sleep.assert_called_once()
