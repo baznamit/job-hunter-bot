@@ -22,17 +22,20 @@ from models.company import (
     ProviderType,
 )
 from src.providers import (
+    AlgoliaAdapter,
     AshbyAdapter,
+    BankOfAmericaAdapter,
+    EightfoldAdapter,
     GreenhouseAdapter,
-    LeverAdapter,
-    WorkdayAdapter,
-    SmartRecruitersAdapter,
-    OracleAdapter,
     HigherAdapter,
+    KekaAdapter,
+    LeverAdapter,
+    OracleAdapter,
+    PhonePeAdapter,
+    SmartRecruitersAdapter,
     SuccessFactorsAdapter,
     TalentBrewAdapter,
-    AlgoliaAdapter,
-    BankOfAmericaAdapter,
+    WorkdayAdapter,
 )
 from src.providers.exceptions import ProviderError
 
@@ -49,6 +52,9 @@ _ADAPTERS = {
     ProviderType.TALENTBREW: TalentBrewAdapter(),
     ProviderType.ALGOLIA: AlgoliaAdapter(),
     ProviderType.BANKOFAMERICA: BankOfAmericaAdapter(),
+    ProviderType.PHONEPE: PhonePeAdapter(),
+    ProviderType.KEKA: KekaAdapter(),
+    ProviderType.EIGHTFOLD: EightfoldAdapter(),
 }
 
 
@@ -271,6 +277,59 @@ def validate_registry(registry: CompanyRegistry) -> None:
                 raise ValueError(
                     f"{company.name}: Bank of America "
                     "provider requires config.base_url"
+                )
+
+        elif provider.type == ProviderType.PHONEPE:
+            if not getattr(
+                config,
+                "api_url",
+                None,
+            ):
+                raise ValueError(
+                    f"{company.name}: PhonePe provider "
+                    "requires config.api_url"
+                )
+
+        elif provider.type == ProviderType.KEKA:
+            missing = []
+
+            if not config.base_url:
+                missing.append("base_url")
+
+            if not getattr(
+                config,
+                "identifier",
+                None,
+            ):
+                missing.append("identifier")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: Keka provider "
+                    f"is missing config fields: "
+                    f"{', '.join(missing)}"
+                )
+
+        elif provider.type == ProviderType.EIGHTFOLD:
+            missing = []
+
+            if not config.base_url:
+                missing.append("base_url")
+
+            domain = getattr(
+                config,
+                "domain",
+                None,
+            )
+
+            if not domain:
+                missing.append("domain")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: Eightfold provider "
+                    f"is missing config fields: "
+                    f"{', '.join(missing)}"
                 )
 
         elif provider.type == ProviderType.ORACLE:

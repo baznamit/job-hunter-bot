@@ -497,20 +497,19 @@
       "category": "SaaS",
       "priority": 3,
       "enabled": true,
-      "career_page": "https://careers.microsoft.com/",
+      "career_page": "https://apply.careers.microsoft.com/careers",
       "provider": {
-        "type": "workday",
-        "status": "verified",
+        "type": "eightfold",
+        "status": "implemented",
         "config": {
-          "tenant": "microsoft",
-          "board": "Careers",
-          "cluster": "wd5"
+          "base_url": "https://apply.careers.microsoft.com",
+          "domain": "microsoft.com"
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Uses Workday ATS (microsoft.wd5.myworkdayjobs.com)."
+      "notes": "Uses Eightfold PCS public careers search API."
     },
     {
       "id": "adobe",

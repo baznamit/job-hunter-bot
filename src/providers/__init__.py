@@ -12,6 +12,7 @@ from .algolia import AlgoliaAdapter
 from .bankofamerica import BankOfAmericaAdapter
 from .phonepe import PhonePeAdapter
 from .keka import KekaAdapter
+from .eightfold import EightfoldAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -28,4 +29,5 @@ __all__ = [
     "BankOfAmericaAdapter",
     "PhonePeAdapter",
     "KekaAdapter",
+    "EightfoldAdapter",
 ]

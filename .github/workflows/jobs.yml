@@ -33,8 +33,9 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Probe Microsoft Eightfold
-        run: python -m research.microsoft_eightfold_probe
+      - name: Probe Freshworks and Navi
+        run: |
+          python -m research.empty_provider_probe
 
       - name: Run Bot
         run: |
