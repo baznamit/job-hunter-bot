@@ -1,4 +1,8 @@
 import uuid
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
 from datetime import datetime
 
 import requests
@@ -15,6 +19,7 @@ from .base import ProviderAdapter
 _TIMEOUT = 30
 _PAGE_SIZE = 200
 _MAX_PAGES = 100
+_PAGE_WORKERS = 3
 
 
 class OracleAdapter(ProviderAdapter):
@@ -46,97 +51,169 @@ class OracleAdapter(ProviderAdapter):
             "recruitingCEJobRequisitions"
         )
 
+    def _request_site_page(
+        self,
+        company: Company,
+        site: OracleSiteConfig,
+        offset: int,
+    ) -> tuple[list[dict], int | None]:
+        url = self._listing_url(
+            company
+        )
+
+        finder = (
+            "findReqs;"
+            f"siteNumber={site.site_number},"
+            f"limit={_PAGE_SIZE},"
+            f"offset={offset}"
+        )
+
+        response = requests.get(
+            url,
+            params={
+                "onlyData": "true",
+                "expand": "requisitionList",
+                "finder": finder,
+            },
+            headers=self._headers(),
+            timeout=_TIMEOUT,
+        )
+
+        self._check_response(
+            response,
+            company,
+        )
+
+        try:
+            data = response.json()
+
+        except requests.exceptions.JSONDecodeError as exc:
+            content_type = (
+                response.headers.get(
+                    "Content-Type",
+                    "unknown",
+                )
+            )
+
+            body_preview = (
+                response.text[:500]
+                .replace("\n", " ")
+            )
+
+            raise RuntimeError(
+                f"{company.name}: Oracle API "
+                "returned non-JSON response "
+                f"(status={response.status_code}, "
+                f"content_type={content_type}, "
+                f"url={response.url}, "
+                f"body={body_preview!r})"
+            ) from exc
+
+        items = data.get("items") or []
+
+        if not items:
+            return [], None
+
+        root = items[0]
+
+        postings = (
+            root.get("requisitionList")
+            or []
+        )
+
+        reported_total = root.get(
+            "TotalJobsCount"
+        )
+
+        total = (
+            reported_total
+            if isinstance(
+                reported_total,
+                int,
+            )
+            and reported_total >= 0
+            else None
+        )
+
+        return postings, total
+
     def _fetch_site(
         self,
         company: Company,
         site: OracleSiteConfig,
     ) -> list[dict]:
-        """
-        Fetch every posting from one Oracle Candidate Experience site.
+        first_postings, total = (
+            self._request_site_page(
+                company,
+                site,
+                0,
+            )
+        )
 
-        Oracle CE pagination is controlled inside the findReqs finder,
-        not by the generic REST limit/offset query parameters.
-        """
+        if not first_postings:
+            return []
 
-        url = self._listing_url(company)
+        # Never guess pagination when Oracle doesn't
+        # provide an authoritative total.
+        if total is None or total <= 0:
+            return self._fetch_site_sequential(
+                company,
+                site,
+                first_postings,
+            )
+
+        pages: dict[
+            int,
+            list[dict],
+        ] = {
+            0: first_postings,
+        }
+
+        offsets = range(
+            _PAGE_SIZE,
+            total,
+            _PAGE_SIZE,
+        )
+
+        with ThreadPoolExecutor(
+            max_workers=_PAGE_WORKERS
+        ) as executor:
+
+            future_offsets = {
+                executor.submit(
+                    self._request_site_page,
+                    company,
+                    site,
+                    offset,
+                ): offset
+                for offset in offsets
+            }
+
+            for future in as_completed(
+                future_offsets
+            ):
+                offset = future_offsets[
+                    future
+                ]
+
+                postings, _ = (
+                    future.result()
+                )
+
+                pages[offset] = postings
 
         all_jobs: list[dict] = []
         seen_ids: set[str] = set()
 
-        offset = 0
-        total: int | None = None
+        # Restore original Oracle ordering and verify
+        # that every fetched page actually advances
+        # pagination.
+        for offset in sorted(pages):
+            postings = pages[offset]
 
-        for _ in range(_MAX_PAGES):
-            finder = (
-                "findReqs;"
-                f"siteNumber={site.site_number},"
-                f"limit={_PAGE_SIZE},"
-                f"offset={offset}"
+            previous_count = len(
+                seen_ids
             )
-
-            response = requests.get(
-                url,
-                params={
-                    "onlyData": "true",
-                    "expand": "requisitionList",
-                    "finder": finder,
-                },
-                headers=self._headers(),
-                timeout=_TIMEOUT,
-            )
-
-            self._check_response(
-                response,
-                company,
-            )
-
-            try:
-                data = response.json()
-            except requests.exceptions.JSONDecodeError as exc:
-                content_type = response.headers.get(
-                    "Content-Type",
-                    "unknown",
-                )
-                body_preview = response.text[:500].replace(
-                    "\n",
-                    " ",
-                )
-
-                raise RuntimeError(
-                    f"{company.name}: Oracle validation endpoint "
-                    f"returned non-JSON response "
-                    f"(status={response.status_code}, "
-                    f"content_type={content_type}, "
-                    f"url={response.url}, "
-                    f"body={body_preview!r})"
-                ) from exc
-
-            items = data.get("items") or []
-
-            if not items:
-                break
-
-            root = items[0]
-
-            postings = (
-                root.get("requisitionList")
-                or []
-            )
-
-            reported_total = root.get(
-                "TotalJobsCount"
-            )
-
-            if (
-                isinstance(reported_total, int)
-                and reported_total >= 0
-            ):
-                total = reported_total
-
-            if not postings:
-                break
-
-            new_jobs: list[dict] = []
 
             for posting in postings:
                 job_id = posting.get("Id")
@@ -151,41 +228,111 @@ class OracleAdapter(ProviderAdapter):
 
                 seen_ids.add(job_id)
 
-                # Preserve the site that produced this job so parse()
-                # can construct the correct browser-facing URL.
-                new_jobs.append(
+                all_jobs.append(
                     {
                         "job": posting,
-                        "site_path": site.site_path,
+                        "site_path":
+                            site.site_path,
                         "public_url_prefix":
                             site.public_url_prefix,
                     }
                 )
 
-            if not new_jobs:
+            # Page zero establishes the initial inventory.
+            # Any later non-empty page containing no new
+            # IDs means Oracle repeated a previous page
+            # instead of advancing the requested offset.
+            if (
+                offset > 0
+                and postings
+                and len(seen_ids)
+                == previous_count
+            ):
                 raise RuntimeError(
-                    f"{company.name}: Oracle pagination "
-                    f"stalled at offset {offset} "
-                    f"for site {site.site_number}"
+                    f"{company.name}: Oracle "
+                    "pagination stalled at "
+                    f"offset {offset} for site "
+                    f"{site.site_number}"
                 )
 
-            all_jobs.extend(new_jobs)
+        return all_jobs
+
+    def _fetch_site_sequential(
+        self,
+        company: Company,
+        site: OracleSiteConfig,
+        first_postings: list[dict],
+    ) -> list[dict]:
+        all_jobs: list[dict] = []
+        seen_ids: set[str] = set()
+
+        def add_postings(
+            postings: list[dict],
+        ) -> None:
+            for posting in postings:
+                job_id = posting.get("Id")
+
+                if job_id is None:
+                    continue
+
+                job_id = str(job_id)
+
+                if job_id in seen_ids:
+                    continue
+
+                seen_ids.add(job_id)
+
+                all_jobs.append(
+                    {
+                        "job": posting,
+                        "site_path":
+                            site.site_path,
+                        "public_url_prefix":
+                            site.public_url_prefix,
+                    }
+                )
+
+        add_postings(first_postings)
+
+        offset = len(first_postings)
+
+        for _ in range(
+            1,
+            _MAX_PAGES,
+        ):
+            postings, _ = (
+                self._request_site_page(
+                    company,
+                    site,
+                    offset,
+                )
+            )
+
+            if not postings:
+                break
+
+            previous_count = len(
+                seen_ids
+            )
+
+            add_postings(postings)
+
+            if len(seen_ids) == previous_count:
+                raise RuntimeError(
+                    f"{company.name}: Oracle "
+                    "pagination stalled at "
+                    f"offset {offset}"
+                )
 
             offset += len(postings)
 
-            if (
-                total is not None
-                and offset >= total
-            ):
-                break
-
         else:
             raise RuntimeError(
-                f"{company.name}: Oracle pagination "
-                f"exceeded {_MAX_PAGES} pages "
-                f"for site {site.site_number}"
+                f"{company.name}: Oracle "
+                "pagination exceeded "
+                f"{_MAX_PAGES} pages"
             )
-        
+
         return all_jobs
 
     def _fetch_raw(

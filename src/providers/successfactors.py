@@ -1,5 +1,9 @@
 import html
 import re
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
 from urllib.parse import urljoin
 
 import requests
@@ -12,6 +16,7 @@ from .base import ProviderAdapter
 
 _TIMEOUT = 30
 _MAX_PAGES = 100
+_DETAIL_WORKERS = 6
 
 
 class SuccessFactorsAdapter(ProviderAdapter):
@@ -442,6 +447,46 @@ class SuccessFactorsAdapter(ProviderAdapter):
 
         return job_urls
 
+    def _fetch_job_detail(
+        self,
+        company: Company,
+        url: str,
+    ) -> Job | None:
+        try:
+            page_html = self._fetch_html(
+                url,
+                company,
+            )
+
+            title = self._extract_title(
+                page_html
+            )
+
+            if not title:
+                return None
+
+            return Job(
+                id=self._extract_job_code(
+                    page_html,
+                    url,
+                ),
+                title=title,
+                company=company.name,
+                location=self._extract_location(
+                    page_html,
+                    url,
+                ),
+                url=url,
+                department=(
+                    self._extract_department(
+                        page_html
+                    )
+                ),
+            )
+
+        except requests.RequestException:
+            return None
+
     def fetch_jobs(
         self,
         company: Company,
@@ -450,51 +495,50 @@ class SuccessFactorsAdapter(ProviderAdapter):
             company
         )
 
-        jobs: list[Job] = []
+        if not job_urls:
+            return []
 
-        for url in job_urls:
-            try:
-                page_html = self._fetch_html(
-                    url,
+        jobs_by_url: dict[
+            str,
+            Job,
+        ] = {}
+
+        with ThreadPoolExecutor(
+            max_workers=_DETAIL_WORKERS
+        ) as executor:
+
+            future_urls = {
+                executor.submit(
+                    self._fetch_job_detail,
                     company,
-                )
+                    url,
+                ): url
+                for url in job_urls
+            }
 
-                title = self._extract_title(
-                    page_html
-                )
+            for future in as_completed(
+                future_urls
+            ):
+                url = future_urls[
+                    future
+                ]
 
-                if not title:
+                try:
+                    job = future.result()
+
+                except Exception:
                     continue
 
-                location = self._extract_location(
-                    page_html,
-                    url,
-                )
+                if job is not None:
+                    jobs_by_url[url] = job
 
-                job_id = self._extract_job_code(
-                    page_html,
-                    url,
-                )
-
-                job = Job(
-                    id=job_id,
-                    title=title,
-                    company=company.name,
-                    location=location,
-                    url=url,
-                    department=(
-                        self._extract_department(
-                            page_html
-                        )
-                    ),
-                )
-
-                jobs.append(job)
-
-            except requests.RequestException:
-                continue
-
-        return jobs
+        # Preserve listing order despite concurrent
+        # completion.
+        return [
+            jobs_by_url[url]
+            for url in job_urls
+            if url in jobs_by_url
+        ]
 
     def parse(
         self,
