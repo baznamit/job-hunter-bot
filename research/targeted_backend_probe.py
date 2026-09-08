@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import html
 import re
 from urllib.parse import urljoin
@@ -15,51 +17,89 @@ _HEADERS = {
         "(KHTML, like Gecko) "
         "Chrome/127.0.0.0 Safari/537.36"
     ),
-    "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/json;q=0.9,*/*;q=0.8"
-    ),
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
 }
+
+
+# Network-oriented strings only.
+#
+# We intentionally do NOT search generic words such as
+# "job", "position", or "location". Previous probes showed
+# that those produce enormous amounts of CSS/library noise.
+_NETWORK_MARKERS = (
+    "fetch(",
+    "axios",
+    ".get(",
+    ".post(",
+    "xmlhttprequest",
+    "/api/",
+    "graphql",
+    "searchjobs",
+    "search-jobs",
+    "embedjobs",
+    "openings",
+)
 
 
 def _get(
     url: str,
+    *,
+    allow_redirects: bool = True,
 ) -> requests.Response:
     return requests.get(
         url,
         headers=_HEADERS,
         timeout=_TIMEOUT,
-        allow_redirects=True,
+        allow_redirects=allow_redirects,
     )
 
 
 def _summary(
-    name: str,
+    company: str,
     label: str,
     response: requests.Response,
 ) -> None:
     print(
-        f"[FINAL-PROBE] {name}: "
+        f"[NETWORK-PROBE] {company}: "
         f"{label} "
         f"status={response.status_code} "
-        f"url={response.url} "
+        f"final={response.url} "
         f"content_type="
         f"{response.headers.get('Content-Type')} "
         f"length={len(response.content)}"
     )
 
 
-def _contexts(
-    name: str,
+def _clean(
+    value: str,
+) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        html.unescape(value),
+    ).strip()
+
+
+def _network_contexts(
+    company: str,
+    label: str,
     text: str,
-    markers: tuple[str, ...],
 ) -> None:
+    """
+    Print small contexts around actual network-related
+    expressions.
+
+    Generic job/location strings are deliberately ignored.
+    """
+
     lower = text.lower()
 
-    for marker in markers:
+    for marker in _NETWORK_MARKERS:
         start = 0
+        count = 0
 
-        for _ in range(5):
+        while count < 8:
             index = lower.find(
                 marker.lower(),
                 start,
@@ -69,306 +109,426 @@ def _contexts(
                 break
 
             context = text[
-                max(0, index - 500):
+                max(0, index - 700):
                 index + 1800
             ]
 
-            context = re.sub(
-                r"\s+",
-                " ",
-                html.unescape(context),
-            )
-
             print(
-                f"[FINAL-PROBE] {name}: "
+                f"[NETWORK-PROBE] {company}: "
+                f"{label} "
                 f"marker={marker!r} "
-                f"context={context[:2300]!r}"
+                f"context="
+                f"{_clean(context)[:2500]!r}"
             )
 
-            start = index + len(marker)
+            start = (
+                index
+                + len(marker)
+            )
+
+            count += 1
 
 
-def _print_links(
-    name: str,
+def _absolute_urls(
+    company: str,
+    label: str,
+    text: str,
+) -> list[str]:
+    urls: set[str] = set()
+
+    patterns = (
+        r'https?://[^"\'<>\s\\`]+',
+        r'["\']('
+        r'/[^"\']*'
+        r'(?:api|graphql|job|career|search|opening)'
+        r'[^"\']*'
+        r')["\']',
+    )
+
+    for pattern in patterns:
+        for match in re.findall(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        ):
+            if isinstance(
+                match,
+                tuple,
+            ):
+                match = match[0]
+
+            value = html.unescape(
+                match
+            ).strip()
+
+            value = value.rstrip(
+                ".,);]}"
+            )
+
+            if not value:
+                continue
+
+            urls.add(value)
+
+    result = sorted(urls)
+
+    print(
+        f"[NETWORK-PROBE] {company}: "
+        f"{label} candidate_endpoints="
+        f"{len(result)}"
+    )
+
+    for url in result[:60]:
+        print(
+            f"[NETWORK-PROBE] {company}: "
+            f"{label} ENDPOINT={url[:2000]}"
+        )
+
+    return result
+
+
+def _scripts(
     base_url: str,
     text: str,
-) -> None:
-    links = set()
+) -> list[str]:
+    result: list[str] = []
 
-    for href in re.findall(
-        r'href=["\']([^"\']+)["\']',
+    for src in re.findall(
+        r'<script[^>]+src=["\']([^"\']+)["\']',
         text,
         flags=re.IGNORECASE,
     ):
-        href = html.unescape(href)
+        src = html.unescape(
+            src
+        )
 
-        if href.startswith(
+        if src.startswith(
             (
-                "#",
-                "javascript:",
-                "mailto:",
-                "tel:",
                 "data:",
+                "javascript:",
             )
         ):
             continue
 
         url = urljoin(
             base_url,
-            href,
+            src,
         )
 
-        lower = url.lower()
-
-        if any(
-            value in lower
-            for value in (
-                "job",
-                "position",
-                "career",
-                "search",
-                "apply",
+        if url.startswith(
+            (
+                "http://",
+                "https://",
             )
         ):
-            links.add(url)
+            result.append(url)
 
-    print(
-        f"[FINAL-PROBE] {name}: "
-        f"interesting_links={len(links)}"
+    return list(
+        dict.fromkeys(result)
     )
 
-    for url in sorted(links)[:30]:
-        print(
-            f"[FINAL-PROBE] {name}: "
-            f"LINK={url}"
-        )
 
-
-# ---------------------------------------------------------
-# MICROSOFT
-# ---------------------------------------------------------
-
-def probe_microsoft() -> None:
-    name = "Microsoft"
-
-    urls = (
-        (
-            "software-engineer",
-            "https://apply.careers.microsoft.com/"
-            "search?query=Software%20Engineer",
-        ),
-        (
-            "java",
-            "https://apply.careers.microsoft.com/"
-            "search?query=Java",
-        ),
-        (
-            "india",
-            "https://apply.careers.microsoft.com/"
-            "search?query=India",
-        ),
-    )
-
-    for label, url in urls:
+def _probe_js(
+    company: str,
+    label: str,
+    url: str,
+) -> str | None:
+    try:
         response = _get(url)
 
-        _summary(
-            name,
-            label,
-            response,
+    except requests.RequestException as exc:
+        print(
+            f"[NETWORK-PROBE] {company}: "
+            f"{label} FAILED "
+            f"url={url} "
+            f"error={type(exc).__name__}: {exc}"
         )
-
-        if response.status_code != 200:
-            continue
-
-        _contexts(
-            name,
-            response.text,
-            (
-                "position",
-                "location",
-                "job",
-                "page",
-                "offset",
-                "next",
-                "total",
-                "/api/",
-            ),
-        )
-
-        _print_links(
-            name,
-            response.url,
-            response.text,
-        )
-
-
-# ---------------------------------------------------------
-# JUPITER / KEKA
-# ---------------------------------------------------------
-
-def probe_jupiter() -> None:
-    name = "Jupiter"
-
-    document_url = (
-        "https://jupiter.keka.com/"
-        "ats/documents/"
-        "b5279857-cf81-4dde-a215-fc48957ee2b5/"
-        "careerportal/"
-        "18096d20247d4ecfa4efcf04875cbda6.html"
-    )
-
-    response = _get(
-        document_url
-    )
+        return None
 
     _summary(
-        name,
-        "career-document",
+        company,
+        label,
         response,
     )
 
     if response.status_code != 200:
+        return None
+
+    _network_contexts(
+        company,
+        label,
+        response.text,
+    )
+
+    _absolute_urls(
+        company,
+        label,
+        response.text,
+    )
+
+    return response.text
+
+
+# =========================================================
+# JUPITER / KEKA
+# =========================================================
+
+def probe_jupiter() -> None:
+    """
+    We already know the exact Keka widget JS.
+
+    This probe's only purpose is to discover the HTTP
+    request(s) that populate #khembedjobs.
+    """
+
+    company = "Jupiter"
+
+    identifier = (
+        "b5279857-cf81-4dde-a215-fc48957ee2b5"
+    )
+
+    widget_url = (
+        "https://jupiter.keka.com/"
+        "careers/api/embedjobs/js/"
+        f"{identifier}"
+    )
+
+    print()
+    print(
+        "[NETWORK-PROBE] Jupiter: START"
+    )
+
+    text = _probe_js(
+        company,
+        "embedjobs-js",
+        widget_url,
+    )
+
+    if not text:
         return
 
-    _contexts(
-        name,
-        response.text,
-        (
-            "/api/",
-            "/ats/",
-            "job",
-            "opening",
-            "position",
-            "location",
-            "department",
-            "page",
-            "offset",
-            "skip",
-            "take",
-        ),
+    # Specifically print function-call expressions which
+    # are much more useful than generic API strings.
+    call_patterns = (
+        r'fetch\s*\([^)]{1,500}\)',
+        r'axios\.[a-zA-Z]+\s*\([^)]{1,500}\)',
+        r'\.get\s*\([^)]{1,500}\)',
+        r'\.post\s*\([^)]{1,500}\)',
+        r'open\s*\([^)]{1,500}\)',
     )
 
-    _print_links(
-        name,
-        response.url,
-        response.text,
+    calls: set[str] = set()
+
+    for pattern in call_patterns:
+        calls.update(
+            re.findall(
+                pattern,
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    print(
+        "[NETWORK-PROBE] Jupiter: "
+        f"network_calls={len(calls)}"
     )
 
-    scripts = re.findall(
-        r'<script[^>]+src=["\']([^"\']+)["\']',
-        response.text,
+    for call in sorted(calls)[:50]:
+        print(
+            "[NETWORK-PROBE] Jupiter: "
+            f"CALL={_clean(call)[:2500]}"
+        )
+
+
+# =========================================================
+# PHONEPE / GATSBY
+# =========================================================
+
+def _phonepe_chunk_url(
+    runtime_text: str,
+) -> str | None:
+    """
+    Resolve Gatsby chunk 4339 using the current runtime.
+
+    From the previous run we know the current hash is:
+        1f7467adb370882a0aba
+
+    We still derive it dynamically so the probe survives a
+    PhonePe deployment.
+    """
+
+    hash_match = re.search(
+        r'4339\s*:\s*'
+        r'["\']([a-f0-9]+)["\']',
+        runtime_text,
         flags=re.IGNORECASE,
     )
 
-    print(
-        f"[FINAL-PROBE] Jupiter: "
-        f"scripts={len(scripts)}"
+    if not hash_match:
+        return None
+
+    chunk_hash = (
+        hash_match.group(1)
     )
 
-    for src in scripts[:10]:
-        url = urljoin(
-            response.url,
-            html.unescape(src),
+    print(
+        "[NETWORK-PROBE] PhonePe: "
+        f"chunk_4339_hash={chunk_hash}"
+    )
+
+    # Gatsby/Webpack commonly emits:
+    #
+    # component---src-pages-...-js-<hash>.js
+    #
+    # The runtime also tells us the logical chunk name.
+    chunk_name_match = re.search(
+        r'4339\s*:\s*'
+        r'["\']'
+        r'(component---src-pages-careers-'
+        r'job-openings-index-js)'
+        r'["\']',
+        runtime_text,
+        flags=re.IGNORECASE,
+    )
+
+    if not chunk_name_match:
+        chunk_name = (
+            "component---src-pages-careers-"
+            "job-openings-index-js"
+        )
+    else:
+        chunk_name = (
+            chunk_name_match.group(1)
         )
 
-        try:
-            script_response = _get(
-                url
-            )
-        except requests.RequestException as exc:
-            print(
-                f"[FINAL-PROBE] Jupiter: "
-                f"SCRIPT_FAILED={url} "
-                f"{type(exc).__name__}: {exc}"
-            )
-            continue
+    return (
+        "https://www.phonepe.com/"
+        "webstatic/14886/"
+        f"{chunk_name}-{chunk_hash}.js"
+    )
 
-        _summary(
-            name,
-            "script",
-            script_response,
-        )
-
-        if script_response.status_code == 200:
-            _contexts(
-                name,
-                script_response.text,
-                (
-                    "/api/",
-                    "/ats/",
-                    "job",
-                    "opening",
-                    "position",
-                ),
-            )
-
-
-# ---------------------------------------------------------
-# PHONEPE
-# ---------------------------------------------------------
 
 def probe_phonepe() -> None:
-    name = "PhonePe"
+    company = "PhonePe"
+
+    print()
+    print(
+        "[NETWORK-PROBE] PhonePe: START"
+    )
 
     runtime_url = (
         "https://www.phonepe.com/"
         "webstatic/14886/"
-        "webpack-runtime-12264017310890117f23.js"
+        "webpack-runtime-"
+        "12264017310890117f23.js"
     )
 
-    response = _get(
-        runtime_url
-    )
+    try:
+        runtime = _get(
+            runtime_url
+        )
 
-    _summary(
-        name,
-        "webpack-runtime",
-        response,
-    )
-
-    if response.status_code != 200:
+    except requests.RequestException as exc:
+        print(
+            "[NETWORK-PROBE] PhonePe: "
+            f"runtime FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
         return
 
-    _contexts(
-        name,
-        response.text,
-        (
-            "4339",
-            "job-openings",
-        ),
+    _summary(
+        company,
+        "webpack-runtime",
+        runtime,
     )
 
-    # Gatsby's runtime contains the mapping required to
-    # construct the real chunk filename. Print matching
-    # JS-looking strings around chunk 4339.
-    matches = re.findall(
-        r'[^,"\']*4339[^,"\']*',
-        response.text,
-        flags=re.IGNORECASE,
+    if runtime.status_code != 200:
+        return
+
+    chunk_url = _phonepe_chunk_url(
+        runtime.text
     )
 
-    for value in matches[:20]:
+    if chunk_url:
         print(
-            f"[FINAL-PROBE] PhonePe: "
-            f"CHUNK_CONTEXT={value[:1000]!r}"
+            "[NETWORK-PROBE] PhonePe: "
+            f"CHUNK_URL={chunk_url}"
+        )
+
+        chunk_text = _probe_js(
+            company,
+            "job-openings-chunk",
+            chunk_url,
+        )
+
+        if chunk_text:
+            return
+
+    # If Gatsby's generated filename differs from our
+    # expected construction, print the runtime function
+    # responsible for constructing JS filenames.
+    lower = runtime.text.lower()
+
+    for marker in (
+        ".u=",
+        ".u =",
+        "scriptfilename",
+        "4339",
+    ):
+        index = lower.find(
+            marker.lower()
+        )
+
+        if index < 0:
+            continue
+
+        context = runtime.text[
+            max(
+                0,
+                index - 1500,
+            ):
+            index + 4000
+        ]
+
+        print(
+            "[NETWORK-PROBE] PhonePe: "
+            f"RUNTIME_CONTEXT marker={marker!r} "
+            f"text={_clean(context)[:5500]!r}"
         )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # ATLASSIAN
-# ---------------------------------------------------------
+# =========================================================
 
 def probe_atlassian() -> None:
-    name = "Atlassian"
+    company = "Atlassian"
 
-    response = _get(
+    print()
+    print(
+        "[NETWORK-PROBE] Atlassian: START"
+    )
+
+    page_url = (
         "https://www.atlassian.com/"
         "company/careers/all-jobs"
     )
 
+    try:
+        response = _get(
+            page_url
+        )
+
+    except requests.RequestException as exc:
+        print(
+            "[NETWORK-PROBE] Atlassian: "
+            f"page FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return
+
     _summary(
-        name,
+        company,
         "all-jobs",
         response,
     )
@@ -376,66 +536,267 @@ def probe_atlassian() -> None:
     if response.status_code != 200:
         return
 
-    scripts = re.findall(
-        r'<script[^>]+src=["\']([^"\']+)["\']',
+    scripts = _scripts(
+        response.url,
         response.text,
-        flags=re.IGNORECASE,
     )
 
-    for src in scripts:
-        url = urljoin(
-            response.url,
-            html.unescape(src),
+    print(
+        "[NETWORK-PROBE] Atlassian: "
+        f"scripts={len(scripts)}"
+    )
+
+    # Prioritize the known main bundle and anything whose
+    # filename explicitly references jobs/careers.
+    scripts.sort(
+        key=lambda url: (
+            not any(
+                value in url.lower()
+                for value in (
+                    "career",
+                    "job",
+                    "main.js",
+                )
+            ),
+            url,
         )
+    )
 
-        lower = url.lower()
-
-        if not any(
-            value in lower
-            for value in (
-                "career",
-                "job",
-                "lever",
-                "main",
-            )
-        ):
-            continue
-
+    for index, url in enumerate(
+        scripts[:6]
+    ):
         try:
-            script_response = _get(
+            script = _get(
                 url
             )
+
         except requests.RequestException:
             continue
 
         _summary(
-            name,
-            "career-script",
-            script_response,
+            company,
+            f"script-{index}",
+            script,
         )
 
-        if script_response.status_code != 200:
+        if script.status_code != 200:
             continue
 
-        _contexts(
-            name,
-            script_response.text,
-            (
-                "lever",
-                "job",
-                "career",
-                "/api/",
-                "position",
-                "location",
+        text = script.text
+
+        # Only inspect bundles that actually know about
+        # career components.
+        if not any(
+            marker.lower()
+            in text.lower()
+            for marker in (
+                "JobPostingDetails",
+                "all-jobs",
+                "jobposting",
+                "careers",
+            )
+        ):
+            continue
+
+        for marker in (
+            "JobPostingDetails",
+            "jobposting",
+            "all-jobs",
+        ):
+            lower = text.lower()
+            start = 0
+
+            for _ in range(8):
+                pos = lower.find(
+                    marker.lower(),
+                    start,
+                )
+
+                if pos < 0:
+                    break
+
+                context = text[
+                    max(0, pos - 2500):
+                    pos + 6000
+                ]
+
+                print(
+                    "[NETWORK-PROBE] Atlassian: "
+                    f"COMPONENT marker={marker!r} "
+                    f"context="
+                    f"{_clean(context)[:8500]!r}"
+                )
+
+                start = (
+                    pos
+                    + len(marker)
+                )
+
+        _network_contexts(
+            company,
+            f"career-script-{index}",
+            text,
+        )
+
+        _absolute_urls(
+            company,
+            f"career-script-{index}",
+            text,
+        )
+
+
+# =========================================================
+# MICROSOFT / EIGHTFOLD
+# =========================================================
+
+def probe_microsoft() -> None:
+    """
+    Do NOT probe /search again.
+
+    The last run proved that /search redirects to Azure AD
+    SAML. Instead inspect the anonymous /careers shell and
+    its own JS for the backend/API it uses.
+    """
+
+    company = "Microsoft"
+
+    print()
+    print(
+        "[NETWORK-PROBE] Microsoft: START"
+    )
+
+    page_url = (
+        "https://apply.careers.microsoft.com/"
+        "careers"
+    )
+
+    try:
+        # First inspect redirect behavior explicitly.
+        first = _get(
+            page_url,
+            allow_redirects=False,
+        )
+
+    except requests.RequestException as exc:
+        print(
+            "[NETWORK-PROBE] Microsoft: "
+            f"careers FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return
+
+    _summary(
+        company,
+        "careers-no-redirect",
+        first,
+    )
+
+    if 300 <= first.status_code < 400:
+        print(
+            "[NETWORK-PROBE] Microsoft: "
+            f"REDIRECT="
+            f"{first.headers.get('Location')}"
+        )
+
+    try:
+        response = _get(
+            page_url
+        )
+
+    except requests.RequestException as exc:
+        print(
+            "[NETWORK-PROBE] Microsoft: "
+            f"careers-follow FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return
+
+    _summary(
+        company,
+        "careers",
+        response,
+    )
+
+    # If /careers itself has now become authenticated,
+    # stop. There is no point inspecting Azure AD JS.
+    if (
+        "login.microsoftonline.com"
+        in response.url.lower()
+    ):
+        print(
+            "[NETWORK-PROBE] Microsoft: "
+            "CAREERS_AUTHENTICATED=true"
+        )
+        return
+
+    if response.status_code != 200:
+        return
+
+    _network_contexts(
+        company,
+        "careers-html",
+        response.text,
+    )
+
+    _absolute_urls(
+        company,
+        "careers-html",
+        response.text,
+    )
+
+    scripts = _scripts(
+        response.url,
+        response.text,
+    )
+
+    print(
+        "[NETWORK-PROBE] Microsoft: "
+        f"scripts={len(scripts)}"
+    )
+
+    # Eightfold apps generally keep API/config logic in a
+    # relatively small number of application bundles.
+    scripts.sort(
+        key=lambda url: (
+            not any(
+                value in url.lower()
+                for value in (
+                    "career",
+                    "main",
+                    "app",
+                    "bundle",
+                    "search",
+                )
             ),
+            url,
+        )
+    )
+
+    for index, url in enumerate(
+        scripts[:10]
+    ):
+        _probe_js(
+            company,
+            f"script-{index}",
+            url,
         )
 
 
 def main() -> None:
-    probe_microsoft()
+    print(
+        "[NETWORK-PROBE] "
+        "Starting final network-contract discovery"
+    )
+
     probe_jupiter()
     probe_phonepe()
     probe_atlassian()
+    probe_microsoft()
+
+    print()
+    print(
+        "[NETWORK-PROBE] Finished"
+    )
 
 
 if __name__ == "__main__":
