@@ -83,9 +83,22 @@ class KekaAdapter(ProviderAdapter):
             )
 
             if data:
+                first = data[0]
+
+                compact = {
+                    key: value
+                    for key, value in first.items()
+                    if key != "description"
+                }
+
                 print(
                     f"  [KEKA-DEBUG] {company.name}: "
-                    f"first_item={data[0]!r}"
+                    f"first_keys={list(first.keys())}"
+                )
+
+                print(
+                    f"  [KEKA-DEBUG] {company.name}: "
+                    f"first_compact={compact!r}"
                 )
 
         elif isinstance(data, dict):

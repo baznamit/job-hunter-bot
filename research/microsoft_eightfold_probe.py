@@ -14,6 +14,21 @@ HEADERS = {
 
 TIMEOUT = 20
 
+MARKERS = (
+    "search_positions",
+    "searchPositions",
+    "position/search",
+    "positions/search",
+    "/api/positions",
+    "/api/search",
+    "pcsx",
+    "basePositionFq",
+    "position_fq",
+    "positionFq",
+    "fetch(",
+    "axios",
+)
+
 def fetch(path: str) -> requests.Response:
     url = f"{BASE_URL}{path}"
 
@@ -81,16 +96,7 @@ def main() -> None:
 
     html = response.text
 
-    for marker in (
-        "/search",
-        "positions",
-        "position",
-        "jobs",
-        "job",
-        "query",
-        "domain=microsoft.com",
-        "/api/",
-    ):
+    for marker in MARKERS:
         show_matches(
             html,
             marker,
@@ -116,6 +122,12 @@ def main() -> None:
         if not script.startswith("http"):
             continue
 
+        if not (
+            "apply.careers.microsoft.com/gen/js/ef-" in script
+            or "pcsx" in script.lower()
+        ):
+            continue
+
         try:
             script_response = requests.get(
                 script,
@@ -128,12 +140,8 @@ def main() -> None:
         text = script_response.text
 
         interesting = any(
-            marker in text.lower()
-            for marker in (
-                "/search",
-                "position",
-                "/api/",
-            )
+            marker.lower() in text.lower()
+            for marker in MARKERS
         )
 
         if not interesting:
@@ -146,12 +154,7 @@ def main() -> None:
             f"length={len(text)}"
         )
 
-        for marker in (
-            "/search",
-            "positions",
-            "position",
-            "/api/",
-        ):
+        for marker in MARKERS:
             show_matches(
                 text,
                 marker,
