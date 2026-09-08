@@ -29,7 +29,21 @@ from src.description_diagnostics import (
 )
 from src.filters import JobFilter
 from src.notifier import TelegramNotifier
-from src.providers import AshbyAdapter, GreenhouseAdapter, LeverAdapter, WorkdayAdapter, SmartRecruitersAdapter, OracleAdapter, HigherAdapter, SuccessFactorsAdapter, TalentBrewAdapter, AlgoliaAdapter, BankOfAmericaAdapter
+from src.providers import (
+    AlgoliaAdapter,
+    AshbyAdapter,
+    BankOfAmericaAdapter,
+    GreenhouseAdapter,
+    HigherAdapter,
+    KekaAdapter,
+    LeverAdapter,
+    OracleAdapter,
+    PhonePeAdapter,
+    SmartRecruitersAdapter,
+    SuccessFactorsAdapter,
+    TalentBrewAdapter,
+    WorkdayAdapter,
+)
 from src.providers.exceptions import (
     ProviderNotFoundError,
     ProviderTemporaryError,
@@ -59,6 +73,8 @@ _ADAPTERS = {
     ProviderType.TALENTBREW: TalentBrewAdapter(),
     ProviderType.ALGOLIA: AlgoliaAdapter(),
     ProviderType.BANKOFAMERICA: BankOfAmericaAdapter(),
+    ProviderType.PHONEPE: PhonePeAdapter(),
+    ProviderType.KEKA: KekaAdapter(),
 }
 
 

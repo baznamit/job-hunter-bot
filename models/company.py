@@ -27,6 +27,8 @@ class ProviderType(str, Enum):
     TALENTBREW = "talentbrew"
     ALGOLIA = "algolia"
     BANKOFAMERICA = "bankofamerica"
+    PHONEPE = "phonepe"
+    KEKA = "keka"
     CUSTOM = "custom"
 
 

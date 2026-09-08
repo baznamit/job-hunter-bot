@@ -43,12 +43,12 @@
       "category": "Payments",
       "priority": 1,
       "enabled": true,
-      "career_page": "https://www.phonepe.com/en/careers.html",
+      "career_page": "https://www.phonepe.com/careers/job-openings/",
       "provider": {
-        "type": "greenhouse",
-        "status": "partial",
+        "type": "phonepe",
+        "status": "implemented",
         "config": {
-          "board": "phonepe"
+          "api_url": "https://www.phonepe.com/apollo/job-postings/latest.json"
         }
       },
       "locations": [],
@@ -619,10 +619,12 @@
       "enabled": true,
       "career_page": "https://jupiter.money/careers/",
       "provider": {
-        "type": "lever",
-        "status": "partial",
+        "type": "keka",
+        "status": "implemented",
         "config": {
-          "board": "jupiter"
+          "base_url": "https://jupiter.keka.com/careers",
+          "portal_name": "default",
+          "identifier": "b5279857-cf81-4dde-a215-fc48957ee2b5"
         }
       },
       "locations": [],
