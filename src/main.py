@@ -206,15 +206,37 @@ def _fetch_jobs_with_recovery(
     """
     Fetch jobs and recover stale ATS mappings.
 
-    Repeated failed rediscovery attempts are subject
-    to exponential cooldown.
+    A company already recorded in the recovery store is known to have
+    a stale provider mapping. While its recovery cooldown is active,
+    skip the known-dead provider entirely.
+
+    Once the cooldown expires, retry the configured provider first.
+    If it is still stale, attempt rediscovery.
     """
+
+    should_attempt, retry_at = (
+        recovery_store.should_attempt(
+            company.id
+        )
+    )
+
+    if not should_attempt:
+        print(
+            f"  [STALE-COOLDOWN] "
+            f"{company.name}: skipping known-stale "
+            f"{company.provider.type.value} mapping — "
+            f"retry after {retry_at.isoformat()}",
+            file=sys.stderr,
+        )
+
+        return None
 
     try:
         jobs = adapter.fetch_jobs(
             company
         )
 
+        # The configured provider works again.
         recovery_store.clear(
             company.id
         )
@@ -227,22 +249,6 @@ def _fetch_jobs_with_recovery(
             f"ATS mapping appears invalid — {exc}",
             file=sys.stderr,
         )
-
-        should_attempt, retry_at = (
-            recovery_store.should_attempt(
-                company.id
-            )
-        )
-
-        if not should_attempt:
-            print(
-                f"  [RECOVERY] {company.name}: "
-                f"skipped — retry after "
-                f"{retry_at.isoformat()}",
-                file=sys.stderr,
-            )
-
-            return None
 
         jobs = _recover_and_retry_fetch(
             company
