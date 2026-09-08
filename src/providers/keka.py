@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import requests
 
 from models import Job
@@ -70,48 +72,6 @@ class KekaAdapter(ProviderAdapter):
                 "returned non-JSON response"
             ) from exc
 
-        # TEMPORARY: inspect the real Keka response shape.
-        print(
-            f"  [KEKA-DEBUG] {company.name}: "
-            f"type={type(data).__name__}"
-        )
-
-        if isinstance(data, list):
-            print(
-                f"  [KEKA-DEBUG] {company.name}: "
-                f"items={len(data)}"
-            )
-
-            if data:
-                first = data[0]
-
-                compact = {
-                    key: value
-                    for key, value in first.items()
-                    if key != "description"
-                }
-
-                print(
-                    f"  [KEKA-DEBUG] {company.name}: "
-                    f"first_keys={list(first.keys())}"
-                )
-
-                print(
-                    f"  [KEKA-DEBUG] {company.name}: "
-                    f"first_compact={compact!r}"
-                )
-
-        elif isinstance(data, dict):
-            print(
-                f"  [KEKA-DEBUG] {company.name}: "
-                f"keys={list(data.keys())}"
-            )
-
-            print(
-                f"  [KEKA-DEBUG] {company.name}: "
-                f"sample={data!r}"
-            )
-
         if not isinstance(
             data,
             (dict, list),
@@ -151,13 +111,19 @@ class KekaAdapter(ProviderAdapter):
             or []
         )
 
-        if not isinstance(locations, list):
+        if not isinstance(
+            locations,
+            list,
+        ):
             return "Unknown"
 
         formatted: list[str] = []
 
         for location in locations:
-            if not isinstance(location, dict):
+            if not isinstance(
+                location,
+                dict,
+            ):
                 continue
 
             parts = [
@@ -198,10 +164,47 @@ class KekaAdapter(ProviderAdapter):
         ):
             value = item.get(key)
 
-            if value:
+            if value is not None:
                 return str(value)
 
         return None
+
+    @staticmethod
+    def _employment_type(
+        item: dict,
+    ) -> str | None:
+        value = item.get(
+            "jobType"
+        )
+
+        if value is None:
+            return None
+
+        # Keka currently returns a numeric enum.
+        # Keep the normalized model type-safe even if
+        # Keka changes/adds enum values.
+        return str(value)
+
+    @staticmethod
+    def _posted_at(
+        item: dict,
+    ) -> datetime | None:
+        value = item.get(
+            "publishedOn"
+        )
+
+        if not value:
+            return None
+
+        try:
+            return datetime.fromisoformat(
+                str(value).replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+        except ValueError:
+            return None
 
     def _job_url(
         self,
@@ -221,15 +224,9 @@ class KekaAdapter(ProviderAdapter):
 
         config = company.provider.config
 
-        portal_name = (
-            config.portal_name
-            or "default"
-        )
-
         return (
             f"{config.base_url.rstrip('/')}/"
-            f"{portal_name}/jobdetails/"
-            f"{job_id}"
+            f"jobdetails/{job_id}"
         )
 
     def parse(
@@ -240,45 +237,57 @@ class KekaAdapter(ProviderAdapter):
         jobs: list[Job] = []
 
         for item in self._items(raw):
-            if not isinstance(item, dict):
+            if not isinstance(
+                item,
+                dict,
+            ):
                 continue
 
-            job_id = self._job_id(item)
-            title = item.get("title")
+            job_id = self._job_id(
+                item
+            )
+
+            title = item.get(
+                "title"
+            )
 
             if not job_id or not title:
                 continue
 
-            try:
-                jobs.append(
-                    Job(
-                        id=job_id,
-                        title=str(title).strip(),
-                        company=company.name,
-                        location=self._location(item),
-                        url=self._job_url(
-                            item,
-                            company,
-                            job_id,
-                        ),
-                        department=(
-                            item.get("department")
-                            or item.get(
-                                "departmentName"
-                            )
-                            or None
-                        ),
-                        employment_type=(
-                            item.get("jobType")
-                            or None
-                        ),
-                    )
+            jobs.append(
+                Job(
+                    id=job_id,
+                    title=str(
+                        title
+                    ).strip(),
+                    company=company.name,
+                    location=self._location(
+                        item
+                    ),
+                    url=self._job_url(
+                        item,
+                        company,
+                        job_id,
+                    ),
+                    posted_at=self._posted_at(
+                        item
+                    ),
+                    department=(
+                        item.get(
+                            "departmentName"
+                        )
+                        or item.get(
+                            "department"
+                        )
+                        or None
+                    ),
+                    employment_type=(
+                        self._employment_type(
+                            item
+                        )
+                    ),
                 )
-            except (
-                TypeError,
-                ValueError,
-            ):
-                continue
+            )
 
         return jobs
 
@@ -286,7 +295,9 @@ class KekaAdapter(ProviderAdapter):
         self,
         company: Company,
     ) -> bool:
-        raw = self._fetch_raw(company)
+        raw = self._fetch_raw(
+            company
+        )
 
         return isinstance(
             raw,

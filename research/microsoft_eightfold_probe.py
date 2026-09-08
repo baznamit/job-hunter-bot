@@ -1,164 +1,168 @@
-import re
+import json
 
 import requests
 
-BASE_URL = "https://apply.careers.microsoft.com"
+_BASE_URL = (
+    "https://apply.careers.microsoft.com"
+)
 
-HEADERS = {
-    "Accept": "text/html,application/json",
+_ENDPOINT = (
+    f"{_BASE_URL}/api/pcsx/search"
+)
+
+_TIMEOUT = 30
+
+_HEADERS = {
+    "Accept": "application/json",
     "User-Agent": (
         "Mozilla/5.0 "
-        "(compatible; JobHunterBot/1.0)"
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/127.0.0.0 Safari/537.36"
     ),
 }
 
-TIMEOUT = 20
-
-MARKERS = (
-    "search_positions",
-    "searchPositions",
-    "position/search",
-    "positions/search",
-    "/api/positions",
-    "/api/search",
-    "pcsx",
-    "basePositionFq",
-    "position_fq",
-    "positionFq",
-    "fetch(",
-    "axios",
-)
-
-def fetch(path: str) -> requests.Response:
-    url = f"{BASE_URL}{path}"
-
+def _probe(
+    label: str,
+    params: dict,
+) -> None:
     response = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=TIMEOUT,
+        _ENDPOINT,
+        params=params,
+        headers=_HEADERS,
+        timeout=_TIMEOUT,
+        allow_redirects=False,
     )
 
     print(
-        f"[MS-EIGHTFOLD] GET {path}: "
+        f"[MS-API] {label}: "
         f"status={response.status_code} "
-        f"final={response.url} "
+        f"url={response.url} "
+        f"content_type="
+        f"{response.headers.get('Content-Type')} "
+        f"location="
+        f"{response.headers.get('Location')} "
         f"length={len(response.content)}"
     )
 
-    return response
+    print(
+        f"[MS-API] {label}: "
+        f"body={response.text[:3000]!r}"
+    )
 
-def show_matches(
-    text: str,
-    marker: str,
-) -> None:
-    lower = text.lower()
-    needle = marker.lower()
+    if response.status_code != 200:
+        return
 
-    start = 0
-    count = 0
+    try:
+        payload = response.json()
+    except requests.exceptions.JSONDecodeError:
+        return
 
-    while count < 10:
-        index = lower.find(
-            needle,
-            start,
-        )
+    print(
+        f"[MS-API] {label}: "
+        f"top_type="
+        f"{type(payload).__name__}"
+    )
 
-        if index < 0:
-            break
+    if not isinstance(
+        payload,
+        dict,
+    ):
+        return
 
-        left = max(
-            0,
-            index - 300,
-        )
+    print(
+        f"[MS-API] {label}: "
+        f"top_keys="
+        f"{list(payload.keys())}"
+    )
 
-        right = min(
-            len(text),
-            index + 700,
-        )
+    data = payload.get(
+        "data"
+    )
 
-        context = " ".join(
-            text[left:right].split()
-        )
+    if not isinstance(
+        data,
+        dict,
+    ):
+        return
 
-        print(
-            f"[MS-EIGHTFOLD] "
-            f"marker={marker!r} "
-            f"context={context!r}"
-        )
-
-        start = index + len(marker)
-        count += 1
-
-def main() -> None:
-    response = fetch("/careers")
-
-    response.raise_for_status()
-
-    html = response.text
-
-    for marker in MARKERS:
-        show_matches(
-            html,
-            marker,
-        )
-
-    scripts = re.findall(
-        r'<script[^>]+src=["\']([^"\']+)["\']',
-        html,
-        flags=re.IGNORECASE,
+    print(
+        f"[MS-API] {label}: "
+        f"data_keys="
+        f"{list(data.keys())}"
     )
 
     print(
-        f"[MS-EIGHTFOLD] scripts={len(scripts)}"
+        f"[MS-API] {label}: "
+        f"count={data.get('count')}"
     )
 
-    for script in scripts:
-        if script.startswith("//"):
-            script = "https:" + script
+    positions = (
+        data.get("positions")
+        or []
+    )
 
-        elif script.startswith("/"):
-            script = BASE_URL + script
+    print(
+        f"[MS-API] {label}: "
+        f"positions={len(positions)}"
+    )
 
-        if not script.startswith("http"):
-            continue
-
-        if not (
-            "apply.careers.microsoft.com/gen/js/ef-" in script
-            or "pcsx" in script.lower()
-        ):
-            continue
-
-        try:
-            script_response = requests.get(
-                script,
-                headers=HEADERS,
-                timeout=TIMEOUT,
-            )
-        except requests.RequestException:
-            continue
-
-        text = script_response.text
-
-        interesting = any(
-            marker.lower() in text.lower()
-            for marker in MARKERS
-        )
-
-        if not interesting:
-            continue
+    if positions:
+        first = positions[0]
 
         print(
-            f"[MS-EIGHTFOLD] SCRIPT "
-            f"url={script_response.url} "
-            f"status={script_response.status_code} "
-            f"length={len(text)}"
+            f"[MS-API] {label}: "
+            f"first_keys="
+            f"{list(first.keys())}"
         )
 
-        for marker in MARKERS:
-            show_matches(
-                text,
-                marker,
+        compact = {
+            key: value
+            for key, value
+            in first.items()
+            if key not in (
+                "description",
+                "job_description",
             )
+        }
+
+        print(
+            f"[MS-API] {label}: "
+            f"first={json.dumps(compact)[:5000]}"
+        )
+
+def main() -> None:
+    common = {
+        "domain": "microsoft.com",
+        "location": "",
+        "start": 0,
+    }
+
+    _probe(
+        "all",
+        {
+            **common,
+            "query": "",
+        },
+    )
+
+    _probe(
+        "software-engineer",
+        {
+            **common,
+            "query":
+                "Software Engineer",
+        },
+    )
+
+    _probe(
+        "java",
+        {
+            **common,
+            "query": "Java",
+        },
+    )
 
 if __name__ == "__main__":
     main()
