@@ -368,8 +368,13 @@ def validate_registry(registry: CompanyRegistry) -> None:
             if not config.cluster:
                 missing.append("cluster")
 
-            if not config.board:
-                missing.append("board")
+            if (
+                not config.board
+                and not config.boards
+            ):
+                missing.append(
+                    "board or boards"
+                )
 
             if missing:
                 raise ValueError(

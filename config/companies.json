@@ -710,6 +710,27 @@
       "notes": "Workday external board. Live CXS API, pagination and public job URLs verified from GitHub Actions. Mumbai, Thane and Navi Mumbai coverage."
     },
     {
+      "id": "accelya",
+      "name": "Accelya",
+      "category": "SaaS",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://accelya.wd103.myworkdayjobs.com/Careers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "accelya",
+          "cluster": "wd103",
+          "board": "Careers"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday Careers board verified. Mumbai and Pune software engineering roles confirmed."
+    },
+    {
       "id": "morningstar",
       "name": "Morningstar",
       "category": "FinTech",
@@ -721,14 +742,17 @@
         "status": "verified",
         "config": {
           "tenant": "morningstar",
-          "board": "Americas",
-          "cluster": "wd5"
+          "cluster": "wd5",
+          "boards": [
+            "Americas",
+            "morningstar"
+          ]
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Workday Americas external board. Live CXS API, pagination and public job URLs verified from GitHub Actions. Mumbai software roles confirmed."
+      "notes": "Workday multi-board external configuration. Live CXS API, pagination and public job URLs verified from GitHub Actions. Mumbai software roles confirmed."
     },
     {
       "id": "generalmills",

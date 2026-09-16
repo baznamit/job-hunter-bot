@@ -52,6 +52,9 @@ class ProviderConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     board: str | None = None
+    boards: list[str] = Field(
+        default_factory=list
+    )
     tenant: str | None = None
     organization: str | None = None
     cluster: str | None = None

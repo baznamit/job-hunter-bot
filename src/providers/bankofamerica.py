@@ -299,7 +299,14 @@ class BankOfAmericaAdapter(ProviderAdapter):
             )
 
             if location:
-                return location
+                location = re.split(
+                    r"\s*-->\s*|\s+What we do\b|\s+Advertising Practices\b",
+                    location,
+                    maxsplit=1,
+                )[0].strip(" :-|")
+
+                if location:
+                    return location
 
         # Current cards expose the location after
         # an accessibility-only "Location" span.
@@ -321,7 +328,14 @@ class BankOfAmericaAdapter(ProviderAdapter):
             )
 
             if location:
-                return location
+                location = re.split(
+                    r"\s*-->\s*|\s+What we do\b|\s+Advertising Practices\b",
+                    location,
+                    maxsplit=1,
+                )[0].strip(" :-|")
+
+                if location:
+                    return location
 
         return "Unknown"
 

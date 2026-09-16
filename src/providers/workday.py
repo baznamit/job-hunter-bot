@@ -63,12 +63,95 @@ class WorkdayAdapter(ProviderAdapter):
     ) -> dict:
         config = company.provider.config
 
+        boards = list(
+            config.boards
+        )
+
+        if not boards and config.board:
+            boards = [
+                config.board
+            ]
+
+        if not boards:
+            raise ValueError(
+                f"{company.name}: Workday requires "
+                "config.board or config.boards"
+            )
+
+        combined: list[dict] = []
+
+        for board in boards:
+            raw = self._fetch_board(
+                company,
+                board,
+            )
+
+            for posting in raw.get(
+                "jobPostings",
+                [],
+            ):
+                posting = dict(
+                    posting
+                )
+
+                posting[
+                    "_workday_board"
+                ] = board
+
+                combined.append(
+                    posting
+                )
+
+        deduplicated: list[dict] = []
+        seen: set[str] = set()
+
+        for posting in combined:
+            key = str(
+                posting.get(
+                    "externalPath"
+                )
+                or posting.get(
+                    "title"
+                )
+                or ""
+            )
+
+            if key and key in seen:
+                continue
+
+            if key:
+                seen.add(
+                    key
+                )
+
+            deduplicated.append(
+                posting
+            )
+
+        return {
+            "jobPostings":
+                deduplicated
+        }
+
+    def _fetch_board(
+        self,
+        company: Company,
+        board: str,
+    ) -> dict:
+        config = company.provider.config
+
         tenant = config.tenant
-        board = config.board
         cluster = config.cluster
 
-        base = f"https://{tenant}.{cluster}.myworkdayjobs.com"
-        url = f"{base}/wday/cxs/{tenant}/{board}/jobs"
+        base = (
+            f"https://{tenant}."
+            f"{cluster}.myworkdayjobs.com"
+        )
+
+        url = (
+            f"{base}/wday/cxs/"
+            f"{tenant}/{board}/jobs"
+        )
 
         headers = {
             "Content-Type": "application/json",
@@ -280,12 +363,25 @@ class WorkdayAdapter(ProviderAdapter):
 
         jobs = []
 
-        for item in raw.get("jobPostings", []):
+        for item in raw.get(
+            "jobPostings",
+            [],
+        ):
+            board = item.get(
+                "_workday_board"
+            )
+
+            if not board:
+                board = config.board
+
+            if not board:
+                continue
+
             job = self._parse_item(
                 item=item,
                 company=company,
                 base_url=base,
-                board=config.board,
+                board=board,
             )
 
             if job is not None:
@@ -338,47 +434,60 @@ class WorkdayAdapter(ProviderAdapter):
 
         config = company.provider.config
 
-        if not config.tenant or not config.cluster or not config.board:
+        if (
+            not config.tenant
+            or not config.cluster
+        ):
             return False
 
-        base = (
-            f"https://{config.tenant}."
-            f"{config.cluster}.myworkdayjobs.com"
-        )
-
-        url = (
-            f"{base}/wday/cxs/"
-            f"{config.tenant}/{config.board}/jobs"
-        )
-
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Origin": base,
-            "Referer": f"{base}/en-US/{config.board}",
-        }
-
-        response = requests.post(
-            url,
-            json={
-                "appliedFacets": {},
-                "limit": 1,
-                "offset": 0,
-                "searchText": "",
-            },
-            headers=headers,
-            timeout=_TIMEOUT,
-        )
-
-        self._check_response(response, company)
-
-        data = response.json()
-
-        # A valid Workday jobs endpoint normally returns these fields.
-        if not isinstance(data, dict):
+        if (
+            not config.board
+            and not config.boards
+        ):
             return False
 
-        if "jobPostings" not in data and "total" not in data:
-            return False
+        boards = list(config.boards)
 
-        return True
+        if not boards and config.board:
+            boards = [config.board]
+
+        for board in boards:
+            base = (
+                f"https://{config.tenant}."
+                f"{config.cluster}.myworkdayjobs.com"
+            )
+
+            url = (
+                f"{base}/wday/cxs/"
+                f"{config.tenant}/{board}/jobs"
+            )
+
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Origin": base,
+                "Referer": f"{base}/en-US/{board}",
+            }
+
+            response = requests.post(
+                url,
+                json={
+                    "appliedFacets": {},
+                    "limit": 1,
+                    "offset": 0,
+                    "searchText": "",
+                },
+                headers=headers,
+                timeout=_TIMEOUT,
+            )
+
+            self._check_response(response, company)
+
+            data = response.json()
+
+            if isinstance(data, dict) and (
+                "jobPostings" in data or "total" in data
+            ):
+                return True
+
+        return False
