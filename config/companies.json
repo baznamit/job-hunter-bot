@@ -1100,20 +1100,39 @@
         "type": "bankofamerica",
         "status": "verified",
         "config": {
-          "base_url": "https://careers.bankofamerica.com",
-          "search_terms": [
-            "software developer",
-            "software engineer",
-            "java",
-            "backend",
-            "spring boot"
+          "base_url": "https://careers.bankofamerica.com"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "First-party JSON jobs search API verified. Crawls the complete India inventory using jobsByCountry and start/rows pagination; matching is handled centrally."
+    },
+    {
+      "id": "weatherford",
+      "name": "Weatherford",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://fa-exmi-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs",
+      "provider": {
+        "type": "oracle",
+        "status": "verified",
+        "config": {
+          "host": "fa-exmi-saasfaprod1.fa.ocs.oraclecloud.com",
+          "sites": [
+            {
+              "site_number": "CX_1",
+              "site_path": "CX_1",
+              "enabled": true
+            }
           ]
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "First-party server-rendered Bank of America careers search. India keyword routes, job-card structure, numeric IDs and public detail URLs verified. Pagination follows the emitted Next href rather than assuming query parameters."
+      "notes": "Oracle Recruiting Cloud CX_1 verified. Anonymous requisition API, pagination and public job URLs confirmed. Navi Mumbai inventory present."
     }
   ]
 }

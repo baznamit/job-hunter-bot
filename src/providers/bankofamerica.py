@@ -1,5 +1,6 @@
-import html
-import re
+from __future__ import annotations
+
+from datetime import datetime
 from urllib.parse import urljoin
 
 import requests
@@ -9,57 +10,25 @@ from models.company import Company
 
 from .base import ProviderAdapter
 
-
 _TIMEOUT = 30
+_PAGE_SIZE = 10
 _MAX_PAGES = 100
 
 _DEFAULT_BASE_URL = (
     "https://careers.bankofamerica.com"
 )
 
-_JOB_ID_RE = re.compile(
-    r"^/en-us/job-detail/(\d+)/",
-    flags=re.IGNORECASE,
+_SEARCH_PATH = (
+    "/services/jobssearchservlet"
 )
 
 
-class BankOfAmericaAdapter(ProviderAdapter):
-    provider_name = "Bank of America Careers"
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "User-Agent": (
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/127.0.0.0 Safari/537.36"
-            ),
-            "Accept": (
-                "text/html,application/xhtml+xml,"
-                "application/xml;q=0.9,*/*;q=0.8"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-
-    def _fetch_html(
-        self,
-        url: str,
-        company: Company,
-    ) -> str:
-        response = requests.get(
-            url,
-            headers=self._headers(),
-            timeout=_TIMEOUT,
-            allow_redirects=True,
-        )
-
-        self._check_response(
-            response,
-            company,
-        )
-
-        return response.text
+class BankOfAmericaAdapter(
+    ProviderAdapter
+):
+    provider_name = (
+        "Bank of America Careers"
+    )
 
     def _base_url(
         self,
@@ -70,467 +39,431 @@ class BankOfAmericaAdapter(ProviderAdapter):
             or _DEFAULT_BASE_URL
         ).rstrip("/")
 
-    def _clean_text(
-        self,
-        value: str,
-    ) -> str:
-        value = re.sub(
-            r"<[^>]+>",
-            " ",
-            value,
-        )
-
-        value = html.unescape(
-            value
-        )
-
-        return re.sub(
-            r"\s+",
-            " ",
-            value,
-        ).strip()
-
-    def _keyword_slug(
-        self,
-        value: str,
-    ) -> str:
-        value = value.strip().lower()
-
-        value = re.sub(
-            r"[^a-z0-9]+",
-            "-",
-            value,
-        )
-
-        return value.strip("-")
-
-    def _search_url(
+    def _listing_url(
         self,
         company: Company,
-        search_term: str,
     ) -> str:
-        base_url = self._base_url(
-            company
-        )
-
-        slug = self._keyword_slug(
-            search_term
-        )
-
         return (
-            f"{base_url}/en-us/"
-            f"job-search/india/q-{slug}"
+            f"{self._base_url(company)}"
+            f"{_SEARCH_PATH}"
         )
 
-    def _extract_total(
+    def _headers(
         self,
-        page_html: str,
-    ) -> int | None:
-        patterns = (
-            r"([\d,]+)\s+relevant\s+jobs",
-            r'id=["\']span_results["\'][^>]*>'
-            r"\s*([\d,]+)\s*<",
-        )
-
-        for pattern in patterns:
-            match = re.search(
-                pattern,
-                page_html,
-                flags=re.IGNORECASE,
-            )
-
-            if match:
-                return int(
-                    match.group(1)
-                    .replace(",", "")
-                )
-
-        return None
-
-    def _extract_jobs(
-        self,
-        page_html: str,
-        company: Company,
-    ) -> list[Job]:
-        base_url = self._base_url(
-            company
-        )
-
-        cards = re.findall(
-            r'<div\b[^>]*class=["\'][^"\']*'
-            r'\bjob-search-tile\b[^"\']*["\'][^>]*>'
-            r'(.*?)'
-            r'(?=<div\b[^>]*class=["\'][^"\']*'
-            r'\bjob-search-tile\b[^"\']*["\']|$)',
-            page_html,
-            flags=(
-                re.IGNORECASE
-                | re.DOTALL
+    ) -> dict[str, str]:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/127.0.0.0 "
+                "Safari/537.36"
             ),
-        )
+            "Accept":
+                "application/json",
+            "Accept-Language":
+                "en-US,en;q=0.9",
+        }
 
-        jobs: list[Job] = []
-        seen_ids: set[str] = set()
-
-        for card in cards:
-            link_match = re.search(
-                r'<a\b[^>]*class=["\'][^"\']*'
-                r'job-search-tile__url[^"\']*["\']'
-                r'[^>]*href=["\']([^"\']+)["\']'
-                r'[^>]*>(.*?)</a>',
-                card,
-                flags=(
-                    re.IGNORECASE
-                    | re.DOTALL
-                ),
-            )
-
-            # Attribute order can change.
-            if not link_match:
-                anchor_match = re.search(
-                    r'<a\b([^>]*)>(.*?)</a>',
-                    card,
-                    flags=(
-                        re.IGNORECASE
-                        | re.DOTALL
-                    ),
-                )
-
-                if not anchor_match:
-                    continue
-
-                attrs = anchor_match.group(1)
-
-                if (
-                    "job-search-tile__url"
-                    not in attrs
-                ):
-                    continue
-
-                href_match = re.search(
-                    r'href=["\']([^"\']+)["\']',
-                    attrs,
-                    flags=re.IGNORECASE,
-                )
-
-                if not href_match:
-                    continue
-
-                href = html.unescape(
-                    href_match.group(1)
-                )
-
-                title = self._clean_text(
-                    anchor_match.group(2)
-                )
-
-            else:
-                href = html.unescape(
-                    link_match.group(1)
-                )
-
-                title = self._clean_text(
-                    link_match.group(2)
-                )
-
-            id_match = _JOB_ID_RE.match(
-                href
-            )
-
-            if not id_match:
-                continue
-
-            job_id = id_match.group(1)
-
-            if job_id in seen_ids:
-                continue
-
-            location = self._extract_location(
-                card
-            )
-
-            if not title:
-                continue
-
-            seen_ids.add(job_id)
-
-            jobs.append(
-                Job(
-                    id=job_id,
-                    title=title,
-                    company=company.name,
-                    location=location,
-                    url=urljoin(
-                        base_url,
-                        href,
-                    ),
-                    department=(
-                        self._extract_department(
-                            card
-                        )
-                    ),
-                )
-            )
-
-        return jobs
-
-    def _extract_location(
-        self,
-        card: str,
-    ) -> str:
-        text = self._clean_text(
-            card
-        )
-
-        match = re.search(
-            r"Location\s+(.+?)"
-            r"(?=\s+(?:Posted|"
-            r"Job Type|"
-            r"Career Area|"
-            r"Business|$))",
-            text,
-            flags=re.IGNORECASE,
-        )
-
-        if match:
-            location = (
-                match.group(1)
-                .strip(" :-|")
-            )
-
-            if location:
-                location = re.split(
-                    r"\s*-->\s*|\s+What we do\b|\s+Advertising Practices\b",
-                    location,
-                    maxsplit=1,
-                )[0].strip(" :-|")
-
-                if location:
-                    return location
-
-        # Current cards expose the location after
-        # an accessibility-only "Location" span.
-        match = re.search(
-            r'<span[^>]*class=["\'][^"\']*'
-            r'ada-hidden[^"\']*["\'][^>]*>'
-            r'\s*Location(?:\s*&nbsp;)?\s*'
-            r'</span>\s*([^<]+)',
-            card,
-            flags=(
-                re.IGNORECASE
-                | re.DOTALL
-            ),
-        )
-
-        if match:
-            location = self._clean_text(
-                match.group(1)
-            )
-
-            if location:
-                location = re.split(
-                    r"\s*-->\s*|\s+What we do\b|\s+Advertising Practices\b",
-                    location,
-                    maxsplit=1,
-                )[0].strip(" :-|")
-
-                if location:
-                    return location
-
-        return "Unknown"
-
-    def _extract_department(
-        self,
-        card: str,
-    ) -> str | None:
-        text = self._clean_text(
-            card
-        )
-
-        if "Technology" in text:
-            return "Technology"
-
-        return None
-
-    def _extract_next_url(
-        self,
-        page_html: str,
-        current_url: str,
-    ) -> str | None:
-        anchors = re.findall(
-            r'<a\b([^>]*)>(.*?)</a>',
-            page_html,
-            flags=(
-                re.IGNORECASE
-                | re.DOTALL
-            ),
-        )
-
-        for attrs, body in anchors:
-            text = self._clean_text(
-                body
-            ).lower()
-
-            aria_match = re.search(
-                r'aria-label=["\']([^"\']+)["\']',
-                attrs,
-                flags=re.IGNORECASE,
-            )
-
-            aria = (
-                aria_match.group(1).lower()
-                if aria_match
-                else ""
-            )
-
-            if (
-                text != "next"
-                and "next" not in aria
-            ):
-                continue
-
-            href_match = re.search(
-                r'href=["\']([^"\']+)["\']',
-                attrs,
-                flags=re.IGNORECASE,
-            )
-
-            if not href_match:
-                continue
-
-            href = html.unescape(
-                href_match.group(1)
-            )
-
-            if not href or href == "#":
-                continue
-
-            return urljoin(
-                current_url,
-                href,
-            )
-
-        return None
-
-    def _fetch_search(
+    def _request_page(
         self,
         company: Company,
-        search_term: str,
-    ) -> list[Job]:
-        current_url = self._search_url(
+        *,
+        start: int,
+        rows: int,
+    ) -> tuple[list[dict], int]:
+        response = requests.get(
+            self._listing_url(company),
+            params={
+                "country": "India",
+                "start": start,
+                "rows": rows,
+                "search":
+                    "jobsByCountry",
+            },
+            headers=self._headers(),
+            timeout=_TIMEOUT,
+        )
+
+        self._check_response(
+            response,
             company,
-            search_term,
         )
 
-        jobs: list[Job] = []
-        seen_ids: set[str] = set()
-        seen_pages: set[str] = set()
+        try:
+            data = response.json()
 
-        for _ in range(_MAX_PAGES):
-            if current_url in seen_pages:
-                break
-
-            seen_pages.add(
-                current_url
+        except requests.exceptions.JSONDecodeError as exc:
+            content_type = (
+                response.headers.get(
+                    "Content-Type",
+                    "unknown",
+                )
             )
 
-            page_html = self._fetch_html(
-                current_url,
-                company,
+            body_preview = (
+                response.text[:500]
+                .replace("\n", " ")
             )
 
-            page_jobs = self._extract_jobs(
-                page_html,
-                company,
-            )
-
-            for job in page_jobs:
-                if job.id in seen_ids:
-                    continue
-
-                seen_ids.add(job.id)
-                jobs.append(job)
-
-            next_url = self._extract_next_url(
-                page_html,
-                current_url,
-            )
-
-            if not next_url:
-                break
-
-            current_url = next_url
-
-        else:
             raise RuntimeError(
-                f"{company.name}: Bank of America "
-                f"pagination exceeded {_MAX_PAGES} pages"
+                f"{company.name}: "
+                "Bank of America API "
+                "returned non-JSON response "
+                f"(status="
+                f"{response.status_code}, "
+                f"content_type="
+                f"{content_type}, "
+                f"url={response.url}, "
+                f"body={body_preview!r})"
+            ) from exc
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            raise RuntimeError(
+                f"{company.name}: "
+                "Bank of America API "
+                "returned unexpected "
+                "response shape"
             )
 
-        return jobs
+        jobs = (
+            data.get("jobsList")
+            or []
+        )
+
+        total = data.get(
+            "totalMatches"
+        )
+
+        if not isinstance(
+            jobs,
+            list,
+        ):
+            raise RuntimeError(
+                f"{company.name}: "
+                "Bank of America jobsList "
+                "is not a list"
+            )
+
+        if not isinstance(
+            total,
+            int,
+        ):
+            raise RuntimeError(
+                f"{company.name}: "
+                "Bank of America response "
+                "is missing totalMatches"
+            )
+
+        return jobs, total
 
     def _fetch_raw(
         self,
         company: Company,
-    ) -> list[Job]:
-        search_terms = (
-            company.provider.config.search_terms
-            or [
-                "software developer",
-                "software engineer",
-                "java",
-                "backend",
-                "spring boot",
-            ]
+    ) -> dict:
+        first_page, total = (
+            self._request_page(
+                company,
+                start=0,
+                rows=_PAGE_SIZE,
+            )
         )
 
-        jobs: list[Job] = []
+        all_jobs: list[dict] = []
         seen_ids: set[str] = set()
 
-        for search_term in search_terms:
-            search_jobs = self._fetch_search(
-                company,
-                search_term,
-            )
+        def add_page(
+            page: list[dict],
+        ) -> int:
+            added = 0
 
-            for job in search_jobs:
-                if job.id in seen_ids:
+            for item in page:
+                if not isinstance(
+                    item,
+                    dict,
+                ):
                     continue
 
-                seen_ids.add(job.id)
-                jobs.append(job)
+                job_id = item.get(
+                    "jobRequisitionId"
+                )
 
-        return jobs
+                if job_id is None:
+                    continue
+
+                key = str(job_id)
+
+                if key in seen_ids:
+                    continue
+
+                seen_ids.add(key)
+                all_jobs.append(
+                    item
+                )
+                added += 1
+
+            return added
+
+        add_page(
+            first_page
+        )
+
+        if total <= len(
+            first_page
+        ):
+            return {
+                "jobsList":
+                    all_jobs,
+            }
+
+        start = len(
+            first_page
+        )
+
+        page_number = 1
+
+        while start < total:
+            if (
+                page_number
+                >= _MAX_PAGES
+            ):
+                raise RuntimeError(
+                    f"{company.name}: "
+                    "Bank of America "
+                    "pagination exceeded "
+                    f"{_MAX_PAGES} pages"
+                )
+
+            # BofA uses rows as the END pointer,
+            # not as page size:
+            #
+            # start=0,  rows=10
+            # start=10, rows=20
+            # start=20, rows=30
+            rows = min(
+                start + _PAGE_SIZE,
+                total,
+            )
+
+            page, reported_total = (
+                self._request_page(
+                    company,
+                    start=start,
+                    rows=rows,
+                )
+            )
+
+            if not page:
+                raise RuntimeError(
+                    f"{company.name}: "
+                    "Bank of America "
+                    "pagination ended early "
+                    f"at start={start}, "
+                    f"rows={rows}, "
+                    f"total={total}"
+                )
+
+            added = add_page(
+                page
+            )
+
+            if added == 0:
+                raise RuntimeError(
+                    f"{company.name}: "
+                    "Bank of America "
+                    "pagination stalled at "
+                    f"start={start}, "
+                    f"rows={rows}"
+                )
+
+            # Inventory may change while we crawl.
+            if (
+                isinstance(
+                    reported_total,
+                    int,
+                )
+                and reported_total >= 0
+            ):
+                total = (
+                    reported_total
+                )
+
+            start = rows
+            page_number += 1
+
+        return {
+            "jobsList":
+                all_jobs,
+        }
+
+    @staticmethod
+    def _parse_date(
+        value: str | None,
+    ) -> datetime | None:
+        if not value:
+            return None
+
+        value = str(
+            value
+        ).strip()
+
+        # Probe currently exposes dates such
+        # as the site's postedDate fields.
+        for fmt in (
+            "%Y-%m-%d",
+            "%m/%d/%Y",
+            "%m/%d/%y",
+        ):
+            try:
+                return datetime.strptime(
+                    value,
+                    fmt,
+                )
+            except ValueError:
+                continue
+
+        try:
+            return (
+                datetime.fromisoformat(
+                    value.replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+            )
+        except ValueError:
+            return None
+
+    def _job_url(
+        self,
+        item: dict,
+        company: Company,
+    ) -> str | None:
+        base_url = self._base_url(
+            company
+        )
+
+        # Prefer the site's explicit external
+        # public URL when available.
+        for key in (
+            "externalUrl",
+            "jcrURL",
+        ):
+            value = item.get(key)
+
+            if value:
+                return urljoin(
+                    f"{base_url}/",
+                    str(value),
+                )
+
+        return None
 
     def parse(
         self,
-        raw,
+        raw: dict,
         company: Company,
     ) -> list[Job]:
-        return raw
+        jobs: list[Job] = []
+
+        for item in raw.get(
+            "jobsList",
+            [],
+        ):
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            job_id = item.get(
+                "jobRequisitionId"
+            )
+
+            title = item.get(
+                "postingTitle"
+            )
+
+            location = item.get(
+                "location"
+            )
+
+            url = self._job_url(
+                item,
+                company,
+            )
+
+            if (
+                job_id is None
+                or not title
+                or not url
+            ):
+                continue
+
+            department = (
+                item.get(
+                    "careerArea"
+                )
+                or item.get(
+                    "family"
+                )
+                or item.get(
+                    "division"
+                )
+                or None
+            )
+
+            posted_at = (
+                self._parse_date(
+                    item.get(
+                        "postedDate"
+                    )
+                    or item.get(
+                        "externalPostedDate"
+                    )
+                )
+            )
+
+            jobs.append(
+                Job(
+                    id=str(job_id),
+                    title=str(
+                        title
+                    ).strip(),
+                    company=company.name,
+                    location=(
+                        str(location).strip()
+                        if location
+                        else "Unknown"
+                    ),
+                    url=url,
+                    posted_at=posted_at,
+                    department=department,
+                )
+            )
+
+        return jobs
 
     def validate(
         self,
         company: Company,
     ) -> bool:
-        try:
-            page_html = self._fetch_html(
-                self._search_url(
-                    company,
-                    "software engineer",
-                ),
+        jobs, total = (
+            self._request_page(
                 company,
+                start=0,
+                rows=1,
             )
+        )
 
-            return bool(
-                self._extract_jobs(
-                    page_html,
-                    company,
-                )
+        return (
+            total >= 0
+            and isinstance(
+                jobs,
+                list,
             )
-
-        except (
-            requests.RequestException,
-            ValueError,
-        ):
-            return False
+        )

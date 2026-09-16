@@ -34,10 +34,6 @@ jobs:
         run: |
           pip install -r requirements.txt
         
-      - name: Probe company backends
-        run: |
-          python -m research.bofa_pagination_probe
-
       - name: Run Bot
         run: |
           python -m src.main

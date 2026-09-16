@@ -59,3 +59,91 @@ def test_navi_does_not_use_unrelated_ashby_board(
         company.provider.status
         == ProviderStatus.RESEARCH_PENDING
     )
+
+
+def test_weatherford_uses_oracle_cx(
+    registry,
+):
+    company = next(
+        company
+        for company
+        in registry.companies
+        if company.id
+        == "weatherford"
+    )
+
+    assert (
+        company.provider.type
+        == ProviderType.ORACLE
+    )
+
+    config = (
+        company.provider.config
+    )
+
+    assert config.host == (
+        "fa-exmi-saasfaprod1."
+        "fa.ocs.oraclecloud.com"
+    )
+
+    assert len(
+        config.sites
+    ) == 1
+
+    site = config.sites[0]
+
+    assert (
+        site.site_number
+        == "CX_1"
+    )
+
+    assert (
+        site.site_path
+        == "CX_1"
+    )
+
+    assert site.enabled is True
+
+
+def test_weatherford_uses_oracle_cx(
+    registry,
+):
+    company = next(
+        company
+        for company
+        in registry.companies
+        if company.id
+        == "weatherford"
+    )
+
+    assert (
+        company.provider.type
+        == ProviderType.ORACLE
+    )
+
+    config = (
+        company.provider.config
+    )
+
+    assert config.host == (
+        "fa-exmi-saasfaprod1."
+        "fa.ocs.oraclecloud.com"
+    )
+
+    assert len(
+        config.sites
+    ) == 1
+
+    site = config.sites[0]
+
+    assert (
+        site.site_number
+        == "CX_1"
+    )
+
+    assert (
+        site.site_path
+        == "CX_1"
+    )
+
+    assert site.enabled is True
