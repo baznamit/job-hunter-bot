@@ -1192,6 +1192,27 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official Zoho Recruit public careers API verified from GitHub Actions. API returned structured job records including Mumbai openings."
+    },
+    {
+      "id": "synechron",
+      "name": "Synechron",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://synechron.wd1.myworkdayjobs.com/SynechronCareers",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "synechron",
+          "cluster": "wd1",
+          "board": "SynechronCareers"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Synechron Workday CXS endpoint verified. Pagination tested with distinct offset=0 and offset=20 pages; Maharashtra engineering inventory present."
     }
   ]
 }

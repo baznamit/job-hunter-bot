@@ -1911,16 +1911,216 @@ def probe_fynd_targeted() -> None:
             )
 
 
-def main() -> None:
-    print(
-        "[FINAL-BATCH-PROBE] START"
+def probe_fynd_public_api() -> None:
+    prefix = "FYND-PUBLIC"
+
+    print()
+    print(f"[{prefix}] START")
+
+    base = "https://hiring.fynd.com"
+
+    candidates = (
+        "/api/public/careers/gofynd",
+        "/api/public/careers/gofynd/jobs",
     )
 
-    probe_wissen_zoho()
-    probe_fynd_targeted()
+    for path in candidates:
+        url = f"{base}{path}"
+
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "Accept": (
+                        "application/json,"
+                        "text/plain;q=0.9,"
+                        "*/*;q=0.8"
+                    ),
+                    "User-Agent": (
+                        "Mozilla/5.0 "
+                        "(Windows NT 10.0; "
+                        "Win64; x64) "
+                        "AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) "
+                        "Chrome/127.0.0.0 "
+                        "Safari/537.36"
+                    ),
+                    "Referer": (
+                        "https://hiring.fynd.com/"
+                        "careers/gofynd"
+                    ),
+                },
+                timeout=_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            print(
+                f"[{prefix}] "
+                f"path={path!r} "
+                f"REQUEST_FAILED "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
+
+        _response_summary(
+            prefix,
+            path,
+            response,
+        )
+
+        if _blocked_by_network(
+            prefix,
+            path,
+            response,
+        ):
+            continue
+
+        print(
+            f"[{prefix}] "
+            f"path={path!r} "
+            f"body_preview="
+            f"{response.text[:5000]!r}"
+        )
+
+        if response.status_code != 200:
+            continue
+
+        try:
+            payload = response.json()
+        except ValueError:
+            print(
+                f"[{prefix}] "
+                f"path={path!r} "
+                "NON_JSON"
+            )
+            continue
+
+        print(
+            f"[{prefix}] "
+            f"path={path!r} "
+            f"root_type="
+            f"{type(payload).__name__}"
+        )
+
+        if isinstance(payload, dict):
+            print(
+                f"[{prefix}] "
+                f"root_keys="
+                f"{list(payload.keys())}"
+            )
+
+            _inspect_fynd_value(
+                prefix,
+                "root",
+                payload,
+            )
+
+        elif isinstance(payload, list):
+            print(
+                f"[{prefix}] "
+                f"root_list_count="
+                f"{len(payload)}"
+            )
+
+            for index, item in enumerate(
+                payload[:10]
+            ):
+                print(
+                    f"[{prefix}] "
+                    f"ROOT_ITEM[{index}]="
+                    f"{json.dumps(
+                        item,
+                        default=str,
+                    )[:5000]}"
+                )
+
+
+def _inspect_fynd_value(
+    prefix: str,
+    name: str,
+    value,
+    *,
+    depth: int = 0,
+) -> None:
+    """
+    Recursively print enough structure to identify the public
+    careers response without dumping a potentially huge body.
+    """
+
+    if depth > 4:
+        return
+
+    if isinstance(value, dict):
+        print(
+            f"[{prefix}] "
+            f"OBJECT "
+            f"name={name!r} "
+            f"keys={list(value.keys())}"
+        )
+
+        for key, child in value.items():
+            if isinstance(
+                child,
+                (dict, list),
+            ):
+                _inspect_fynd_value(
+                    prefix,
+                    f"{name}.{key}",
+                    child,
+                    depth=depth + 1,
+                )
+
+    elif isinstance(value, list):
+        print(
+            f"[{prefix}] "
+            f"LIST "
+            f"name={name!r} "
+            f"count={len(value)}"
+        )
+
+        for index, item in enumerate(
+            value[:5]
+        ):
+            if isinstance(
+                item,
+                dict,
+            ):
+                print(
+                    f"[{prefix}] "
+                    f"ITEM "
+                    f"name={name!r} "
+                    f"index={index} "
+                    f"keys={list(item.keys())}"
+                )
+
+                print(
+                    f"[{prefix}] "
+                    f"ITEM_DATA "
+                    f"name={name!r} "
+                    f"index={index} "
+                    f"value="
+                    f"{json.dumps(
+                        item,
+                        default=str,
+                    )[:7000]}"
+                )
+
+                _inspect_fynd_value(
+                    prefix,
+                    f"{name}[{index}]",
+                    item,
+                    depth=depth + 1,
+                )
+
+
+def main() -> None:
+    print(
+        "[FINAL-FYND-PROBE] START"
+    )
+
+    probe_fynd_public_api()
 
     print(
-        "[FINAL-BATCH-PROBE] FINISHED"
+        "[FINAL-FYND-PROBE] FINISHED"
     )
 
 
