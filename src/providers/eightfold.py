@@ -1,4 +1,3 @@
-import random
 import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin
@@ -14,9 +13,11 @@ _TIMEOUT = 20
 _PAGE_SIZE = 10
 _MAX_PAGES = 500
 
-_MAX_RETRIES = 5
-_RETRY_BASE_SECONDS = 2.0
-_REQUEST_DELAY_SECONDS = 0.20
+_MAX_RETRIES = 3
+_REQUEST_DELAY_SECONDS = 0.35
+_RATE_LIMIT_COOLDOWN_SECONDS = 15.0
+_BATCH_SIZE = 5
+_BATCH_COOLDOWN_SECONDS = 15.0
 
 class EightfoldAdapter(ProviderAdapter):
     """
@@ -116,22 +117,15 @@ class EightfoldAdapter(ProviderAdapter):
                     retry_after
                 )
 
-                # Small safety margin when the server explicitly
-                # tells us when to retry.
-                delay += 0.10
+                # Small safety margin.
+                delay += 0.5
 
             except (
                 TypeError,
                 ValueError,
             ):
                 delay = (
-                    _RETRY_BASE_SECONDS
-                    * (2 ** attempt)
-                )
-
-                delay += random.uniform(
-                    0.0,
-                    0.5,
+                    _RATE_LIMIT_COOLDOWN_SECONDS
                 )
 
             print(
@@ -268,6 +262,7 @@ class EightfoldAdapter(ProviderAdapter):
 
         offset = page_size
         page_number = 1
+        pages_since_cooldown = 1
 
         while offset < total:
             if page_number >= _MAX_PAGES:
@@ -277,12 +272,29 @@ class EightfoldAdapter(ProviderAdapter):
                     f"{_MAX_PAGES} pages"
                 )
 
-            # Keep normal traffic below Eightfold's
-            # observed rate limit rather than relying
-            # entirely on reactive 429 retries.
-            time.sleep(
-                _REQUEST_DELAY_SECONDS
-            )
+            if (
+                pages_since_cooldown
+                >= _BATCH_SIZE
+            ):
+                print(
+                    f"  [EIGHTFOLD] "
+                    f"{company.name}: "
+                    f"batch cooldown "
+                    f"{_BATCH_COOLDOWN_SECONDS:.1f}s "
+                    f"after "
+                    f"{pages_since_cooldown} pages"
+                )
+
+                time.sleep(
+                    _BATCH_COOLDOWN_SECONDS
+                )
+
+                pages_since_cooldown = 0
+
+            else:
+                time.sleep(
+                    _REQUEST_DELAY_SECONDS
+                )
 
             page, reported_total = self._request_page(
                 company,
@@ -303,6 +315,8 @@ class EightfoldAdapter(ProviderAdapter):
                     f"start={offset}"
                 )
 
+            pages_since_cooldown += 1
+
             # Inventory can change while crawling.
             if reported_total > 0:
                 total = reported_total
@@ -316,7 +330,7 @@ class EightfoldAdapter(ProviderAdapter):
         print(
             f"  [EIGHTFOLD] "
             f"{company.name}: "
-            f"pages={page_number + 1}, "
+            f"pages={page_number}, "
             f"search_location="
             f"{company.provider.config.search_location or 'ALL'}"
         )
