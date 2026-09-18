@@ -35,6 +35,7 @@ from src.providers import (
     BankOfAmericaAdapter,
     CognizantAdapter,
     EightfoldAdapter,
+    FyndAdapter,
     GreenhouseAdapter,
     HigherAdapter,
     KekaAdapter,
@@ -81,6 +82,7 @@ _ADAPTERS = {
     ProviderType.EIGHTFOLD: EightfoldAdapter(),
     ProviderType.COGNIZANT: CognizantAdapter(),
     ProviderType.ZOHO_RECRUIT: ZohoRecruitAdapter(),
+    ProviderType.FYND: FyndAdapter(),
 }
 
 

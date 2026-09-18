@@ -33,10 +33,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-        
-      - name: Run Probe
-        run: |
-          python -m research.next_mumbai_batch_probe
 
       - name: Run Bot
         run: |

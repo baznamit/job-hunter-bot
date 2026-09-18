@@ -1213,6 +1213,25 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official Synechron Workday CXS endpoint verified. Pagination tested with distinct offset=0 and offset=20 pages; Maharashtra engineering inventory present."
+    },
+    {
+      "id": "fynd",
+      "name": "Fynd",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://hiring.fynd.com/careers/gofynd",
+      "provider": {
+        "type": "fynd",
+        "status": "verified",
+        "config": {
+          "base_url": "https://hiring.fynd.com"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official first-party public careers JSON API verified in GitHub Actions."
     }
   ]
 }

@@ -32,6 +32,7 @@ class ProviderType(str, Enum):
     KEKA = "keka"
     COGNIZANT = "cognizant"
     ZOHO_RECRUIT = "zoho_recruit"
+    FYND = "fynd"
     CUSTOM = "custom"
 
 
