@@ -1479,81 +1479,248 @@ def probe_cognizant() -> None:
     )
 
 
-# ============================================================
-# MAIN
-# ============================================================
+def probe_wissen_zoho() -> None:
+    prefix = "WISSEN-ZOHO"
 
-
-def _run(
-    name: str,
-    function,
-) -> None:
     print()
-    print(
-        "=" * 72
+    print(f"[{prefix}] START")
+
+    url = (
+        "https://wissen.zohorecruit.in/"
+        "recruit/v2/public/Job_Openings"
+    )
+
+    response = requests.get(
+        url,
+        params={
+            "pagename": "Careers",
+            "source": "CareerSite",
+        },
+        headers={
+            **_HEADERS,
+            "Accept": "application/json",
+        },
+        timeout=_TIMEOUT,
+    )
+
+    _response_summary(
+        prefix,
+        "jobs",
+        response,
     )
 
     print(
-        f"[BATCH-PROBE] {name}"
+        f"[{prefix}] final_url="
+        f"{response.url}"
     )
 
-    print(
-        "=" * 72
-    )
+    if response.status_code != 200:
+        print(
+            f"[{prefix}] body="
+            f"{response.text[:3000]!r}"
+        )
+        return
 
     try:
-        function()
-
-    except requests.RequestException as exc:
+        payload = response.json()
+    except ValueError:
         print(
-            f"[BATCH-PROBE] {name}: "
-            f"REQUEST_FAILED "
-            f"{type(exc).__name__}: "
-            f"{exc}"
+            f"[{prefix}] NON_JSON "
+            f"body={response.text[:5000]!r}"
+        )
+        return
+
+    print(
+        f"[{prefix}] root_type="
+        f"{type(payload).__name__}"
+    )
+
+    if isinstance(payload, dict):
+        print(
+            f"[{prefix}] root_keys="
+            f"{list(payload.keys())}"
         )
 
-    except Exception as exc:
-        # Research probe: one company failing should never
-        # prevent evidence collection for the remaining
-        # companies.
+    data = (
+        payload.get("data")
+        if isinstance(payload, dict)
+        else None
+    )
+
+    info = (
+        payload.get("info")
+        if isinstance(payload, dict)
+        else None
+    )
+
+    print(
+        f"[{prefix}] data_type="
+        f"{type(data).__name__} "
+        f"jobs="
+        f"{len(data) if isinstance(data, list) else None}"
+    )
+
+    print(
+        f"[{prefix}] info="
+        f"{str(info)[:5000]!r}"
+    )
+
+    if not isinstance(data, list):
         print(
-            f"[BATCH-PROBE] {name}: "
-            f"FAILED "
-            f"{type(exc).__name__}: "
-            f"{exc}"
+            f"[{prefix}] payload="
+            f"{json.dumps(payload, default=str)[:10000]}"
         )
+        return
+
+    for index, item in enumerate(
+        data[:30]
+    ):
+        print(
+            f"[{prefix}] JOB[{index}] "
+            f"keys={list(item.keys())}"
+        )
+
+        print(
+            f"[{prefix}] JOB[{index}] "
+            f"payload="
+            f"{json.dumps(item, default=str)[:5000]}"
+        )
+
+    mumbai = []
+
+    for item in data:
+        blob = json.dumps(
+            item,
+            default=str,
+        ).lower()
+
+        if (
+            "mumbai" in blob
+            or "maharashtra" in blob
+        ):
+            mumbai.append(item)
+
+    print(
+        f"[{prefix}] "
+        f"mumbai_candidates="
+        f"{len(mumbai)}"
+    )
+
+    for item in mumbai[:30]:
+        print(
+            f"[{prefix}] MUMBAI="
+            f"{json.dumps(item, default=str)[:5000]}"
+        )
+
+
+def probe_fynd_targeted() -> None:
+    prefix = "FYND-TARGETED"
+
+    print()
+    print(f"[{prefix}] START")
+
+    page = _get(
+        "https://hiring.fynd.com/"
+        "careers/gofynd"
+    )
+
+    _response_summary(
+        prefix,
+        "page",
+        page,
+    )
+
+    if page.status_code != 200:
+        return
+
+    scripts = _extract_scripts(
+        page.url,
+        page.text,
+    )
+
+    print(
+        f"[{prefix}] scripts="
+        f"{len(scripts)}"
+    )
+
+    markers = (
+        "JobsForCandidateFilter",
+        "JobsForInstant",
+        "Failed to fetch jobs",
+        "Failed to search jobs",
+        "GraphQL request",
+        "graphql",
+    )
+
+    for script_url in scripts:
+        response = _get(
+            script_url
+        )
+
+        if response.status_code != 200:
+            continue
+
+        text = response.text
+
+        hits = [
+            marker
+            for marker in markers
+            if marker.lower()
+            in text.lower()
+        ]
+
+        if not hits:
+            continue
+
+        print(
+            f"[{prefix}] MATCH "
+            f"url={script_url} "
+            f"hits={hits}"
+        )
+
+        _contexts(
+            prefix=prefix,
+            source=script_url,
+            text=text,
+            markers=markers,
+            max_hits=8,
+            before=5000,
+            after=10000,
+        )
+
+        # Look specifically for likely GraphQL URLs.
+        urls = sorted(
+            set(
+                re.findall(
+                    r'https?://'
+                    r'[^"\'\s<>\\]+',
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            )
+        )
+
+        for url in urls:
+            lower = url.lower()
+
+            if any(
+                value in lower
+                for value in (
+                    "graphql",
+                    "api",
+                    "hiring",
+                    "fynd",
+                )
+            ):
+                print(
+                    f"[{prefix}] "
+                    f"CANDIDATE_URL="
+                    f"{url[:1000]!r}"
+                )
 
 
 def main() -> None:
-    print(
-        "[BATCH-PROBE] "
-        "Starting Mumbai company batch"
-    )
-
-    _run(
-        "Nium",
-        probe_nium,
-    )
-
-    _run(
-        "Wissen Technology",
-        probe_wissen,
-    )
-
-    _run(
-        "Fynd",
-        probe_fynd,
-    )
-
-    _run(
-        "Cognizant",
-        probe_cognizant,
-    )
-
-    print()
-    print(
-        "[BATCH-PROBE] Finished"
-    )
+    probe_fynd_targeted()
 
 
 if __name__ == "__main__":

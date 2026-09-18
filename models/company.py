@@ -30,6 +30,7 @@ class ProviderType(str, Enum):
     BANKOFAMERICA = "bankofamerica"
     PHONEPE = "phonepe"
     KEKA = "keka"
+    COGNIZANT = "cognizant"
     CUSTOM = "custom"
 
 

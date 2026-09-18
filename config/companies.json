@@ -1133,6 +1133,44 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Oracle Recruiting Cloud CX_1 verified. Anonymous requisition API, pagination and public job URLs confirmed. Navi Mumbai inventory present."
+    },
+    {
+      "id": "nium",
+      "name": "Nium",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://jobs.lever.co/nium",
+      "provider": {
+        "type": "lever",
+        "status": "verified",
+        "config": {
+          "board": "nium"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Lever board verified from GitHub Actions. Public Lever API returned 26 jobs including 9 Mumbai roles."
+    },
+    {
+      "id": "cognizant",
+      "name": "Cognizant",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.cognizant.com/india-en/jobs/",
+      "provider": {
+        "type": "cognizant",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.cognizant.com/india-en"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "First-party Cognizant XML jobs feed verified from GitHub Actions. Structured job records expose requisition ID, title, posting date, canonical URL, city, state and country."
     }
   ]
 }

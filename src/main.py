@@ -33,6 +33,7 @@ from src.providers import (
     AlgoliaAdapter,
     AshbyAdapter,
     BankOfAmericaAdapter,
+    CognizantAdapter,
     EightfoldAdapter,
     GreenhouseAdapter,
     HigherAdapter,
@@ -77,6 +78,7 @@ _ADAPTERS = {
     ProviderType.PHONEPE: PhonePeAdapter(),
     ProviderType.KEKA: KekaAdapter(),
     ProviderType.EIGHTFOLD: EightfoldAdapter(),
+    ProviderType.COGNIZANT: CognizantAdapter(),
 }
 
 
