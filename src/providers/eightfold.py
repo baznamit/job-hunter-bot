@@ -17,13 +17,13 @@ _MAX_PAGES = 500
 _MAX_RETRIES = 5
 _RETRY_BASE_SECONDS = 2.0
 
-_INITIAL_REQUEST_DELAY_SECONDS = 0.20
-_MIN_REQUEST_DELAY_SECONDS = 0.15
-_MAX_REQUEST_DELAY_SECONDS = 1.25
+_INITIAL_REQUEST_DELAY_SECONDS = 0.35
+_MIN_REQUEST_DELAY_SECONDS = 0.30
+_MAX_REQUEST_DELAY_SECONDS = 0.80
 
-_DELAY_INCREASE_SECONDS = 0.15
+_DELAY_INCREASE_SECONDS = 0.10
 _DELAY_RECOVERY_SECONDS = 0.02
-_SUCCESS_PAGES_BEFORE_RECOVERY = 20
+_SUCCESS_PAGES_BEFORE_RECOVERY = 50
 
 class EightfoldAdapter(ProviderAdapter):
     """
@@ -125,6 +125,11 @@ class EightfoldAdapter(ProviderAdapter):
                 delay = float(
                     retry_after
                 )
+
+                # Small safety margin when the server explicitly
+                # tells us when to retry.
+                delay += 0.10
+
             except (
                 TypeError,
                 ValueError,
@@ -134,12 +139,10 @@ class EightfoldAdapter(ProviderAdapter):
                     * (2 ** attempt)
                 )
 
-            # Small jitter prevents retries from
-            # repeatedly landing on the same boundary.
-            delay += random.uniform(
-                0.0,
-                0.5,
-            )
+                delay += random.uniform(
+                    0.0,
+                    0.5,
+                )
 
             print(
                 f"  [EIGHTFOLD] "
@@ -290,11 +293,22 @@ class EightfoldAdapter(ProviderAdapter):
 
         successful_pages_since_throttle = 0
 
+        throttled_during_crawl = (
+            first_throttled
+        )
+
+        throttle_events = (
+            1 if first_throttled else 0
+        )
+
         if first_throttled:
-            request_delay = min(
-                _MAX_REQUEST_DELAY_SECONDS,
-                request_delay
-                + _DELAY_INCREASE_SECONDS,
+            request_delay = round(
+                min(
+                    _MAX_REQUEST_DELAY_SECONDS,
+                    request_delay
+                    + _DELAY_INCREASE_SECONDS,
+                ),
+                2,
             )
 
         while offset < total:
@@ -322,12 +336,18 @@ class EightfoldAdapter(ProviderAdapter):
             )
 
             if was_throttled:
+                throttled_during_crawl = True
+                throttle_events += 1
+
                 old_delay = request_delay
 
-                request_delay = min(
-                    _MAX_REQUEST_DELAY_SECONDS,
-                    request_delay
-                    + _DELAY_INCREASE_SECONDS,
+                request_delay = round(
+                    min(
+                        _MAX_REQUEST_DELAY_SECONDS,
+                        request_delay
+                        + _DELAY_INCREASE_SECONDS,
+                    ),
+                    2,
                 )
 
                 successful_pages_since_throttle = 0
@@ -341,7 +361,7 @@ class EightfoldAdapter(ProviderAdapter):
                         f"{request_delay:.2f}s"
                     )
 
-            else:
+            elif not throttled_during_crawl:
                 successful_pages_since_throttle += 1
 
                 if (
@@ -350,10 +370,13 @@ class EightfoldAdapter(ProviderAdapter):
                 ):
                     old_delay = request_delay
 
-                    request_delay = max(
-                        _MIN_REQUEST_DELAY_SECONDS,
-                        request_delay
-                        - _DELAY_RECOVERY_SECONDS,
+                    request_delay = round(
+                        max(
+                            _MIN_REQUEST_DELAY_SECONDS,
+                            request_delay
+                            - _DELAY_RECOVERY_SECONDS,
+                        ),
+                        2,
                     )
 
                     successful_pages_since_throttle = 0
@@ -390,6 +413,14 @@ class EightfoldAdapter(ProviderAdapter):
             )
 
             page_number += 1
+
+        print(
+            f"  [EIGHTFOLD] "
+            f"{company.name}: "
+            f"pages={page_number + 1}, "
+            f"throttled_pages={throttle_events}, "
+            f"final_delay={request_delay:.2f}s"
+        )
 
         return {
             "positions":

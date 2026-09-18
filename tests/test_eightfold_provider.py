@@ -326,7 +326,18 @@ def test_eightfold_adapts_after_throttle():
                         "positionUrl": "/careers/job/2",
                     }
                 ],
-                2,
+                3,
+                False,
+            ),
+            (
+                [
+                    {
+                        "id": 3,
+                        "name": "Software Engineer III",
+                        "positionUrl": "/careers/job/3",
+                    }
+                ],
+                3,
                 False,
             ),
         ]
@@ -344,5 +355,72 @@ def test_eightfold_adapts_after_throttle():
     ):
         raw = adapter._fetch_raw(company)
 
-    assert len(raw["positions"]) == 2
-    mock_sleep.assert_called_once_with(0.35)
+    assert len(raw["positions"]) == 3
+    assert [
+        call.args[0]
+        for call
+        in mock_sleep.call_args_list
+    ] == [
+        0.45,
+        0.45,
+    ]
+
+
+def test_eightfold_can_recover_without_throttle():
+    company = _company()
+    adapter = EightfoldAdapter()
+
+    total = 520
+
+    def page(
+        start: int,
+    ):
+        return (
+            [
+                {
+                    "id": start,
+                    "name":
+                        f"Software Engineer {start}",
+                    "positionUrl":
+                        f"/careers/job/{start}",
+                }
+            ],
+            total,
+            False,
+        )
+
+    starts = iter(
+        range(total)
+    )
+
+    with (
+        patch.object(
+            adapter,
+            "_request_page",
+            side_effect=(
+                lambda *args, **kwargs:
+                page(next(starts))
+            ),
+        ),
+        patch(
+            "src.providers.eightfold."
+            "time.sleep",
+        ) as mock_sleep,
+        patch(
+            "src.providers.eightfold._MAX_PAGES",
+            600,
+        ),
+    ):
+        adapter._fetch_raw(
+            company
+        )
+
+    delays = [
+        call.args[0]
+        for call
+        in mock_sleep.call_args_list
+    ]
+
+    assert delays[0] == 0.35
+
+    assert min(delays) >= 0.30
