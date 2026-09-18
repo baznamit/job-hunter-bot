@@ -14,6 +14,7 @@ from .phonepe import PhonePeAdapter
 from .keka import KekaAdapter
 from .eightfold import EightfoldAdapter
 from .cognizant import CognizantAdapter
+from .zoho_recruit import ZohoRecruitAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -32,4 +33,5 @@ __all__ = [
     "KekaAdapter",
     "EightfoldAdapter",
     "CognizantAdapter",
+    "ZohoRecruitAdapter",
 ]

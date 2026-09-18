@@ -1171,6 +1171,27 @@
       "roles": [],
       "supports_remote": false,
       "notes": "First-party Cognizant XML jobs feed verified from GitHub Actions. Structured job records expose requisition ID, title, posting date, canonical URL, city, state and country."
+    },
+    {
+      "id": "wissen",
+      "name": "Wissen Technology",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.wissen.com/",
+      "provider": {
+        "type": "zoho_recruit",
+        "status": "verified",
+        "config": {
+          "api_url": "https://wissen.zohorecruit.in/recruit/v2/public/Job_Openings",
+          "page_name": "Careers",
+          "source": "CareerSite"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Zoho Recruit public careers API verified from GitHub Actions. API returned structured job records including Mumbai openings."
     }
   ]
 }

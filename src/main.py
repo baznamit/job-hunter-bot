@@ -45,6 +45,7 @@ from src.providers import (
     SuccessFactorsAdapter,
     TalentBrewAdapter,
     WorkdayAdapter,
+    ZohoRecruitAdapter,
 )
 from src.providers.exceptions import (
     ProviderNotFoundError,
@@ -79,6 +80,7 @@ _ADAPTERS = {
     ProviderType.KEKA: KekaAdapter(),
     ProviderType.EIGHTFOLD: EightfoldAdapter(),
     ProviderType.COGNIZANT: CognizantAdapter(),
+    ProviderType.ZOHO_RECRUIT: ZohoRecruitAdapter(),
 }
 
 

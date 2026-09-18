@@ -31,6 +31,7 @@ class ProviderType(str, Enum):
     PHONEPE = "phonepe"
     KEKA = "keka"
     COGNIZANT = "cognizant"
+    ZOHO_RECRUIT = "zoho_recruit"
     CUSTOM = "custom"
 
 
@@ -69,6 +70,9 @@ class ProviderConfig(BaseModel):
     public_base_url: str | None = None
 
     base_url: str | None = None
+    api_url: str | None = None
+    page_name: str | None = None
+    source: str | None = None
     listing_path: str | None = None
     page_size: int | None = None
 
