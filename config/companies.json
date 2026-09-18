@@ -503,7 +503,8 @@
         "status": "implemented",
         "config": {
           "base_url": "https://apply.careers.microsoft.com",
-          "domain": "microsoft.com"
+          "domain": "microsoft.com",
+          "search_location": "India"
         }
       },
       "locations": [],

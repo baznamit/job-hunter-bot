@@ -82,6 +82,7 @@ class ProviderConfig(BaseModel):
     index_name: str | None = None
 
     search_terms: list[str] | None = None
+    search_location: str | None = None
 
 class Provider(BaseModel):
     model_config = ConfigDict(extra="forbid")

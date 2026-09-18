@@ -284,7 +284,7 @@ def test_eightfold_retries_429():
             "time.sleep",
         ) as mock_sleep,
     ):
-        positions, total, was_throttled = (
+        positions, total = (
             EightfoldAdapter()
             ._request_page(
                 company,
@@ -294,133 +294,69 @@ def test_eightfold_retries_429():
 
     assert total == 1
     assert len(positions) == 1
-    assert was_throttled is True
 
     assert mock_get.call_count == 2
 
     mock_sleep.assert_called_once()
 
 
-def test_eightfold_adapts_after_throttle():
+def test_eightfold_uses_configured_search_location():
     company = _company()
-    adapter = EightfoldAdapter()
-
-    pages = iter(
-        [
-            (
-                [
-                    {
-                        "id": 1,
-                        "name": "Software Engineer",
-                        "positionUrl": "/careers/job/1",
-                    }
-                ],
-                2,
-                True,
-            ),
-            (
-                [
-                    {
-                        "id": 2,
-                        "name": "Software Engineer II",
-                        "positionUrl": "/careers/job/2",
-                    }
-                ],
-                3,
-                False,
-            ),
-            (
-                [
-                    {
-                        "id": 3,
-                        "name": "Software Engineer III",
-                        "positionUrl": "/careers/job/3",
-                    }
-                ],
-                3,
-                False,
-            ),
-        ]
+    company.provider.config.search_location = (
+        "Mumbai"
     )
 
-    with (
-        patch.object(
-            adapter,
-            "_request_page",
-            side_effect=lambda *args, **kwargs: next(pages),
-        ),
-        patch(
-            "src.providers.eightfold.time.sleep",
-        ) as mock_sleep,
-    ):
-        raw = adapter._fetch_raw(company)
-
-    assert len(raw["positions"]) == 3
-    assert [
-        call.args[0]
-        for call
-        in mock_sleep.call_args_list
-    ] == [
-        0.45,
-        0.45,
-    ]
-
-
-def test_eightfold_can_recover_without_throttle():
-    company = _company()
-    adapter = EightfoldAdapter()
-
-    total = 520
-
-    def page(
-        start: int,
-    ):
-        return (
-            [
-                {
-                    "id": start,
-                    "name":
-                        f"Software Engineer {start}",
-                    "positionUrl":
-                        f"/careers/job/{start}",
-                }
-            ],
-            total,
-            False,
-        )
-
-    starts = iter(
-        range(total)
+    response = _Response(
+        {
+            "status": 200,
+            "error": None,
+            "data": {
+                "positions": [],
+                "count": 0,
+            },
+            "metadata": {},
+        }
     )
 
-    with (
-        patch.object(
-            adapter,
-            "_request_page",
-            side_effect=(
-                lambda *args, **kwargs:
-                page(next(starts))
-            ),
-        ),
-        patch(
-            "src.providers.eightfold."
-            "time.sleep",
-        ) as mock_sleep,
-        patch(
-            "src.providers.eightfold._MAX_PAGES",
-            600,
-        ),
-    ):
-        adapter._fetch_raw(
-            company
+    with patch(
+        "src.providers.eightfold.requests.get",
+        return_value=response,
+    ) as mock_get:
+        EightfoldAdapter()._request_page(
+            company,
+            start=0,
         )
 
-    delays = [
-        call.args[0]
-        for call
-        in mock_sleep.call_args_list
-    ]
+    params = mock_get.call_args.kwargs["params"]
 
-    assert delays[0] == 0.35
+    assert params["location"] == "Mumbai"
 
-    assert min(delays) >= 0.30
+
+def test_eightfold_defaults_search_location_to_empty():
+    company = _company()
+
+    response = _Response(
+        {
+            "status": 200,
+            "error": None,
+            "data": {
+                "positions": [],
+                "count": 0,
+            },
+            "metadata": {},
+        }
+    )
+
+    with patch(
+        "src.providers.eightfold.requests.get",
+        return_value=response,
+    ) as mock_get:
+        EightfoldAdapter()._request_page(
+            company,
+            start=0,
+        )
+
+    params = mock_get.call_args.kwargs["params"]
+
+    assert params["location"] == ""
+

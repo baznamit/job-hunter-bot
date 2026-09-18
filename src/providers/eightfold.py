@@ -16,14 +16,7 @@ _MAX_PAGES = 500
 
 _MAX_RETRIES = 5
 _RETRY_BASE_SECONDS = 2.0
-
-_INITIAL_REQUEST_DELAY_SECONDS = 0.35
-_MIN_REQUEST_DELAY_SECONDS = 0.30
-_MAX_REQUEST_DELAY_SECONDS = 0.80
-
-_DELAY_INCREASE_SECONDS = 0.10
-_DELAY_RECOVERY_SECONDS = 0.02
-_SUCCESS_PAGES_BEFORE_RECOVERY = 50
+_REQUEST_DELAY_SECONDS = 0.20
 
 class EightfoldAdapter(ProviderAdapter):
     """
@@ -58,11 +51,7 @@ class EightfoldAdapter(ProviderAdapter):
         *,
         start: int,
         query: str = "",
-    ) -> tuple[
-        list[dict],
-        int,
-        bool,
-    ]:
+    ) -> tuple[list[dict], int]:
         config = company.provider.config
 
         domain = getattr(
@@ -77,14 +66,17 @@ class EightfoldAdapter(ProviderAdapter):
                 "config.domain"
             )
 
+        search_location = (
+            company.provider.config.search_location
+            or ""
+        )
+
         params = {
             "domain": domain,
             "query": query,
-            "location": "",
+            "location": search_location,
             "start": start,
         }
-
-        was_throttled = False
 
         for attempt in range(
             _MAX_RETRIES + 1
@@ -106,8 +98,6 @@ class EightfoldAdapter(ProviderAdapter):
 
             if response.status_code != 429:
                 break
-
-            was_throttled = True
 
             if attempt >= _MAX_RETRIES:
                 self._check_response(
@@ -206,21 +196,13 @@ class EightfoldAdapter(ProviderAdapter):
                 positions
             )
 
-        return (
-            positions,
-            count,
-            was_throttled,
-        )
+        return positions, count
 
     def _fetch_raw(
         self,
         company: Company,
     ) -> dict:
-        (
-            first_page,
-            total,
-            first_throttled,
-        ) = self._request_page(
+        first_page, total = self._request_page(
             company,
             start=0,
         )
@@ -287,30 +269,6 @@ class EightfoldAdapter(ProviderAdapter):
         offset = page_size
         page_number = 1
 
-        request_delay = (
-            _INITIAL_REQUEST_DELAY_SECONDS
-        )
-
-        successful_pages_since_throttle = 0
-
-        throttled_during_crawl = (
-            first_throttled
-        )
-
-        throttle_events = (
-            1 if first_throttled else 0
-        )
-
-        if first_throttled:
-            request_delay = round(
-                min(
-                    _MAX_REQUEST_DELAY_SECONDS,
-                    request_delay
-                    + _DELAY_INCREASE_SECONDS,
-                ),
-                2,
-            )
-
         while offset < total:
             if page_number >= _MAX_PAGES:
                 raise RuntimeError(
@@ -323,72 +281,13 @@ class EightfoldAdapter(ProviderAdapter):
             # observed rate limit rather than relying
             # entirely on reactive 429 retries.
             time.sleep(
-                request_delay
+                _REQUEST_DELAY_SECONDS
             )
 
-            (
-                page,
-                reported_total,
-                was_throttled,
-            ) = self._request_page(
+            page, reported_total = self._request_page(
                 company,
                 start=offset,
             )
-
-            if was_throttled:
-                throttled_during_crawl = True
-                throttle_events += 1
-
-                old_delay = request_delay
-
-                request_delay = round(
-                    min(
-                        _MAX_REQUEST_DELAY_SECONDS,
-                        request_delay
-                        + _DELAY_INCREASE_SECONDS,
-                    ),
-                    2,
-                )
-
-                successful_pages_since_throttle = 0
-
-                if request_delay != old_delay:
-                    print(
-                        f"  [EIGHTFOLD] "
-                        f"{company.name}: "
-                        "adaptive delay increased "
-                        f"{old_delay:.2f}s -> "
-                        f"{request_delay:.2f}s"
-                    )
-
-            elif not throttled_during_crawl:
-                successful_pages_since_throttle += 1
-
-                if (
-                    successful_pages_since_throttle
-                    >= _SUCCESS_PAGES_BEFORE_RECOVERY
-                ):
-                    old_delay = request_delay
-
-                    request_delay = round(
-                        max(
-                            _MIN_REQUEST_DELAY_SECONDS,
-                            request_delay
-                            - _DELAY_RECOVERY_SECONDS,
-                        ),
-                        2,
-                    )
-
-                    successful_pages_since_throttle = 0
-
-                    if request_delay != old_delay:
-                        print(
-                            f"  [EIGHTFOLD] "
-                            f"{company.name}: "
-                            "adaptive delay recovered "
-                            f"{old_delay:.2f}s -> "
-                            f"{request_delay:.2f}s"
-                        )
 
             if not page:
                 break
@@ -418,8 +317,8 @@ class EightfoldAdapter(ProviderAdapter):
             f"  [EIGHTFOLD] "
             f"{company.name}: "
             f"pages={page_number + 1}, "
-            f"throttled_pages={throttle_events}, "
-            f"final_delay={request_delay:.2f}s"
+            f"search_location="
+            f"{company.provider.config.search_location or 'ALL'}"
         )
 
         return {
@@ -563,7 +462,7 @@ class EightfoldAdapter(ProviderAdapter):
         self,
         company: Company,
     ) -> bool:
-        positions, total, _ = (
+        positions, total = (
             self._request_page(
                 company,
                 start=0,
