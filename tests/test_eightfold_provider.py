@@ -284,7 +284,7 @@ def test_eightfold_retries_429():
             "time.sleep",
         ) as mock_sleep,
     ):
-        positions, total = (
+        positions, total, was_throttled = (
             EightfoldAdapter()
             ._request_page(
                 company,
@@ -294,7 +294,55 @@ def test_eightfold_retries_429():
 
     assert total == 1
     assert len(positions) == 1
+    assert was_throttled is True
 
     assert mock_get.call_count == 2
 
     mock_sleep.assert_called_once()
+
+
+def test_eightfold_adapts_after_throttle():
+    company = _company()
+    adapter = EightfoldAdapter()
+
+    pages = iter(
+        [
+            (
+                [
+                    {
+                        "id": 1,
+                        "name": "Software Engineer",
+                        "positionUrl": "/careers/job/1",
+                    }
+                ],
+                2,
+                True,
+            ),
+            (
+                [
+                    {
+                        "id": 2,
+                        "name": "Software Engineer II",
+                        "positionUrl": "/careers/job/2",
+                    }
+                ],
+                2,
+                False,
+            ),
+        ]
+    )
+
+    with (
+        patch.object(
+            adapter,
+            "_request_page",
+            side_effect=lambda *args, **kwargs: next(pages),
+        ),
+        patch(
+            "src.providers.eightfold.time.sleep",
+        ) as mock_sleep,
+    ):
+        raw = adapter._fetch_raw(company)
+
+    assert len(raw["positions"]) == 2
+    mock_sleep.assert_called_once_with(0.35)

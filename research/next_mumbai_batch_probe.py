@@ -1509,6 +1509,13 @@ def probe_wissen_zoho() -> None:
         response,
     )
 
+    if _blocked_by_network(
+        prefix,
+        "jobs",
+        response,
+    ):
+        return
+
     print(
         f"[{prefix}] final_url="
         f"{response.url}"
@@ -1619,9 +1626,12 @@ def probe_fynd_targeted() -> None:
     print()
     print(f"[{prefix}] START")
 
+    base_url = (
+        "https://hiring.fynd.com"
+    )
+
     page = _get(
-        "https://hiring.fynd.com/"
-        "careers/gofynd"
+        f"{base_url}/careers/gofynd"
     )
 
     _response_summary(
@@ -1630,31 +1640,50 @@ def probe_fynd_targeted() -> None:
         page,
     )
 
+    if _blocked_by_network(
+        prefix,
+        "page",
+        page,
+    ):
+        return
+
     if page.status_code != 200:
         return
 
-    scripts = _extract_scripts(
+    initial_scripts = _extract_scripts(
         page.url,
         page.text,
     )
 
     print(
-        f"[{prefix}] scripts="
-        f"{len(scripts)}"
+        f"[{prefix}] "
+        f"initial_scripts="
+        f"{len(initial_scripts)}"
     )
 
-    markers = (
+    discovered_chunks: set[str] = set()
+
+    main_markers = (
         "JobsForCandidateFilter",
         "JobsForInstant",
+        "graphql",
+        "ApolloClient",
+        "HttpLink",
+        "createHttpLink",
+        "uri:",
         "Failed to fetch jobs",
         "Failed to search jobs",
-        "GraphQL request",
-        "graphql",
     )
 
-    for script_url in scripts:
+    for script_url in initial_scripts:
         response = _get(
             script_url
+        )
+
+        _response_summary(
+            prefix,
+            "initial-script",
+            response,
         )
 
         if response.status_code != 200:
@@ -1662,9 +1691,35 @@ def probe_fynd_targeted() -> None:
 
         text = response.text
 
+        for chunk in re.findall(
+            r'["\']'
+            r'(assets/[^"\']+\.js)'
+            r'["\']',
+            text,
+            flags=re.IGNORECASE,
+        ):
+            lower = chunk.lower()
+
+            if any(
+                marker in lower
+                for marker in (
+                    "graphql",
+                    "job",
+                    "candidate",
+                    "public",
+                    "career",
+                )
+            ):
+                discovered_chunks.add(
+                    urljoin(
+                        f"{base_url}/",
+                        chunk,
+                    )
+                )
+
         hits = [
             marker
-            for marker in markers
+            for marker in main_markers
             if marker.lower()
             in text.lower()
         ]
@@ -1682,13 +1737,127 @@ def probe_fynd_targeted() -> None:
             prefix=prefix,
             source=script_url,
             text=text,
-            markers=markers,
-            max_hits=8,
-            before=5000,
-            after=10000,
+                markers=main_markers,
+                max_hits=4,
+                before=3500,
+                after=7000,
         )
 
-        # Look specifically for likely GraphQL URLs.
+    print(
+        f"[{prefix}] "
+        f"discovered_chunks="
+        f"{len(discovered_chunks)}"
+    )
+
+    for chunk in sorted(
+        discovered_chunks
+    ):
+        print(
+            f"[{prefix}] "
+            f"CHUNK={chunk}"
+        )
+
+    known_chunks = {
+        (
+            f"{base_url}/assets/"
+            "graphql-BM6Ljzt6.js"
+        ),
+        (
+            f"{base_url}/assets/"
+            "route-src-pages-public-"
+            "JobDetailPage-tsx-Bv-kMpQx.js"
+        ),
+        (
+            f"{base_url}/assets/"
+            "route-src-pages-"
+            "JobsPage-tsx-BdGlv9d9.js"
+        ),
+    }
+
+    candidate_chunks = (
+        discovered_chunks
+        | known_chunks
+    )
+
+    chunk_markers = (
+        "JobsForCandidateFilter",
+        "JobsForInstant",
+        "GetJob",
+        "GetJobs",
+        "SearchJobs",
+        "PublicJob",
+        "JobDetail",
+        "query ",
+        "mutation ",
+        "ApolloClient",
+        "HttpLink",
+        "createHttpLink",
+        "uri:",
+        "/graphql",
+        "/api/",
+        "organizationSlug",
+        "organization",
+        "slug",
+        "career",
+        "careers",
+        "gofynd",
+    )
+
+    for chunk_url in sorted(
+        candidate_chunks
+    ):
+        try:
+            response = _get(
+                chunk_url
+            )
+        except requests.RequestException as exc:
+            print(
+                f"[{prefix}] "
+                f"CHUNK_FAILED "
+                f"url={chunk_url} "
+                f"error={type(exc).__name__}: "
+                f"{exc}"
+            )
+            continue
+
+        _response_summary(
+            prefix,
+            "chunk",
+            response,
+        )
+
+        if response.status_code != 200:
+            continue
+
+        text = response.text
+
+        hits = [
+            marker
+            for marker in chunk_markers
+            if marker.lower()
+            in text.lower()
+        ]
+
+        if not hits:
+            continue
+
+        print(
+            f"[{prefix}] "
+            f"CHUNK_MATCH "
+            f"url={chunk_url} "
+            f"hits={hits}"
+        )
+
+        _contexts(
+            prefix=prefix,
+            source=chunk_url,
+            text=text,
+            markers=chunk_markers,
+            max_hits=6,
+            before=4500,
+            after=9000,
+        )
+
         urls = sorted(
             set(
                 re.findall(
@@ -1700,27 +1869,59 @@ def probe_fynd_targeted() -> None:
             )
         )
 
-        for url in urls:
-            lower = url.lower()
+        for value in urls:
+            lower = value.lower()
 
             if any(
-                value in lower
-                for value in (
+                marker in lower
+                for marker in (
                     "graphql",
                     "api",
-                    "hiring",
-                    "fynd",
+                    "hiring.fynd",
+                    "fynd.engineering",
                 )
             ):
                 print(
                     f"[{prefix}] "
                     f"CANDIDATE_URL="
-                    f"{url[:1000]!r}"
+                    f"{value[:1500]!r}"
                 )
+
+        relative_paths = sorted(
+            set(
+                re.findall(
+                    r'["\']'
+                    r'('
+                    r'/(?:api|graphql)'
+                    r'/[^"\']*'
+                    r'|/graphql'
+                    r')'
+                    r'["\']',
+                    text,
+                    flags=re.IGNORECASE,
+                )
+            )
+        )
+
+        for value in relative_paths:
+            print(
+                f"[{prefix}] "
+                f"RELATIVE_ENDPOINT="
+                f"{value!r}"
+            )
 
 
 def main() -> None:
+    print(
+        "[FINAL-BATCH-PROBE] START"
+    )
+
+    probe_wissen_zoho()
     probe_fynd_targeted()
+
+    print(
+        "[FINAL-BATCH-PROBE] FINISHED"
+    )
 
 
 if __name__ == "__main__":
