@@ -1305,6 +1305,25 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official first-party public careers JSON API verified in GitHub Actions."
+    },
+    {
+      "id": "clevertap",
+      "name": "CleverTap",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.kula.ai/clevertap",
+      "provider": {
+        "type": "kula",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.kula.ai/clevertap"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official CleverTap careers board hosted by Kula. Public server-rendered board exposes structured job inventory and canonical /<job_id>/ URLs."
     }
   ]
 }

@@ -12,6 +12,7 @@ from .algolia import AlgoliaAdapter
 from .bankofamerica import BankOfAmericaAdapter
 from .phonepe import PhonePeAdapter
 from .keka import KekaAdapter
+from .kula import KulaAdapter
 from .eightfold import EightfoldAdapter
 from .cognizant import CognizantAdapter
 from .zoho_recruit import ZohoRecruitAdapter
@@ -32,6 +33,7 @@ __all__ = [
     "BankOfAmericaAdapter",
     "PhonePeAdapter",
     "KekaAdapter",
+    "KulaAdapter",
     "EightfoldAdapter",
     "CognizantAdapter",
     "ZohoRecruitAdapter",
