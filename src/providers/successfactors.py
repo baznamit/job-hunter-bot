@@ -4,7 +4,10 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
-from urllib.parse import urljoin
+from urllib.parse import (
+    urlencode,
+    urljoin,
+)
 
 import requests
 
@@ -61,12 +64,46 @@ class SuccessFactorsAdapter(ProviderAdapter):
             + "/"
         )
 
-        if offset == 0:
-            return f"{base_url}{listing_path}"
-
-        return (
+        listing_url = (
             f"{base_url}{listing_path}"
-            f"{offset}/"
+        )
+
+        pagination_mode = (
+            config.pagination_mode
+            or "path"
+        )
+
+        if offset == 0:
+            return listing_url
+
+        if pagination_mode == "path":
+            return (
+                f"{listing_url}"
+                f"{offset}/"
+            )
+
+        if pagination_mode == "query":
+            pagination_param = (
+                config.pagination_param
+                or "startrow"
+            )
+
+            query = urlencode(
+                {
+                    pagination_param:
+                        offset,
+                }
+            )
+
+            return (
+                f"{listing_url}"
+                f"?{query}"
+            )
+
+        raise ValueError(
+            f"{company.name}: unsupported "
+            f"SuccessFactors pagination_mode="
+            f"{pagination_mode!r}"
         )
 
     def _extract_job_urls(
@@ -277,7 +314,7 @@ class SuccessFactorsAdapter(ProviderAdapter):
         # Use that as the stable fallback when the detail HTML
         # doesn't expose a clean Location field.
         match = re.search(
-            r"/Nomura/job/([^/]+)/\d+/?$",
+            r"/job/([^/]+)/\d+/?$",
             url,
             flags=re.IGNORECASE,
         )

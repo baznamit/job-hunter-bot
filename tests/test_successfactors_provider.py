@@ -88,6 +88,46 @@ def test_successfactors_listing_pagination_url():
         "9050900/100/"
     )
 
+
+def test_successfactors_query_pagination_url():
+    adapter = SuccessFactorsAdapter()
+
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url=(
+            "https://careers.capgemini.com"
+        ),
+        listing_path="/search/",
+        page_size=25,
+        pagination_mode="query",
+        pagination_param="startrow",
+    )
+
+    assert adapter._listing_url(
+        company,
+        0,
+    ) == (
+        "https://careers.capgemini.com/"
+        "search/"
+    )
+
+    assert adapter._listing_url(
+        company,
+        25,
+    ) == (
+        "https://careers.capgemini.com/"
+        "search/?startrow=25"
+    )
+
+    assert adapter._listing_url(
+        company,
+        50,
+    ) == (
+        "https://careers.capgemini.com/"
+        "search/?startrow=50"
+    )
+
+
 def test_extract_location_falls_back_to_nomura_url():
     adapter = SuccessFactorsAdapter()
 
@@ -102,6 +142,44 @@ def test_extract_location_falls_back_to_nomura_url():
     )
 
     assert location == "Mumbai"
+
+
+def test_extract_location_from_generic_successfactors_url():
+    adapter = SuccessFactorsAdapter()
+
+    location = adapter._extract_location(
+        (
+            "<html><body>"
+            "No structured location field"
+            "</body></html>"
+        ),
+        (
+            "https://careers.capgemini.com/"
+            "job/Mumbai-SAP-Concur/"
+            "1389183133/"
+        ),
+    )
+
+    assert location == "Mumbai"
+
+
+def test_extract_location_from_ltm_successfactors_url():
+    adapter = SuccessFactorsAdapter()
+
+    location = adapter._extract_location(
+        (
+            "<html><body>"
+            "No structured location field"
+            "</body></html>"
+        ),
+        (
+            "https://careers.ltm.com/"
+            "job/Bengaluru-Senior-Software-Engineer-Karn/"
+            "679605001/"
+        ),
+    )
+
+    assert location == "Bengaluru"
 
 def test_extract_location_rejects_job_description_text():
     adapter = SuccessFactorsAdapter()

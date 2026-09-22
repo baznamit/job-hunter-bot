@@ -880,6 +880,52 @@
       "notes": "TalentBrew/Radancy public careers search. Server-rendered search pagination, job IDs, locations and detail URLs verified from GitHub Actions."
     },
     {
+      "id": "capgemini",
+      "name": "Capgemini",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.capgemini.com/",
+      "provider": {
+        "type": "successfactors",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.capgemini.com",
+          "listing_path": "/search/",
+          "page_size": 25,
+          "pagination_mode": "query",
+          "pagination_param": "startrow"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "SAP SuccessFactors Recruiting Marketing careers site. Server-rendered job listings and startrow query pagination verified from GitHub Actions."
+    },
+    {
+      "id": "ltmindtree",
+      "name": "LTIMindtree",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.ltm.com/",
+      "provider": {
+        "type": "successfactors",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.ltm.com",
+          "listing_path": "/search/",
+          "page_size": 25,
+          "pagination_mode": "query",
+          "pagination_param": "startrow"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "SAP SuccessFactors Recruiting Marketing careers site. careers.ltm.com is the current valid host. Server-rendered job listings and startrow query pagination verified from GitHub Actions."
+    },
+    {
       "id": "blackrock",
       "name": "BlackRock",
       "category": "FinTech",

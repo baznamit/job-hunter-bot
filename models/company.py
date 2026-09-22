@@ -76,6 +76,8 @@ class ProviderConfig(BaseModel):
     source: str | None = None
     listing_path: str | None = None
     page_size: int | None = None
+    pagination_mode: str | None = None
+    pagination_param: str | None = None
 
     app_id: str | None = None
     api_key: str | None = None
