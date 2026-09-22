@@ -1,4 +1,25 @@
-https://careers.db.com/professionals/search-roles/#/professional/results/?country=81
-https://db.wd3.myworkdayjobs.com/DBWebsite/job/Bangalore-Velankani-Tech-Park/Senior-Full-Stack-Developer--NMS-_R0449856/apply
-https://db.wd3.myworkdayjobs.com/DBWebsite/job/Bangalore-Velankani-ISC/Senior-Full-Stack-Developer--NMS-_R0449845/apply
-https://db.wd3.myworkdayjobs.com/DBWebsite/job/Pune-Magarpatta-City-Hadapsa/Java-Full-Stack-Engineer--AVP_R0447756/apply
+$token = Read-Host "GitHub token" -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token)
+$plainToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+
+$headers = @{
+    Authorization = "Bearer $plainToken"
+    Accept = "application/vnd.github+json"
+    "X-GitHub-Api-Version" = "2026-03-10"
+}
+
+$body = @{
+    ref = "main"
+    inputs = @{
+        validation_only = $true
+    }
+} | ConvertTo-Json -Depth 3
+
+Invoke-WebRequest `
+    -Method Post `
+    -Uri "https://api.github.com/repos/baznamit/job-hunter-bot/actions/workflows/jobs.yml/dispatches" `
+    -Headers $headers `
+    -ContentType "application/json" `
+    -Body $body
+
+$plainToken = $null
