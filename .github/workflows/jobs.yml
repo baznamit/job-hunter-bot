@@ -34,9 +34,77 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Probe
+      - name: Smoke test Capgemini and LTIMindtree
         run: |
-          python -m research.next_company_batch_probe
+          python - <<'PY'
+          import time
+
+          from research.loader import load_registry
+          from src.providers import SuccessFactorsAdapter
+
+          registry = load_registry()
+          adapter = SuccessFactorsAdapter()
+
+          for company_id in ("capgemini", "ltmindtree"):
+              company = next(
+                  company
+                  for company in registry.companies
+                  if company.id == company_id
+              )
+
+              print()
+              print("=" * 70)
+              print(f"[SF-SMOKE] {company.name}")
+              print("=" * 70)
+
+              start = time.perf_counter()
+
+              try:
+                  jobs = adapter.fetch_jobs(company)
+              except Exception as exc:
+                  print(
+                      f"[SF-SMOKE] FAILED "
+                      f"{type(exc).__name__}: {exc}"
+                  )
+                  continue
+
+              elapsed = time.perf_counter() - start
+
+              print(
+                  f"[SF-SMOKE] {company.name}: "
+                  f"jobs={len(jobs)} "
+                  f"time={elapsed:.1f}s"
+              )
+
+              target_jobs = [
+                  job
+                  for job in jobs
+                  if any(
+                      term in (job.location or "").lower()
+                      for term in (
+                          "mumbai",
+                          "navi mumbai",
+                          "pune",
+                          "bangalore",
+                          "bengaluru",
+                      )
+                  )
+              ]
+
+              print(
+                  f"[SF-SMOKE] target_locations="
+                  f"{len(target_jobs)}"
+              )
+
+              for job in target_jobs[:30]:
+                  print(
+                      f"[SF-SMOKE] JOB "
+                      f"id={job.id!r} "
+                      f"title={job.title!r} "
+                      f"location={job.location!r} "
+                      f"url={str(job.url)!r}"
+                  )
+          PY
       
       - name: Run Bot
         run: |
