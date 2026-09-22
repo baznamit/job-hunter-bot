@@ -371,20 +371,20 @@
       "category": "Banking",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://careers.db.com/",
+      "career_page": "https://careers.db.com/professionals/search-roles/",
       "provider": {
         "type": "workday",
         "status": "verified",
         "config": {
           "tenant": "db",
-          "board": "DBCareers",
-          "cluster": "wd3"
+          "cluster": "wd3",
+          "board": "DBWebsite"
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Uses Workday ATS (db.wd3.myworkdayjobs.com)."
+      "notes": "Current Deutsche Bank Workday board is DBWebsite. Previous DBCareers mapping became stale. DBWebsite CXS endpoint verified with 1171 jobs and working offset pagination."
     },
     {
       "id": "morganstanley",
@@ -426,6 +426,27 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Uses Goldman Sachs Higher careers platform. Anonymous GetRoles GraphQL API verified."
+    },
+    {
+      "id": "tiaa",
+      "name": "TIAA",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.tiaa.org/jobs",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "tiaa",
+          "cluster": "wd1",
+          "board": "Search"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official TIAA Workday Search board verified. CXS endpoint returned 214 jobs with working offset pagination and substantial Mumbai/Pune inventory."
     },
     {
       "id": "barclays",
