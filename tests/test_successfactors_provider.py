@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from models.company import (
     Company,
     CompanyCategory,
@@ -180,6 +182,116 @@ def test_extract_location_from_ltm_successfactors_url():
     )
 
     assert location == "Bengaluru"
+
+
+def test_location_from_job_url():
+    adapter = SuccessFactorsAdapter()
+
+    assert (
+        adapter._location_from_job_url(
+            (
+                "https://careers.capgemini.com/"
+                "job/Mumbai-SAP-Concur/"
+                "1389183133/"
+            )
+        )
+        == "Mumbai"
+    )
+
+    assert (
+        adapter._location_from_job_url(
+            (
+                "https://careers.ltm.com/"
+                "job/Bengaluru-Senior-Software-Engineer-Karn/"
+                "679605001/"
+            )
+        )
+        == "Bengaluru"
+    )
+
+
+def test_successfactors_search_location_filter():
+    adapter = SuccessFactorsAdapter()
+
+    locations = [
+        "Mumbai",
+        "Bangalore",
+        "Bengaluru",
+    ]
+
+    assert adapter._matches_search_locations(
+        (
+            "https://careers.capgemini.com/"
+            "job/Mumbai-SAP-Concur/"
+            "1389183133/"
+        ),
+        locations,
+    )
+
+    assert adapter._matches_search_locations(
+        (
+            "https://careers.capgemini.com/"
+            "job/Bangalore-Java-Developer/"
+            "123456/"
+        ),
+        locations,
+    )
+
+    assert not adapter._matches_search_locations(
+        (
+            "https://careers.capgemini.com/"
+            "job/Pune-Java-Developer/"
+            "123456/"
+        ),
+        locations,
+    )
+
+
+@patch.object(
+    SuccessFactorsAdapter,
+    "_fetch_html",
+)
+def test_location_filter_does_not_stop_pagination(
+    mock_fetch_html,
+):
+    adapter = SuccessFactorsAdapter()
+
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url=(
+            "https://careers.example.com"
+        ),
+        listing_path="/search/",
+        page_size=2,
+        pagination_mode="query",
+        pagination_param="startrow",
+        search_locations=[
+            "Mumbai",
+        ],
+    )
+
+    mock_fetch_html.side_effect = [
+        """
+        <a href="/job/Pune-One/1/">One</a>
+        <a href="/job/Pune-Two/2/">Two</a>
+        """,
+        """
+        <a href="/job/Mumbai-Three/3/">Three</a>
+        """,
+    ]
+
+    urls = adapter._fetch_raw(
+        company
+    )
+
+    assert urls == [
+        (
+            "https://careers.example.com/"
+            "job/Mumbai-Three/3/"
+        )
+    ]
+
+    assert mock_fetch_html.call_count == 2
 
 def test_extract_location_rejects_job_description_text():
     adapter = SuccessFactorsAdapter()

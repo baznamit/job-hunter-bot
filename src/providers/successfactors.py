@@ -139,6 +139,76 @@ class SuccessFactorsAdapter(ProviderAdapter):
 
         return jobs
 
+    def _location_from_job_url(
+        self,
+        url: str,
+    ) -> str | None:
+        """
+        Extract the leading location component from an RMK
+        canonical job URL.
+
+        Examples:
+
+        /job/Mumbai-SAP-Concur/1389183133/
+            -> Mumbai
+
+        /job/Bengaluru-Senior-Software-Engineer-Karn/679605001/
+            -> Bengaluru
+
+        /Nomura/job/Mumbai-Software-Engineer/1421393100/
+            -> Mumbai
+        """
+
+        match = re.search(
+            r"/job/([^/]+)/\d+/?$",
+            url,
+            flags=re.IGNORECASE,
+        )
+
+        if not match:
+            return None
+
+        slug = html.unescape(
+            match.group(1)
+        )
+
+        first_part = (
+            slug.split("-", 1)[0]
+            .replace("_", " ")
+            .strip()
+        )
+
+        return first_part or None
+
+    def _matches_search_locations(
+        self,
+        url: str,
+        search_locations: list[str],
+    ) -> bool:
+        if not search_locations:
+            return True
+
+        location = (
+            self._location_from_job_url(
+                url
+            )
+        )
+
+        # Do not discard jobs whose location cannot safely be
+        # determined from the canonical URL. Let the detail
+        # parser make the final decision.
+        if not location:
+            return True
+
+        normalized = location.lower()
+
+        return any(
+            normalized
+            == candidate.lower().strip()
+            for candidate in search_locations
+            if candidate.strip()
+        )
+
     def _fetch_html(
         self,
         url: str,
@@ -306,37 +376,14 @@ class SuccessFactorsAdapter(ProviderAdapter):
             ):
                 return location
 
-        # SuccessFactors RMK/Nomura puts the location at the
-        # beginning of the canonical job URL:
-        #
-        # /Nomura/job/Mumbai-Software-Engineer/1421393100/
-        #
-        # Use that as the stable fallback when the detail HTML
-        # doesn't expose a clean Location field.
-        match = re.search(
-            r"/job/([^/]+)/\d+/?$",
-            url,
-            flags=re.IGNORECASE,
+        url_location = (
+            self._location_from_job_url(
+                url
+            )
         )
 
-        if match:
-            slug = html.unescape(
-                match.group(1)
-            )
-
-            first_part = slug.split(
-                "-",
-                1,
-            )[0]
-
-            first_part = (
-                first_part
-                .replace("_", " ")
-                .strip()
-            )
-
-            if first_part:
-                return first_part
+        if url_location:
+            return url_location
 
         return "Unknown"
 
@@ -437,6 +484,13 @@ class SuccessFactorsAdapter(ProviderAdapter):
 
         job_urls: list[str] = []
         seen_urls: set[str] = set()
+        seen_page_signatures: set[
+            tuple[str, ...]
+        ] = set()
+
+        search_locations = (
+            config.search_locations
+        )
 
         for page_number in range(_MAX_PAGES):
             offset = page_number * page_size
@@ -459,14 +513,39 @@ class SuccessFactorsAdapter(ProviderAdapter):
             if not urls:
                 break
 
+            signature = tuple(urls)
+
+            if signature in seen_page_signatures:
+                raise RuntimeError(
+                    f"{company.name}: SuccessFactors "
+                    "pagination stalled on a repeated page"
+                )
+
+            seen_page_signatures.add(
+                signature
+            )
+
             new_urls = [
                 url
                 for url in urls
-                if url not in seen_urls
+                if (
+                    url not in seen_urls
+                    and self._matches_search_locations(
+                        url,
+                        search_locations,
+                    )
+                )
             ]
 
             if not new_urls:
-                break
+                # The listing page itself was valid. It simply contained
+                # no jobs in our provider-side candidate locations.
+                # Continue pagination unless the upstream listing has
+                # actually ended.
+                if len(urls) < page_size:
+                    break
+
+                continue
 
             for url in new_urls:
                 seen_urls.add(url)

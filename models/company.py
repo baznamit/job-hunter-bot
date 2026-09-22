@@ -85,6 +85,9 @@ class ProviderConfig(BaseModel):
 
     search_terms: list[str] | None = None
     search_location: str | None = None
+    search_locations: list[str] = Field(
+        default_factory=list
+    )
 
 class Provider(BaseModel):
     model_config = ConfigDict(extra="forbid")

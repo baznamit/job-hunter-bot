@@ -894,7 +894,12 @@
           "listing_path": "/search/",
           "page_size": 25,
           "pagination_mode": "query",
-          "pagination_param": "startrow"
+          "pagination_param": "startrow",
+          "search_locations": [
+            "Mumbai",
+            "Bangalore",
+            "Bengaluru"
+          ]
         }
       },
       "locations": [],
