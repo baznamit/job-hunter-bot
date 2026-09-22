@@ -1,9 +1,31 @@
 {
-    "allowed_locations": [
-        "Mumbai",
-        "Bangalore",
-        "Bengaluru"
-    ],
+    "locations": {
+        "allowed": [
+            "Mumbai",
+            "Navi Mumbai",
+            "Bangalore",
+            "Bengaluru"
+        ],
+        "notification_priority": [
+            {
+                "name": "Mumbai",
+                "terms": [
+                    "Mumbai",
+                    "Navi Mumbai"
+                ]
+            },
+            {
+                "name": "Bengaluru",
+                "terms": [
+                    "Bangalore",
+                    "Bengaluru"
+                ]
+            }
+        ],
+        "allow_india": true,
+        "allow_remote_india": true,
+        "allow_plain_remote": true
+    },
 
     "excluded_levels": [
         "Lead",

@@ -16,6 +16,10 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
+from datetime import (
+    datetime,
+    timezone,
+)
 from pathlib import Path
 
 from models import Job
@@ -200,14 +204,184 @@ def _performance_top_n(
     )
 
 
-def _build_message(jobs: list[Job], limit: int) -> str:
+def _notification_location_rank(
+    job: Job,
+    settings: dict,
+) -> int:
+    """
+    Rank an already-eligible job for presentation.
+
+    Lower number = higher notification priority.
+
+    Eligibility remains JobFilter's responsibility.
+    This function affects ordering only.
+    """
+
+    location = (
+        job.location
+        or ""
+    ).lower()
+
+    groups = (
+        settings.get(
+            "locations",
+            {},
+        ).get(
+            "notification_priority",
+            [],
+        )
+    )
+
+    for rank, group in enumerate(
+        groups
+    ):
+        terms = group.get(
+            "terms",
+            []
+        )
+
+        if any(
+            str(term).lower()
+            in location
+            for term in terms
+        ):
+            return rank
+
+    # Explicit India listings come after
+    # configured preferred-city groups.
+    if "india" in location:
+        return len(groups)
+
+    # Generic remote comes last.
+    if "remote" in location:
+        return len(groups) + 1
+
+    # Defensive fallback. Normally such a job
+    # should already have been rejected by JobFilter.
+    return len(groups) + 2
+
+
+def _posted_timestamp(
+    job: Job,
+) -> float:
+    posted_at = job.posted_at
+
+    if posted_at is None:
+        return 0.0
+
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(
+            tzinfo=timezone.utc
+        )
+
+    return posted_at.timestamp()
+
+
+def _sort_notification_jobs(
+    jobs: list[Job],
+    settings: dict,
+) -> list[Job]:
+    """
+    Presentation ordering:
+
+    1. configured location priority
+    2. newest posting first
+    3. deterministic company/title fallback
+    """
+
+    return sorted(
+        jobs,
+        key=lambda job: (
+            _notification_location_rank(
+                job,
+                settings,
+            ),
+            -_posted_timestamp(job),
+            job.company.lower(),
+            job.title.lower(),
+        ),
+    )
+
+
+def _notification_location_group(
+    job: Job,
+    settings: dict,
+) -> str:
+    location = (
+        job.location
+        or ""
+    ).lower()
+
+    groups = (
+        settings.get(
+            "locations",
+            {},
+        ).get(
+            "notification_priority",
+            [],
+        )
+    )
+
+    for group in groups:
+        if any(
+            str(term).lower()
+            in location
+            for term in group.get(
+                "terms",
+                []
+            )
+        ):
+            return str(
+                group.get(
+                    "name",
+                    "Preferred",
+                )
+            )
+
+    if "remote" in location:
+        return "India / Remote"
+
+    return "Other India"
+
+
+def _build_message(
+    jobs: list[Job],
+    limit: int,
+    settings: dict,
+) -> str:
     lines = [
         "🤖 Job Hunter",
         "",
         f"🆕 {len(jobs)} new job(s)",
         "",
     ]
-    for i, job in enumerate(jobs[:limit], 1):
+
+    shown_jobs = jobs[:limit]
+
+    current_group = None
+
+    for i, job in enumerate(
+        shown_jobs,
+        1,
+    ):
+        group = (
+            _notification_location_group(
+                job,
+                settings,
+            )
+        )
+
+        if group != current_group:
+            if current_group is not None:
+                lines.append("")
+
+            lines += [
+                f"📌 {group}",
+                "",
+            ]
+
+            current_group = group
+
         lines += [
             f"{i}. {job.company}",
             f"💼 {job.title}",
@@ -215,6 +389,7 @@ def _build_message(jobs: list[Job], limit: int) -> str:
             str(job.url),
             "",
         ]
+
     remaining = len(jobs) - limit
     if remaining > 0:
         lines.append(f"...and {remaining} more job(s) not shown.")
@@ -430,12 +605,20 @@ def _send_notifications(
     notifier,
     new_jobs,
     max_jobs: int,
+    settings: dict,
 ) -> None:
     """Send notification with new jobs and mark them as seen."""
     try:
+        ordered_jobs = (
+            _sort_notification_jobs(
+                new_jobs,
+                settings,
+            )
+        )
         message = _build_message(
-            new_jobs,
+            ordered_jobs,
             max_jobs,
+            settings,
         )
         notifier.send_message(message)
         store.mark_seen(new_jobs)
@@ -791,6 +974,7 @@ def main() -> None:
         notifier,
         new_jobs,
         _max_jobs(settings),
+        settings,
     )
 
 

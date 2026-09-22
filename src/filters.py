@@ -109,9 +109,40 @@ class JobFilter:
         settings = json.loads(
             (_CONFIG_DIR / "settings.json").read_text(encoding="utf-8")
         )
+        location_settings = settings.get(
+            "locations",
+            {},
+        )
+
         self.allowed_locations: list[str] = [
-            loc.lower() for loc in settings["allowed_locations"]
+            location.lower()
+            for location in location_settings.get(
+                "allowed",
+                [],
+            )
         ]
+
+        self.allow_india = bool(
+            location_settings.get(
+                "allow_india",
+                True,
+            )
+        )
+
+        self.allow_remote_india = bool(
+            location_settings.get(
+                "allow_remote_india",
+                True,
+            )
+        )
+
+        self.allow_plain_remote = bool(
+            location_settings.get(
+                "allow_plain_remote",
+                True,
+            )
+        )
+
         self.excluded_levels: list[str] = [
             lvl.lower() for lvl in settings["excluded_levels"]
         ]
@@ -216,17 +247,23 @@ class JobFilter:
         ):
             return True
 
-        # Country-wide India listings.
-        if loc == "india":
+        if (
+            self.allow_india
+            and loc == "india"
+        ):
             return True
 
-        # Explicit India remote roles.
-        if "remote" in loc and "india" in loc:
+        if (
+            self.allow_remote_india
+            and "remote" in loc
+            and "india" in loc
+        ):
             return True
 
-        # Provider explicitly says only "Remote", with no conflicting
-        # country information.
-        if loc == "remote":
+        if (
+            self.allow_plain_remote
+            and loc == "remote"
+        ):
             return True
 
         return False
