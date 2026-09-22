@@ -36,7 +36,7 @@ jobs:
 
       - name: Probe
         run: |
-          next_company_batch_probe.py
+          python -m research.next_company_batch_probe
       
       - name: Run Bot
         run: |
