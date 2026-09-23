@@ -1,9 +1,6 @@
 name: Job Hunter
 
 on:
-  schedule:
-    - cron: "17 * * * *"
-
   workflow_dispatch:
     inputs:
       validation_only:
