@@ -895,6 +895,7 @@
           "page_size": 25,
           "pagination_mode": "query",
           "pagination_param": "startrow",
+          "search_location_param": "location",
           "search_locations": [
             "Mumbai",
             "Bangalore",

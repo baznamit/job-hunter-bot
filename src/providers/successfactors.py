@@ -41,6 +41,7 @@ class SuccessFactorsAdapter(ProviderAdapter):
         self,
         company: Company,
         offset: int,
+        search_location: str | None = None,
     ) -> str:
         config = company.provider.config
 
@@ -73,38 +74,27 @@ class SuccessFactorsAdapter(ProviderAdapter):
             or "path"
         )
 
-        if offset == 0:
-            return listing_url
+        query_params: dict[str, str | int] = {}
+        if search_location and config.search_location_param:
+            query_params[config.search_location_param] = search_location
 
-        if pagination_mode == "path":
-            return (
-                f"{listing_url}"
-                f"{offset}/"
-            )
+        if offset:
+            if pagination_mode == "path":
+                listing_url = f"{listing_url}{offset}/"
+            elif pagination_mode == "query":
+                pagination_param = config.pagination_param or "startrow"
+                query_params[pagination_param] = offset
+            else:
+                raise ValueError(
+                    f"{company.name}: unsupported "
+                    f"SuccessFactors pagination_mode="
+                    f"{pagination_mode!r}"
+                )
 
-        if pagination_mode == "query":
-            pagination_param = (
-                config.pagination_param
-                or "startrow"
-            )
+        if query_params:
+            return f"{listing_url}?{urlencode(query_params)}"
 
-            query = urlencode(
-                {
-                    pagination_param:
-                        offset,
-                }
-            )
-
-            return (
-                f"{listing_url}"
-                f"?{query}"
-            )
-
-        raise ValueError(
-            f"{company.name}: unsupported "
-            f"SuccessFactors pagination_mode="
-            f"{pagination_mode!r}"
-        )
+        return listing_url
 
     def _extract_job_urls(
         self,
@@ -461,6 +451,7 @@ class SuccessFactorsAdapter(ProviderAdapter):
     def _fetch_raw(
         self,
         company: Company,
+        search_location: str | None = None,
     ) -> list[str]:
         """
         Fetch all unique job-detail URLs from the configured
@@ -489,7 +480,9 @@ class SuccessFactorsAdapter(ProviderAdapter):
         ] = set()
 
         search_locations = (
-            config.search_locations
+            []
+            if search_location and config.search_location_param
+            else config.search_locations
         )
 
         for page_number in range(_MAX_PAGES):
@@ -498,6 +491,7 @@ class SuccessFactorsAdapter(ProviderAdapter):
             listing_url = self._listing_url(
                 company,
                 offset,
+                search_location,
             )
 
             page_html = self._fetch_html(
@@ -607,9 +601,16 @@ class SuccessFactorsAdapter(ProviderAdapter):
         self,
         company: Company,
     ) -> list[Job]:
-        job_urls = self._fetch_raw(
-            company
-        )
+        config = company.provider.config
+        matched_locations: dict[str, list[str]] = {}
+
+        if config.search_location_param and config.search_locations:
+            for location in dict.fromkeys(config.search_locations):
+                for url in self._fetch_raw(company, location):
+                    matched_locations.setdefault(url, []).append(location)
+            job_urls = list(matched_locations)
+        else:
+            job_urls = self._fetch_raw(company)
 
         if not job_urls:
             return []
@@ -646,6 +647,20 @@ class SuccessFactorsAdapter(ProviderAdapter):
                     continue
 
                 if job is not None:
+                    if url in matched_locations:
+                        locations = (
+                            [job.location]
+                            if job.location != "Unknown"
+                            else []
+                        )
+                        locations.extend(
+                            location
+                            for location in matched_locations[url]
+                            if location.lower() not in job.location.lower()
+                        )
+                        job = job.model_copy(
+                            update={"location": ", ".join(locations)}
+                        )
                     jobs_by_url[url] = job
 
         # Preserve listing order despite concurrent

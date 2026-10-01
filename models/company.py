@@ -86,6 +86,7 @@ class ProviderConfig(BaseModel):
 
     search_terms: list[str] | None = None
     search_location: str | None = None
+    search_location_param: str | None = None
     search_locations: list[str] = Field(
         default_factory=list
     )
