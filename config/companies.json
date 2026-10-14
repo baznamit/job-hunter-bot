@@ -1359,11 +1359,10 @@
         "config": {
           "api_url": "https://careers.hcltech.com/services/recruiting/v1/jobs",
           "search_terms": [
-            "java",
-            "spring boot",
-            "full stack",
-            "backend",
-            "microservices"
+            "Mumbai",
+            "Navi Mumbai",
+            "Bengaluru",
+            "Bangalore"
           ],
           "max_pages": 15
         }
@@ -1386,7 +1385,7 @@
         "config": {
           "api_url": "https://www-api.ibm.com/search/api/v2",
           "page_size": 30,
-          "max_pages": 15,
+          "max_pages": 25,
           "search_terms": [
             "Java",
             "Spring Boot",

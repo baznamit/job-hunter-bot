@@ -21,6 +21,59 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate Infosys production adapter
+        run: |
+          python -u - <<'PY'
+          import time
+          from collections import Counter
+
+          from research.loader import load_registry
+          from src.providers import InfosysAdapter
+
+          company = next(
+            c for c in load_registry().companies
+            if c.id == "infosys"
+          )
+
+          started = time.perf_counter()
+          jobs = InfosysAdapter().fetch_jobs(company)
+          elapsed = time.perf_counter() - started
+          ids = [job.id for job in jobs]
+
+          print(
+            f"[INFOSYS-VALIDATE] {company.name}: "
+            f"jobs={len(jobs)} "
+            f"unique={len(set(ids))} "
+            f"seconds={elapsed:.2f}"
+          )
+          print(
+            "[INFOSYS-VALIDATE] top_locations=",
+            Counter(job.location for job in jobs).most_common(20),
+          )
+
+          for job in jobs:
+            if any(
+              city in job.location.upper()
+              for city in (
+                "MUMBAI",
+                "BANGALORE",
+                "BENGALURU",
+              )
+            ):
+              print(
+                f"[INFOSYS-MATCH] {job.id} | "
+                f"{job.title} | {job.location} | {job.url}"
+              )
+
+          if not jobs:
+            raise RuntimeError("Infosys returned zero jobs")
+
+          if len(ids) != len(set(ids)):
+            raise RuntimeError("Infosys returned duplicate job IDs")
+
+          print("[INFOSYS-VALIDATE] PASSED")
+          PY
+
       - name: Company Probe
         run: python -u -m research.company_probe
 
