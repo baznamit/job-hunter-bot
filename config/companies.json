@@ -1331,7 +1331,7 @@
       "name": "Infosys",
       "category": "Product",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://career.infosys.com/jobs?companyhiringtype=IL&countrycode=IN",
       "provider": {
         "type": "infosys",
@@ -1377,7 +1377,7 @@
       "name": "IBM",
       "category": "Product",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.ibm.com/careers/search",
       "provider": {
         "type": "ibm",
