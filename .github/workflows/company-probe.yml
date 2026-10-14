@@ -21,5 +21,82 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Probe BNP Paribas and Infosys
-        run: python -u -m research.company_probe
+      # - name: Probe BNP Paribas and Infosys
+      #   run: python -u -m research.company_probe
+
+      - name: Validate IBM production adapter
+        run: |
+          python -u - <<'PY'
+          import time
+          from collections import Counter
+
+          from research.loader import load_registry
+          from src.providers import IBMAdapter
+
+          company = next(
+              c for c in load_registry().companies
+              if c.id == "ibm"
+          )
+
+          start = time.perf_counter()
+
+          try:
+              jobs = IBMAdapter().fetch_jobs(company)
+          except Exception as exc:
+              print(
+                  f"[IBM-VALIDATE] FAILED "
+                  f"{type(exc).__name__}: {exc}"
+              )
+              raise
+
+          elapsed = time.perf_counter() - start
+
+          ids = [job.id for job in jobs]
+
+          print(
+              f"[IBM-VALIDATE] "
+              f"fetched={len(jobs)} "
+              f"unique={len(set(ids))} "
+              f"elapsed={elapsed:.2f}s"
+          )
+
+          locations = Counter(
+              job.location for job in jobs
+          )
+
+          print(
+              "[IBM-VALIDATE] "
+              f"top_locations={locations.most_common(20)}"
+          )
+
+          for job in jobs:
+              location = job.location.upper()
+
+              if any(
+                  city in location
+                  for city in (
+                      "MUMBAI",
+                      "BANGALORE",
+                      "BENGALURU",
+                  )
+              ):
+                  print(
+                      f"[IBM-MATCH] "
+                      f"{job.id} | "
+                      f"{job.title} | "
+                      f"{job.location} | "
+                      f"{job.url}"
+                  )
+
+          if not jobs:
+              raise RuntimeError(
+                  "IBM returned zero jobs"
+              )
+
+          if len(ids) != len(set(ids)):
+              raise RuntimeError(
+                  "IBM returned duplicate job IDs"
+              )
+
+          print("[IBM-VALIDATE] PASSED")
+          PY
