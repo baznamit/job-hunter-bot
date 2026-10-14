@@ -24,79 +24,71 @@ jobs:
       - name: Company Probe
         run: python -u -m research.company_probe
 
-      - name: Validate IBM production adapter
+      - name: Validate IBM and HCLTech
         run: |
           python -u - <<'PY'
           import time
-          from collections import Counter
-
           from research.loader import load_registry
-          from src.providers import IBMAdapter
+          from src.providers import IBMAdapter, HCLTechAdapter
 
-          company = next(
-              c for c in load_registry().companies
-              if c.id == "ibm"
-          )
+          companies = {
+              c.id: c
+              for c in load_registry().companies
+          }
 
-          start = time.perf_counter()
+          failed = []
 
-          try:
-              jobs = IBMAdapter().fetch_jobs(company)
-          except Exception as exc:
-              print(
-                  f"[IBM-VALIDATE] FAILED "
-                  f"{type(exc).__name__}: {exc}"
-              )
-              raise
+          for company_id, adapter in (
+              ("ibm", IBMAdapter()),
+              ("hcltech", HCLTechAdapter()),
+          ):
+              company = companies[company_id]
+              started = time.perf_counter()
 
-          elapsed = time.perf_counter() - start
+              try:
+                  jobs = adapter.fetch_jobs(company)
+                  elapsed = time.perf_counter() - started
 
-          ids = [job.id for job in jobs]
+                  unique = len({job.id for job in jobs})
 
-          print(
-              f"[IBM-VALIDATE] "
-              f"fetched={len(jobs)} "
-              f"unique={len(set(ids))} "
-              f"elapsed={elapsed:.2f}s"
-          )
-
-          locations = Counter(
-              job.location for job in jobs
-          )
-
-          print(
-              "[IBM-VALIDATE] "
-              f"top_locations={locations.most_common(20)}"
-          )
-
-          for job in jobs:
-              location = job.location.upper()
-
-              if any(
-                  city in location
-                  for city in (
-                      "MUMBAI",
-                      "BANGALORE",
-                      "BENGALURU",
-                  )
-              ):
                   print(
-                      f"[IBM-MATCH] "
-                      f"{job.id} | "
-                      f"{job.title} | "
-                      f"{job.location} | "
-                      f"{job.url}"
+                      f"[FINAL] {company.name}: "
+                      f"jobs={len(jobs)} "
+                      f"unique={unique} "
+                      f"seconds={elapsed:.2f}"
                   )
 
-          if not jobs:
-              raise RuntimeError(
-                  "IBM returned zero jobs"
-              )
+                  for job in jobs:
+                      if any(
+                          city in job.location.upper()
+                          for city in (
+                              "MUMBAI",
+                              "BANGALORE",
+                              "BENGALURU",
+                          )
+                      ):
+                          print(
+                              f"[MATCH] {company.name}: "
+                              f"{job.id} | {job.title} | "
+                              f"{job.location} | {job.url}"
+                          )
 
-          if len(ids) != len(set(ids)):
-              raise RuntimeError(
-                  "IBM returned duplicate job IDs"
-              )
+                  if not jobs or len(jobs) != unique:
+                      raise RuntimeError(
+                          "Empty inventory or duplicate IDs"
+                      )
 
-          print("[IBM-VALIDATE] PASSED")
+                  print(f"[FINAL] {company.name}: PASSED")
+
+              except Exception as exc:
+                  failed.append(company_id)
+                  print(
+                      f"[FINAL] {company.name}: FAILED "
+                      f"{type(exc).__name__}: {exc}"
+                  )
+
+          if failed:
+              raise SystemExit(
+                  "Failed providers: " + ", ".join(failed)
+              )
           PY

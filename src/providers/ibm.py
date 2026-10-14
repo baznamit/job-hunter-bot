@@ -277,10 +277,8 @@ class IBMAdapter(ProviderAdapter):
                     received_hits += len(records)
 
                     print(
-                        f"  [IBM-PAGE] {company.name}: "
-                        f"term={term!r} "
+                        f"[IBM-PAGE] term={term!r} "
                         f"page={page} "
-                        f"received={len(records)} "
                         f"hits={received_hits}/{total} "
                         f"unique={len(term_jobs)} "
                         f"duplicates={duplicate_ids}"
@@ -292,10 +290,7 @@ class IBMAdapter(ProviderAdapter):
                 if received_hits < total:
                     raise RuntimeError(
                         f"IBM query {term!r} incomplete: "
-                        f"received={received_hits}/{total}, "
-                        f"unique={len(term_jobs)}, "
-                        f"duplicates={duplicate_ids}, "
-                        f"max_pages={max_pages}"
+                        f"{received_hits}/{total} hits"
                     )
 
                 collected.update(term_jobs)
