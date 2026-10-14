@@ -1,7 +1,7 @@
-import xml.etree.ElementTree as ET
-from collections import Counter
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+from collections import Counter
 import argparse
 import re
 from html.parser import HTMLParser
