@@ -86,21 +86,31 @@ def main():
 
         print("\n========== CONFIG ==========")
 
-        try:
-            response = session.get(
-                CONFIG_URL,
-                timeout=TIMEOUT,
+        response = session.get(
+            CONFIG_URL,
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+
+        config = response.json()
+
+        base = str(
+            config.get("JobsUnAuthUrl") or ""
+        ).strip()
+
+        if not base:
+            raise RuntimeError(
+                "JobsUnAuthUrl missing from environment.json"
             )
-            inspect_json("INF-CONFIG", response)
-        except requests.RequestException as exc:
-            print(
-                "[INF-CONFIG] ERROR "
-                f"{type(exc).__name__}: {exc}"
-            )
+
+        print(
+            "[INF-CONFIG] JobsUnAuthUrl host="
+            f"{requests.utils.urlparse(base).netloc}"
+        )
+
+        endpoint = base.rstrip("/") + "/getCareerSearchJobs"
 
         print("\n========== PUBLIC JOBS ==========")
-
-        endpoint = BASE + "getCareerSearchJobs"
 
         for source_id in ("1,21", "1", "21"):
             try:
@@ -111,6 +121,19 @@ def main():
                         "searchText": "ALL",
                     },
                     timeout=TIMEOUT,
+                    headers={
+                        "Accept": "application/json",
+                        "Origin": "https://career.infosys.com",
+                        "Referer": "https://career.infosys.com/jobs",
+                    },
+                )
+
+                print(
+                    f"[INF-JOBS] "
+                    f"sourceId={source_id} "
+                    f"status={response.status_code} "
+                    f"final={response.url} "
+                    f"content_type={response.headers.get('Content-Type')}"
                 )
 
                 inspect_json(
@@ -120,7 +143,8 @@ def main():
 
             except requests.RequestException as exc:
                 print(
-                    f"[INF-JOBS sourceId={source_id}] "
+                    f"[INF-JOBS] "
+                    f"sourceId={source_id} "
                     f"ERROR {type(exc).__name__}: {exc}"
                 )
 
