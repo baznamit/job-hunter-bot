@@ -173,6 +173,8 @@ class IBMAdapter(ProviderAdapter):
                 term_jobs = {}
                 total = None
                 offset = 0
+                received_hits = 0
+                duplicate_ids = 0
 
                 for page in range(1, max_pages + 1):
                     response = session.post(
@@ -264,18 +266,36 @@ class IBMAdapter(ProviderAdapter):
                         )
 
                         job_id = self._job_id(url)
+
+                        if job_id in term_jobs:
+                            duplicate_ids += 1
+
                         term_jobs[job_id] = item
 
                     offset += len(records)
 
-                    if len(term_jobs) >= total:
+                    received_hits += len(records)
+
+                    print(
+                        f"  [IBM-PAGE] {company.name}: "
+                        f"term={term!r} "
+                        f"page={page} "
+                        f"received={len(records)} "
+                        f"hits={received_hits}/{total} "
+                        f"unique={len(term_jobs)} "
+                        f"duplicates={duplicate_ids}"
+                    )
+
+                    if received_hits >= total:
                         break
 
-                if len(term_jobs) < total:
+                if received_hits < total:
                     raise RuntimeError(
                         f"IBM query {term!r} incomplete: "
-                        f"{len(term_jobs)}/{total} "
-                        f"within {max_pages} pages"
+                        f"received={received_hits}/{total}, "
+                        f"unique={len(term_jobs)}, "
+                        f"duplicates={duplicate_ids}, "
+                        f"max_pages={max_pages}"
                     )
 
                 collected.update(term_jobs)
