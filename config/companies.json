@@ -1345,6 +1345,61 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official Infosys anonymous careers API verified in GitHub Actions on 2026-10-14. Combined sourceId=1,21 returned 1691 jobs with 1691 unique reference codes, including Mumbai, Navi Mumbai and Bangalore. Job-detail URLs require final browser validation."
+    },
+    {
+      "id": "hcltech",
+      "name": "HCLTech",
+      "category": "Product",
+      "priority": 2,
+      "enabled": false,
+      "career_page": "https://careers.hcltech.com/search/",
+      "provider": {
+        "type": "hcltech",
+        "status": "verified",
+        "config": {
+          "api_url": "https://careers.hcltech.com/services/recruiting/v1/jobs",
+          "search_terms": [
+            "java",
+            "spring boot",
+            "full stack",
+            "backend",
+            "microservices"
+          ],
+          "max_pages": 15
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Public SuccessFactors RMK JSON API verified on 2026-10-14. Pagination uses zero-based pageNumber and returns 10 jobs per page. Geographic optimization and canonical job URL mapping require validation before enabling."
+    },
+    {
+      "id": "ibm",
+      "name": "IBM",
+      "category": "Product",
+      "priority": 2,
+      "enabled": false,
+      "career_page": "https://www.ibm.com/careers/search",
+      "provider": {
+        "type": "ibm",
+        "status": "verified",
+        "config": {
+          "api_url": "https://www-api.ibm.com/search/api/v2",
+          "page_size": 30,
+          "max_pages": 15,
+          "search_terms": [
+            "Java",
+            "Spring Boot",
+            "Full Stack",
+            "Backend",
+            "Microservices"
+          ]
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Public IBM search API verified on 2026-10-14. JSON POST uses from/p pagination with 30 jobs per page. Keyword inventory is global; server-side India filtering and broader inventory coverage remain to be verified."
     }
   ]
 }

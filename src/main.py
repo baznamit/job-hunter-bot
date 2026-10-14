@@ -41,7 +41,9 @@ from src.providers import (
     EightfoldAdapter,
     FyndAdapter,
     GreenhouseAdapter,
+    HCLTechAdapter,
     HigherAdapter,
+    IBMAdapter,
     InfosysAdapter,
     KekaAdapter,
     KulaAdapter,
@@ -91,6 +93,8 @@ _ADAPTERS = {
     ProviderType.ZOHO_RECRUIT: ZohoRecruitAdapter(),
     ProviderType.FYND: FyndAdapter(),
     ProviderType.INFOSYS: InfosysAdapter(),
+    ProviderType.HCLTECH: HCLTechAdapter(),
+    ProviderType.IBM: IBMAdapter(),
 }
 
 

@@ -18,6 +18,8 @@ from .cognizant import CognizantAdapter
 from .zoho_recruit import ZohoRecruitAdapter
 from .fynd import FyndAdapter
 from .infosys import InfosysAdapter
+from .hcltech import HCLTechAdapter
+from .ibm import IBMAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -40,4 +42,6 @@ __all__ = [
     "ZohoRecruitAdapter",
     "FyndAdapter",
     "InfosysAdapter",
+    "HCLTechAdapter",
+    "IBMAdapter",
 ]

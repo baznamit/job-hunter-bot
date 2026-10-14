@@ -35,6 +35,8 @@ class ProviderType(str, Enum):
     ZOHO_RECRUIT = "zoho_recruit"
     FYND = "fynd"
     INFOSYS = "infosys"
+    HCLTECH = "hcltech"
+    IBM = "ibm"
     CUSTOM = "custom"
 
 
@@ -78,6 +80,7 @@ class ProviderConfig(BaseModel):
     source: str | None = None
     listing_path: str | None = None
     page_size: int | None = None
+    max_pages: int | None = Field(default=None, ge=1, le=500)
     pagination_mode: str | None = None
     pagination_param: str | None = None
 
