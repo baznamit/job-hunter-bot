@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 import requests
 
@@ -112,6 +113,8 @@ def main():
 
         print("\n========== PUBLIC JOBS ==========")
 
+        combined_response = None
+
         for source_id in ("1,21", "1", "21"):
             try:
                 response = session.get(
@@ -127,6 +130,9 @@ def main():
                         "Referer": "https://career.infosys.com/jobs",
                     },
                 )
+
+                if source_id == "1,21":
+                    combined_response = response
 
                 print(
                     f"[INF-JOBS] "
@@ -147,6 +153,59 @@ def main():
                     f"sourceId={source_id} "
                     f"ERROR {type(exc).__name__}: {exc}"
                 )
+
+        if combined_response is not None:
+            response = combined_response
+            jobs = response.json()
+
+            if not isinstance(jobs, list):
+                raise RuntimeError("Unexpected Infosys response")
+
+            references = [
+                str(job.get("referenceCode") or "")
+                for job in jobs
+            ]
+
+            valid_references = [
+                ref for ref in references if ref
+            ]
+
+            print(
+                "[INF-VALIDATE] "
+                f"total={len(jobs)} "
+                f"unique_refs={len(set(valid_references))} "
+                f"missing_refs={len(jobs) - len(valid_references)}"
+            )
+
+            locations = Counter(
+                str(job.get("location") or "").strip().upper()
+                for job in jobs
+            )
+
+            print(
+                "[INF-VALIDATE] "
+                f"top_locations={locations.most_common(25)}"
+            )
+
+            for job in jobs:
+                location = str(
+                    job.get("location") or ""
+                ).strip().upper()
+
+                if any(
+                    city in location
+                    for city in (
+                        "MUMBAI",
+                        "BANGALORE",
+                        "BENGALURU",
+                    )
+                ):
+                    print(
+                        "[INF-VALIDATE] JOB "
+                        f"id={job.get('referenceCode')} "
+                        f"title={job.get('postingTitle')} "
+                        f"location={location}"
+                    )
 
 
 if __name__ == "__main__":
