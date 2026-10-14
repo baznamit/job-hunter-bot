@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import Mock, patch
 
 from models.company import Company
 from src.providers.hcltech import HCLTechAdapter
@@ -78,6 +79,60 @@ def test_ibm_payload():
     assert payload["p"] == 2
     assert payload["size"] == 30
     assert payload["appId"] == "careers"
+
+
+@patch("src.providers.ibm.requests.Session")
+def test_ibm_pagination_advances_by_returned_count(mock_session):
+    first_record = {
+        "_source": {
+            "url": (
+                "https://careers.ibm.com/careers/"
+                "JobDetail?jobId=1001"
+            ),
+            "title": "Java Engineer One",
+        }
+    }
+    second_record = {
+        "_source": {
+            "url": (
+                "https://careers.ibm.com/careers/"
+                "JobDetail?jobId=1002"
+            ),
+            "title": "Java Engineer Two",
+        }
+    }
+    responses = []
+
+    for records in ([first_record], [second_record]):
+        response = Mock()
+        response.status_code = 200
+        response.url = "https://www-api.ibm.com/search/api/v2"
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {
+            "hits": {
+                "total": {"value": 2, "relation": "eq"},
+                "hits": records,
+            }
+        }
+        response.raise_for_status = Mock()
+        responses.append(response)
+
+    session = Mock()
+    session.post.side_effect = responses
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("ibm")
+    test_company.provider.config.search_terms = ["Java"]
+    test_company.provider.config.page_size = 2
+    test_company.provider.config.max_pages = 2
+
+    jobs = IBMAdapter().fetch_jobs(test_company)
+
+    assert [job.id for job in jobs] == ["1001", "1002"]
+    assert [
+        call.kwargs["json"]["from"]
+        for call in session.post.call_args_list
+    ] == [0, 1]
 
 
 def test_ibm_parse():

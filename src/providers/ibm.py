@@ -68,7 +68,13 @@ class IBMAdapter(ProviderAdapter):
         return result
 
     @classmethod
-    def _payload(cls, term: str, page: int, size: int):
+    def _payload(
+        cls,
+        term: str,
+        page: int,
+        size: int,
+        offset: int | None = None,
+    ):
         return {
             "appId": "careers",
             "scopes": ["careers2"],
@@ -83,7 +89,11 @@ class IBMAdapter(ProviderAdapter):
                 }
             },
             "aggs": cls._aggregations(),
-            "from": (page - 1) * size,
+            "from": (
+                offset
+                if offset is not None
+                else (page - 1) * size
+            ),
             "p": page,
             "size": size,
             "sort": [
@@ -162,12 +172,16 @@ class IBMAdapter(ProviderAdapter):
             for term in terms:
                 term_jobs = {}
                 total = None
+                offset = 0
 
                 for page in range(1, max_pages + 1):
                     response = session.post(
                         endpoint,
                         json=self._payload(
-                            term, page, page_size
+                            term,
+                            page,
+                            page_size,
+                            offset,
                         ),
                         timeout=TIMEOUT,
                     )
@@ -230,10 +244,7 @@ class IBMAdapter(ProviderAdapter):
                         break
 
                     if not records:
-                        raise RuntimeError(
-                            "IBM returned empty page "
-                            "before inventory completion"
-                        )
+                        break
 
                     for record in records:
                         if not isinstance(record, dict):
@@ -254,6 +265,8 @@ class IBMAdapter(ProviderAdapter):
 
                         job_id = self._job_id(url)
                         term_jobs[job_id] = item
+
+                    offset += len(records)
 
                     if len(term_jobs) >= total:
                         break
