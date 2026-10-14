@@ -11,6 +11,7 @@ from models.company import (
 from src.providers.successfactors import (
     SuccessFactorsAdapter,
 )
+from src.filters import JobFilter
 
 
 def _company(
@@ -128,6 +129,91 @@ def test_successfactors_query_pagination_url():
         "https://careers.capgemini.com/"
         "search/?startrow=50"
     )
+
+
+def test_successfactors_location_query_survives_pagination():
+    adapter = SuccessFactorsAdapter()
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://careers.capgemini.com",
+        listing_path="/search/",
+        pagination_mode="query",
+        pagination_param="startrow",
+        search_location_param="location",
+    )
+
+    assert adapter._listing_url(company, 0, "Mumbai") == (
+        "https://careers.capgemini.com/search/?location=Mumbai"
+    )
+    assert adapter._listing_url(company, 25, "Navi Mumbai") == (
+        "https://careers.capgemini.com/search/"
+        "?location=Navi+Mumbai&startrow=25"
+    )
+
+
+@patch.object(SuccessFactorsAdapter, "_fetch_html")
+def test_location_query_keeps_secondary_city_jobs(mock_fetch_html):
+    adapter = SuccessFactorsAdapter()
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://careers.capgemini.com",
+        listing_path="/search/",
+        page_size=2,
+        pagination_mode="query",
+        pagination_param="startrow",
+        search_location_param="location",
+        search_locations=["Mumbai"],
+    )
+    mock_fetch_html.side_effect = [
+        '<a href="/job/Pune-Senior-Software-Engineer/1/">Job</a>'
+        '<a href="/job/Hyderabad-Java-Developer/2/">Job</a>',
+        '<a href="/job/Navi-Mumbai-Software-Engineer/3/">Job</a>',
+    ]
+
+    urls = adapter._fetch_raw(company, "Mumbai")
+
+    assert urls == [
+        "https://careers.capgemini.com/job/Pune-Senior-Software-Engineer/1/",
+        "https://careers.capgemini.com/job/Hyderabad-Java-Developer/2/",
+        "https://careers.capgemini.com/job/Navi-Mumbai-Software-Engineer/3/",
+    ]
+    assert [call.args[0] for call in mock_fetch_html.call_args_list] == [
+        "https://careers.capgemini.com/search/?location=Mumbai",
+        "https://careers.capgemini.com/search/?location=Mumbai&startrow=2",
+    ]
+
+
+@patch.object(SuccessFactorsAdapter, "_fetch_html")
+def test_location_queries_deduplicate_and_preserve_matched_cities(mock_fetch_html):
+    adapter = SuccessFactorsAdapter()
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://careers.capgemini.com",
+        listing_path="/search/",
+        page_size=25,
+        pagination_mode="query",
+        search_location_param="location",
+        search_locations=["Mumbai", "Bangalore"],
+    )
+    listing = '<a href="/job/Pune-Senior-Software-Engineer/1/">Job</a>'
+    mock_fetch_html.side_effect = [
+        listing,
+        listing,
+        "<html><title>Senior Software Engineer Job Details | Capgemini</title>"
+        "<body>No structured location field</body></html>",
+    ]
+
+    jobs = adapter.fetch_jobs(company)
+
+    assert len(jobs) == 1
+    assert jobs[0].title == "Senior Software Engineer"
+    assert jobs[0].location == "Pune, Mumbai, Bangalore"
+    assert JobFilter().should_include(jobs[0])
+    assert [call.args[0] for call in mock_fetch_html.call_args_list] == [
+        "https://careers.capgemini.com/search/?location=Mumbai",
+        "https://careers.capgemini.com/search/?location=Bangalore",
+        "https://careers.capgemini.com/job/Pune-Senior-Software-Engineer/1/",
+    ]
 
 
 def test_extract_location_falls_back_to_nomura_url():
