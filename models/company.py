@@ -34,6 +34,7 @@ class ProviderType(str, Enum):
     COGNIZANT = "cognizant"
     ZOHO_RECRUIT = "zoho_recruit"
     FYND = "fynd"
+    INFOSYS = "infosys"
     CUSTOM = "custom"
 
 
@@ -83,6 +84,9 @@ class ProviderConfig(BaseModel):
     app_id: str | None = None
     api_key: str | None = None
     index_name: str | None = None
+
+    config_url: str | None = None
+    source_id: str | None = None
 
     search_terms: list[str] | None = None
     search_location: str | None = None

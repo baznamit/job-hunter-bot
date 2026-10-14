@@ -42,6 +42,7 @@ from src.providers import (
     FyndAdapter,
     GreenhouseAdapter,
     HigherAdapter,
+    InfosysAdapter,
     KekaAdapter,
     KulaAdapter,
     LeverAdapter,
@@ -89,6 +90,7 @@ _ADAPTERS = {
     ProviderType.COGNIZANT: CognizantAdapter(),
     ProviderType.ZOHO_RECRUIT: ZohoRecruitAdapter(),
     ProviderType.FYND: FyndAdapter(),
+    ProviderType.INFOSYS: InfosysAdapter(),
 }
 
 

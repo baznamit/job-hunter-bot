@@ -17,6 +17,7 @@ from .eightfold import EightfoldAdapter
 from .cognizant import CognizantAdapter
 from .zoho_recruit import ZohoRecruitAdapter
 from .fynd import FyndAdapter
+from .infosys import InfosysAdapter
 
 __all__ = [
     "ProviderAdapter",
@@ -38,4 +39,5 @@ __all__ = [
     "CognizantAdapter",
     "ZohoRecruitAdapter",
     "FyndAdapter",
+    "InfosysAdapter",
 ]

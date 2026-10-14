@@ -1325,6 +1325,26 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official CleverTap careers board hosted by Kula. Public server-rendered board exposes structured job inventory and canonical /<job_id>/ URLs."
+    },
+    {
+      "id": "infosys",
+      "name": "Infosys",
+      "category": "Product",
+      "priority": 2,
+      "enabled": false,
+      "career_page": "https://career.infosys.com/jobs?companyhiringtype=IL&countrycode=IN",
+      "provider": {
+        "type": "infosys",
+        "status": "verified",
+        "config": {
+          "config_url": "https://career.infosys.com/assets/environments/environment.json",
+          "source_id": "1,21"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Infosys anonymous careers API verified in GitHub Actions on 2026-10-14. Combined sourceId=1,21 returned 1691 jobs with 1691 unique reference codes, including Mumbai, Navi Mumbai and Bangalore. Job-detail URLs require final browser validation."
     }
   ]
 }
