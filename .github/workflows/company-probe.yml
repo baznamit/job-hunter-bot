@@ -21,8 +21,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # - name: Probe BNP Paribas and Infosys
-      #   run: python -u -m research.company_probe
+      - name: Company Probe
+        run: python -u -m research.company_probe
 
       - name: Validate IBM production adapter
         run: |
