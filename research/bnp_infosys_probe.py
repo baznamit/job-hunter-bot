@@ -1,158 +1,128 @@
 
 from __future__ import annotations
 
-import re
-from urllib.parse import urljoin
-
+import json
 import requests
 
-BASE = "https://career.infosys.com"
+BASE = (
+    "https://intapgateway.infosysapps.com/"
+    "careers/search/intapjbsrch/"
+)
+
+CONFIG_URL = (
+    "https://career.infosys.com/"
+    "assets/environments/environment.json"
+)
 
 TIMEOUT = 30
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/127.0.0.0 Safari/537.36"
-    ),
-    "Accept": "*/*",
-    "Referer": BASE + "/jobs",
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+    "Origin": "https://career.infosys.com",
+    "Referer": "https://career.infosys.com/jobs",
 }
 
-SCRIPTS = [
-    "/assets/js/env.js",
-    "/runtime.js",
-    "/main.js",
-]
 
-MARKERS = (
-    "api",
-    "baseUrl",
-    "baseURL",
-    "environment",
-    "jobReferenceCode",
-    "companyhiringtype",
-    "countrycode",
-    "joblist",
-    "jobdesc",
-    "searchJobs",
-    "getJobs",
-    "pagination",
-    "pageSize",
-    "graphql",
-    "https://",
-    "http://",
-)
-
-MAX_CONTEXTS = 5
-MAX_SCRIPT_BYTES = 15_000_000
-
-
-def clean(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def inspect_script(
-    session: requests.Session,
-    path: str,
-) -> None:
-    url = urljoin(BASE, path)
-
-    print()
-    print(f"[INF-JS] Fetching {url}")
+def inspect_json(label, response):
+    print(
+        f"[{label}] "
+        f"status={response.status_code} "
+        f"content_type={response.headers.get('Content-Type')} "
+        f"bytes={len(response.content)}"
+    )
 
     try:
-        response = session.get(
-            url,
-            timeout=TIMEOUT,
-        )
-    except requests.RequestException as exc:
+        payload = response.json()
+    except ValueError:
         print(
-            f"[INF-JS] ERROR "
-            f"{type(exc).__name__}: {exc}"
+            f"[{label}] NON_JSON "
+            f"preview={response.text[:300]!r}"
         )
         return
 
-    print(
-        f"[INF-JS] status={response.status_code} "
-        f"bytes={len(response.content)} "
-        f"type={response.headers.get('Content-Type')}"
-    )
-
-    if response.status_code != 200:
+    if isinstance(payload, dict):
         print(
-            f"[INF-JS] body="
-            f"{response.text[:500]!r}"
-        )
-        return
-
-    if len(response.content) > MAX_SCRIPT_BYTES:
-        print("[INF-JS] SKIPPED: script too large")
-        return
-
-    text = response.text
-    lower = text.lower()
-
-    for marker in MARKERS:
-        matches = list(
-            re.finditer(
-                re.escape(marker),
-                lower,
-                re.IGNORECASE,
-            )
+            f"[{label}] "
+            f"keys={list(payload.keys())}"
         )
 
+        for key, value in payload.items():
+            if isinstance(value, list):
+                print(
+                    f"[{label}] "
+                    f"list={key} count={len(value)}"
+                )
+
+                if value:
+                    print(
+                        f"[{label}] "
+                        f"sample={json.dumps(value[0], default=str)[:2000]}"
+                    )
+
+            elif isinstance(value, dict):
+                print(
+                    f"[{label}] "
+                    f"object={key} "
+                    f"keys={list(value.keys())}"
+                )
+
+    elif isinstance(payload, list):
         print(
-            f"[INF-JS] marker={marker!r} "
-            f"count={len(matches)}"
+            f"[{label}] "
+            f"jobs={len(payload)}"
         )
 
-        for match in matches[:MAX_CONTEXTS]:
-            snippet = text[
-                max(0, match.start() - 350):
-                min(len(text), match.end() + 700)
-            ]
-
+        for item in payload[:3]:
             print(
-                f"[INF-JS] CONTEXT "
-                f"marker={marker!r} "
-                f"text={clean(snippet)[:1000]!r}"
-            )
-
-    urls = set(
-        re.findall(
-            r'https?://[^"\'\s<>\\]+',
-            text,
-            flags=re.IGNORECASE,
-        )
-    )
-
-    for candidate in sorted(urls):
-        if any(
-            term in candidate.lower()
-            for term in (
-                "api",
-                "career",
-                "job",
-                "infosys",
-                "graphql",
-            )
-        ):
-            print(
-                f"[INF-JS] CANDIDATE_URL "
-                f"{candidate[:300]}"
+                f"[{label}] "
+                f"sample={json.dumps(item, default=str)[:2000]}"
             )
 
 
-def main() -> None:
+def main():
     with requests.Session() as session:
         session.headers.update(HEADERS)
 
-        for path in SCRIPTS:
-            inspect_script(session, path)
+        print("\n========== CONFIG ==========")
+
+        try:
+            response = session.get(
+                CONFIG_URL,
+                timeout=TIMEOUT,
+            )
+            inspect_json("INF-CONFIG", response)
+        except requests.RequestException as exc:
+            print(
+                "[INF-CONFIG] ERROR "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+        print("\n========== PUBLIC JOBS ==========")
+
+        endpoint = BASE + "getCareerSearchJobs"
+
+        for source_id in ("1,21", "1", "21"):
+            try:
+                response = session.get(
+                    endpoint,
+                    params={
+                        "sourceId": source_id,
+                        "searchText": "ALL",
+                    },
+                    timeout=TIMEOUT,
+                )
+
+                inspect_json(
+                    f"INF-JOBS sourceId={source_id}",
+                    response,
+                )
+
+            except requests.RequestException as exc:
+                print(
+                    f"[INF-JOBS sourceId={source_id}] "
+                    f"ERROR {type(exc).__name__}: {exc}"
+                )
 
 
 if __name__ == "__main__":
