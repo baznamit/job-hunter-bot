@@ -1,283 +1,159 @@
+
 from __future__ import annotations
 
-import argparse
 import re
-from html.parser import HTMLParser
 from urllib.parse import urljoin
 
 import requests
 
+BASE = "https://career.infosys.com"
+
 TIMEOUT = 30
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "text/html,application/json,*/*",
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/127.0.0.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
+    "Referer": BASE + "/jobs",
 }
 
-BNP_URL = (
-    "https://group.bnpparibas/"
-    "en/careers/all-job-offers/india"
+SCRIPTS = [
+    "/assets/js/env.js",
+    "/runtime.js",
+    "/main.js",
+]
+
+MARKERS = (
+    "api",
+    "baseUrl",
+    "baseURL",
+    "environment",
+    "jobReferenceCode",
+    "companyhiringtype",
+    "countrycode",
+    "joblist",
+    "jobdesc",
+    "searchJobs",
+    "getJobs",
+    "pagination",
+    "pageSize",
+    "graphql",
+    "https://",
+    "http://",
 )
 
-INFOSYS_URL = "https://career.infosys.com"
+MAX_CONTEXTS = 5
+MAX_SCRIPT_BYTES = 15_000_000
 
-class LinkParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.links = []
-        self.scripts = []
 
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
+def clean(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
 
-        if tag == "a" and attrs.get("href"):
-            self.links.append(attrs["href"])
 
-        if tag == "script" and attrs.get("src"):
-            self.scripts.append(attrs["src"])
+def inspect_script(
+    session: requests.Session,
+    path: str,
+) -> None:
+    url = urljoin(BASE, path)
 
-def fetch(session, label, url):
+    print()
+    print(f"[INF-JS] Fetching {url}")
+
     try:
         response = session.get(
             url,
             timeout=TIMEOUT,
-            allow_redirects=True,
         )
-
-        print(
-            f"[{label}] "
-            f"status={response.status_code} "
-            f"url={response.url} "
-            f"bytes={len(response.content)} "
-            f"type={response.headers.get('Content-Type')}"
-        )
-
-        if response.history:
-            print(
-                f"[{label}] redirects="
-                f"{[(r.status_code, r.url) for r in response.history]}"
-            )
-
-        if response.status_code != 200:
-            print(
-                f"[{label}] preview="
-                f"{response.text[:300]!r}"
-            )
-
-        return response
-
     except requests.RequestException as exc:
         print(
-            f"[{label}] ERROR "
+            f"[INF-JS] ERROR "
             f"{type(exc).__name__}: {exc}"
         )
-        return None
-
-def inspect(label, response, company):
-    if response is None or response.status_code != 200:
-        return set()
-
-    parser = LinkParser()
-    parser.feed(response.text)
-
-    links = [
-        urljoin(response.url, href)
-        for href in parser.links
-    ]
-
-    if company == "bnp":
-        jobs = {
-            url for url in links
-            if "/careers/job-offer/" in url
-        }
-    else:
-        jobs = {
-            url for url in links
-            if "jobdesc" in url.lower()
-            or "jobreferencecode" in url.lower()
-        }
+        return
 
     print(
-        f"[{label}] "
-        f"links={len(links)} "
-        f"job_links={len(jobs)} "
-        f"scripts={len(parser.scripts)}"
+        f"[INF-JS] status={response.status_code} "
+        f"bytes={len(response.content)} "
+        f"type={response.headers.get('Content-Type')}"
     )
 
-    for url in sorted(jobs)[:15]:
-        print(f"[{label}] JOB {url}")
-
-    for url in links:
-        if any(
-            term in url.lower()
-            for term in ("page=", "next", "joblist")
-        ):
-            print(f"[{label}] NAV {url[:220]}")
-
-    for script in parser.scripts[:15]:
+    if response.status_code != 200:
         print(
-            f"[{label}] SCRIPT "
-            f"{urljoin(response.url, script)}"
+            f"[INF-JS] body="
+            f"{response.text[:500]!r}"
         )
+        return
 
-    for marker in (
-        "__NEXT_DATA__",
-        "__INITIAL_STATE__",
-        "graphql",
-        "application/ld+json",
-        "jobReferenceCode",
-    ):
-        print(
-            f"[{label}] marker={marker} "
-            f"present={marker.lower() in response.text.lower()}"
-        )
+    if len(response.content) > MAX_SCRIPT_BYTES:
+        print("[INF-JS] SKIPPED: script too large")
+        return
 
-    return jobs
+    text = response.text
+    lower = text.lower()
 
-def probe_bnp(session):
-    print("\n========== BNP PARIBAS ==========")
-
-    pages = {}
-
-    candidates = {
-        "BNP-BASE": BNP_URL,
-        "BNP-PAGE1": BNP_URL + "?page=1",
-        "BNP-PAGE2": BNP_URL + "?page=2",
-        "BNP-PERM": (
-            "https://group.bnpparibas/"
-            "en/careers/all-job-offers/"
-            "permanent/india?page=1"
-        ),
-    }
-
-    for label, url in candidates.items():
-        response = fetch(session, label, url)
-        pages[label] = inspect(label, response, "bnp")
-
-    baseline = pages["BNP-BASE"]
-
-    for label, jobs in pages.items():
-        print(
-            f"[BNP-COMPARE] {label} "
-            f"count={len(jobs)} "
-            f"overlap={len(baseline & jobs)} "
-            f"different={jobs != baseline}"
-        )
-
-    detail_url = (
-        "https://group.bnpparibas/"
-        "en/careers/job-offer/"
-        "java-backend-developer"
-    )
-
-    response = fetch(
-        session,
-        "BNP-DETAIL",
-        detail_url,
-    )
-
-    if response is not None and response.status_code == 200:
-        parser = LinkParser()
-        parser.feed(response.text)
-
-        for href in parser.links:
-            if any(
-                term in href.lower()
-                for term in ("apply", "bwelcome", "postuler")
-            ):
-                print(
-                    "[BNP-APPLY] "
-                    + urljoin(response.url, href)
-                )
-
-def probe_infosys(session):
-    print("\n========== INFOSYS ==========")
-
-    candidates = {
-        "INF-JOBS": (
-            INFOSYS_URL
-            + "/jobs?companyhiringtype=IL&countrycode=IN"
-        ),
-        "INF-JOBLIST": INFOSYS_URL + "/joblist",
-        "INF-DETAIL": (
-            INFOSYS_URL
-            + "/jobdesc?jobReferenceCode="
-            + "INFSYS-EXTERNAL-254157"
-        ),
-    }
-
-    for label, url in candidates.items():
-        response = fetch(session, label, url)
-        inspect(label, response, "infosys")
-
-        if response is None or response.status_code != 200:
-            continue
-
-        text = response.text
-
-        markers = (
-            "jobReferenceCode",
-            "companyhiringtype",
-            "countrycode",
-            "graphql",
-            "/api/",
-            "fetch(",
-            "axios",
-            "pagination",
-            "totalJobs",
-        )
-
-        for marker in markers:
-            matches = list(
-                re.finditer(
-                    re.escape(marker),
-                    text,
-                    re.IGNORECASE,
-                )
+    for marker in MARKERS:
+        matches = list(
+            re.finditer(
+                re.escape(marker),
+                lower,
+                re.IGNORECASE,
             )
+        )
+
+        print(
+            f"[INF-JS] marker={marker!r} "
+            f"count={len(matches)}"
+        )
+
+        for match in matches[:MAX_CONTEXTS]:
+            snippet = text[
+                max(0, match.start() - 350):
+                min(len(text), match.end() + 700)
+            ]
 
             print(
-                f"[{label}] "
+                f"[INF-JS] CONTEXT "
                 f"marker={marker!r} "
-                f"occurrences={len(matches)}"
+                f"text={clean(snippet)[:1000]!r}"
             )
 
-            for match in matches[:2]:
-                snippet = text[
-                    max(0, match.start() - 100):
-                    match.end() + 150
-                ]
-
-                snippet = re.sub(
-                    r"\s+",
-                    " ",
-                    snippet,
-                )
-
-                print(
-                    f"[{label}] CONTEXT "
-                    f"{snippet[:250]!r}"
-                )
-
-def main():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--company",
-        choices=("all", "bnp", "infosys"),
-        default="all",
+    urls = set(
+        re.findall(
+            r'https?://[^"\'\s<>\\]+',
+            text,
+            flags=re.IGNORECASE,
+        )
     )
 
-    args = parser.parse_args()
+    for candidate in sorted(urls):
+        if any(
+            term in candidate.lower()
+            for term in (
+                "api",
+                "career",
+                "job",
+                "infosys",
+                "graphql",
+            )
+        ):
+            print(
+                f"[INF-JS] CANDIDATE_URL "
+                f"{candidate[:300]}"
+            )
 
+
+def main() -> None:
     with requests.Session() as session:
         session.headers.update(HEADERS)
 
-        if args.company in ("all", "bnp"):
-            probe_bnp(session)
+        for path in SCRIPTS:
+            inspect_script(session, path)
 
-        if args.company in ("all", "infosys"):
-            probe_infosys(session)
 
 if __name__ == "__main__":
     main()
