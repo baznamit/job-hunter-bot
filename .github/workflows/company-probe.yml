@@ -24,6 +24,22 @@ jobs:
       - name: Company Probe
         run: python -u -m research.company_probe
 
+      - name: Verify IBM and HCLTech configuration
+        run: |
+          python - <<'PY'
+          from research.loader import load_registry
+
+          for company in load_registry().companies:
+              if company.id in ("ibm", "hcltech"):
+                  print(
+                      "[CONFIG]",
+                      company.id,
+                      "enabled=", company.enabled,
+                      "terms=", company.provider.config.search_terms,
+                      "max_pages=", company.provider.config.max_pages,
+                  )
+          PY
+
       - name: Validate IBM and HCLTech
         run: |
           python -u - <<'PY'
