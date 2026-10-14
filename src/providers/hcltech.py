@@ -88,6 +88,7 @@ class HCLTechAdapter(ProviderAdapter):
             for term in terms:
                 term_jobs = {}
                 total = None
+                received_hits = 0
 
                 for page in range(max_pages):
                     response = session.post(
@@ -115,11 +116,28 @@ class HCLTechAdapter(ProviderAdapter):
                     records = data.get("jobSearchResult")
 
                     if (
-                        not isinstance(reported, int)
-                        or not isinstance(records, list)
+                        isinstance(reported, bool)
+                        or not isinstance(reported, int)
+                        or reported < 0
                     ):
                         raise RuntimeError(
-                            "Invalid HCLTech job schema"
+                            f"HCLTech invalid totalJobs: "
+                            f"term={term!r} page={page} "
+                            f"value={reported!r} "
+                            f"keys={list(data.keys())}"
+                        )
+
+                    if records is None and reported == 0:
+                        records = []
+
+                    if not isinstance(records, list):
+                        raise RuntimeError(
+                            f"HCLTech invalid jobSearchResult: "
+                            f"term={term!r} page={page} "
+                            f"totalJobs={reported} "
+                            f"records_type={type(records).__name__} "
+                            f"keys={list(data.keys())} "
+                            f"preview={str(data)[:500]}"
                         )
 
                     if total is None:
@@ -164,15 +182,25 @@ class HCLTechAdapter(ProviderAdapter):
 
                         term_jobs[job_id] = item
 
-                    if len(term_jobs) >= total:
+                    received_hits += len(records)
+
+                    print(
+                        f"[HCL-PAGE] term={term!r} "
+                        f"page={page} "
+                        f"received={received_hits}/{total} "
+                        f"unique={len(term_jobs)}"
+                    )
+
+                    if received_hits >= total:
                         break
 
-                if len(term_jobs) < total:
+                if received_hits < total:
                     raise RuntimeError(
                         f"HCLTech query {term!r} "
-                        f"incomplete: fetched "
-                        f"{len(term_jobs)}/{total} "
-                        f"within {max_pages} pages"
+                        f"incomplete: received "
+                        f"{received_hits}/{total} records "
+                        f"within {max_pages} pages; "
+                        f"unique={len(term_jobs)}"
                     )
 
                 collected.update(term_jobs)

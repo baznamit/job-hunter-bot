@@ -70,6 +70,66 @@ def test_hcl_deduplication():
     assert len(jobs) == 1
 
 
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_zero_results_without_job_list(mock_session):
+    response = Mock()
+    response.status_code = 200
+    response.url = (
+        "https://careers.hcltech.com"
+        "/services/recruiting/v1/jobs"
+    )
+    response.headers = {
+        "Content-Type": "application/json"
+    }
+    response.json.return_value = {
+        "totalJobs": 0
+    }
+    response.raise_for_status = Mock()
+
+    session = Mock()
+    session.post.return_value = response
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Mumbai"]
+    test_company.provider.config.max_pages = 1
+
+    jobs = HCLTechAdapter().fetch_jobs(test_company)
+
+    assert jobs == []
+
+
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_rejects_missing_positive_job_list(mock_session):
+    response = Mock()
+    response.status_code = 200
+    response.url = (
+        "https://careers.hcltech.com"
+        "/services/recruiting/v1/jobs"
+    )
+    response.headers = {
+        "Content-Type": "application/json"
+    }
+    response.json.return_value = {
+        "totalJobs": 13
+    }
+    response.raise_for_status = Mock()
+
+    session = Mock()
+    session.post.return_value = response
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Mumbai"]
+    test_company.provider.config.max_pages = 1
+
+    with pytest.raises(
+        RuntimeError,
+        match="invalid jobSearchResult",
+    ):
+        HCLTechAdapter().fetch_jobs(test_company)
+
+
 def test_ibm_payload():
     payload = IBMAdapter._payload(
         "Java", 2, 30
