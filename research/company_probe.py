@@ -1,19 +1,38 @@
+
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
-from collections import Counter
 import argparse
+import json
 import re
+import xml.etree.ElementTree as ET
+
+from collections import Counter
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import (
+    urljoin,
+    urlparse,
+    parse_qs,
+    urldefrag,
+)
 
 import requests
 
 
-TIMEOUT = (10, 25)
-MAX_HTML_BYTES = 3_000_000
-MAX_JS_BYTES = 5_000_000
-MAX_JS_FILES = 4
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+TIMEOUT = (10, 30)
+
+MAX_HTML_BYTES = 4_000_000
+MAX_JS_BYTES = 7_000_000
+MAX_JS_FILES = 8
+
+HCL = "https://careers.hcltech.com"
+IBM = "https://www.ibm.com"
+IBM_CAREERS = "https://careers.ibm.com"
+
+HCL_KNOWN_ID = "136528"
 
 HEADERS = {
     "User-Agent": (
@@ -23,44 +42,79 @@ HEADERS = {
         "(KHTML, like Gecko) "
         "Chrome/127.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/json,*/*",
+    "Accept": (
+        "text/html,application/json,"
+        "application/xml,*/*"
+    ),
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-HCL_BASE = "https://careers.hcltech.com"
-IBM_BASE = "https://www.ibm.com"
+JOB_PATTERN = re.compile(
+    r"/job/[^\"'<>\s?#]+?/(\d+)"
+    r"(?:-[a-z]{2}_[A-Z]{2})?"
+    r"(?:/|[?#]|$)",
+    re.IGNORECASE,
+)
 
-HCL_KNOWN_JOB_ID = "136528"
+URL_PATTERN = re.compile(
+    r"https?://[^\s\"'<>\\]+",
+    re.IGNORECASE,
+)
+
+API_MARKERS = (
+    "graphql",
+    "/api/",
+    "searchjobs",
+    "search-jobs",
+    "jobsearch",
+    "job-search",
+    "jobposting",
+    "requisitions",
+    "careers/search",
+    "careers.ibm.com",
+    "eightfold",
+    "workday",
+    "algolia",
+    "phenom",
+    "fetch(",
+    "axios",
+)
 
 
 # ============================================================
 # HTML PARSER
 # ============================================================
 
-
 class PageParser(HTMLParser):
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
 
         self.links = []
         self.scripts = []
+        self.embedded = []
         self.forms = []
-        self.embedded_scripts = []
-        self._current_script = None
+
+        self.current_script = None
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
 
-        if tag == "a" and attrs.get("href"):
-            self.links.append(attrs["href"])
+        if tag == "a":
+            href = attrs.get("href")
+
+            if href:
+                self.links.append(href)
 
         elif tag == "script":
-            if attrs.get("src"):
-                self.scripts.append(attrs["src"])
+            src = attrs.get("src")
+
+            if src:
+                self.scripts.append(src)
             else:
-                self._current_script = {
+                self.current_script = {
                     "attrs": attrs,
-                    "content": [],
+                    "parts": [],
                 }
 
         elif tag == "form":
@@ -70,24 +124,47 @@ class PageParser(HTMLParser):
             })
 
     def handle_data(self, data):
-        if self._current_script is not None:
-            self._current_script["content"].append(data)
+        if self.current_script is not None:
+            self.current_script["parts"].append(
+                data
+            )
 
     def handle_endtag(self, tag):
-        if tag == "script" and self._current_script is not None:
-            script = self._current_script
-            script["content"] = "".join(script["content"])
+        if (
+            tag == "script"
+            and self.current_script is not None
+        ):
+            script = self.current_script
 
-            self.embedded_scripts.append(script)
-            self._current_script = None
+            script["text"] = "".join(
+                script.pop("parts")
+            )
+
+            self.embedded.append(script)
+
+            self.current_script = None
 
 
 # ============================================================
-# COMMON HTTP
+# COMMON HELPERS
 # ============================================================
 
+def clean(value, limit=350):
+    value = re.sub(
+        r"\s+",
+        " ",
+        str(value),
+    ).strip()
 
-def fetch(session, label, url, max_bytes=MAX_HTML_BYTES):
+    return value[:limit]
+
+
+def fetch(
+    session,
+    label,
+    url,
+    max_bytes=MAX_HTML_BYTES,
+):
     try:
         with session.get(
             url,
@@ -116,8 +193,6 @@ def fetch(session, label, url, max_bytes=MAX_HTML_BYTES):
 
                 chunks.append(chunk)
 
-            content = b"".join(chunks)
-
             content_type = response.headers.get(
                 "Content-Type", ""
             )
@@ -132,71 +207,89 @@ def fetch(session, label, url, max_bytes=MAX_HTML_BYTES):
 
             if response.status_code != 200:
                 print(
-                    f"[{label}] "
-                    f"ERROR_BODY={content[:160]!r}"
+                    f"[{label}] HTTP_ERROR "
+                    f"status={response.status_code}"
                 )
                 return None
 
-            text = content.decode(
+            body = b"".join(chunks)
+
+            text = body.decode(
                 response.encoding or "utf-8",
                 errors="replace",
             )
 
+            final_host = urlparse(
+                response.url
+            ).hostname or ""
+
+            if (
+                "zscaler" in final_host.lower()
+                or "login.zscaler" in text[:4000].lower()
+            ):
+                print(
+                    f"[{label}] "
+                    "INTERCEPTED_BY_ZSCALER"
+                )
+                return None
+
             if any(
-                marker in text[:4000].lower()
+                marker in text[:3000].lower()
                 for marker in (
-                    "login.zscaler",
-                    "access denied",
-                    "captcha",
+                    "<title>access denied",
+                    "captcha challenge",
                 )
             ):
                 print(
                     f"[{label}] "
-                    "SECURITY_OR_INTERSTITIAL"
+                    "SECURITY_PAGE"
                 )
                 return None
 
-            return (
-                response.url,
-                content_type,
-                text,
-            )
+            return {
+                "url": response.url,
+                "content_type": content_type,
+                "text": text,
+            }
 
     except requests.RequestException as exc:
         print(
-            f"[{label}] "
-            f"REQUEST_ERROR="
+            f"[{label}] ERROR "
             f"{type(exc).__name__}: {exc}"
         )
         return None
 
 
-def parse_page(result, label):
+def parse_html(result, label):
     if result is None:
         return None, [], []
 
-    final_url, content_type, text = result
+    text = result["text"]
 
     if (
-        "html" not in content_type.lower()
-        or "<html" not in text[:2000].lower()
+        "html" not in result["content_type"].lower()
+        and "<html" not in text[:1000].lower()
     ):
-        print(f"[{label}] NOT_HTML")
+        print(
+            f"[{label}] NOT_HTML"
+        )
         return None, [], []
 
     parser = PageParser()
     parser.feed(text)
 
     links = list(dict.fromkeys(
-        urldefrag(urljoin(final_url, href))[0]
+        urldefrag(
+            urljoin(result["url"], href)
+        )[0]
         for href in parser.links
         if not href.lower().startswith(
-            ("javascript:", "mailto:", "tel:")
+            ("javascript:", "mailto:", "tel:", "#")
         )
     ))
 
     scripts = list(dict.fromkeys(
-        urljoin(final_url, src)
+        urljoin(result["url"], src)
         for src in parser.scripts
     ))
 
@@ -204,374 +297,690 @@ def parse_page(result, label):
         f"[{label}] "
         f"links={len(links)} "
         f"scripts={len(scripts)} "
-        f"forms={len(parser.forms)} "
-        f"embedded_scripts={len(parser.embedded_scripts)}"
+        f"embedded={len(parser.embedded)} "
+        f"forms={len(parser.forms)}"
     )
-
-    for script in parser.embedded_scripts:
-        attrs = script["attrs"]
-
-        if any(
-            marker in str(attrs).lower()
-            for marker in (
-                "json",
-                "next_data",
-            )
-        ):
-            print(
-                f"[{label}] "
-                f"EMBEDDED_JSON "
-                f"attrs={attrs} "
-                f"bytes={len(script['content'])}"
-            )
 
     return parser, links, scripts
 
 
-# ============================================================
-# HCLTECH
-# ============================================================
+def extract_job_ids(text):
+    return set(
+        match.group(1)
+        for match in JOB_PATTERN.finditer(text)
+    )
 
 
-def extract_hcl_jobs(links):
-    jobs = {}
+def extract_job_urls(text):
+    urls = {}
 
-    for link in links:
-        parsed = urlparse(link)
+    for match in re.finditer(
+        r"""(?:https?://[^"'<>\\\s]+)?/job/[^"'<>\\\s]+""",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        candidate = match.group(0)
 
-        if parsed.netloc.lower() != "careers.hcltech.com":
-            continue
-
-        match = re.search(
-            r"/job/[^?#]+?/(\d+)-[a-z]{2}_[A-Z]{2}/?",
-            link,
+        candidate = candidate.replace(
+            "\\/",
+            "/",
         )
 
-        if match:
-            jobs[match.group(1)] = link
+        job_match = JOB_PATTERN.search(
+            candidate
+        )
 
-    return jobs
+        if job_match:
+            urls[job_match.group(1)] = candidate
 
+    return urls
+
+
+def show_contexts(
+    label,
+    text,
+    markers,
+    max_hits=2,
+):
+    for marker in markers:
+        matches = list(
+            re.finditer(
+                re.escape(marker),
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+
+        if not matches:
+            continue
+
+        print(
+            f"[{label}] "
+            f"MARKER={marker!r} "
+            f"count={len(matches)}"
+        )
+
+        for match in matches[:max_hits]:
+            snippet = text[
+                max(0, match.start() - 130):
+                match.end() + 220
+            ]
+
+            print(
+                f"[{label}] CONTEXT "
+                f"{clean(snippet)!r}"
+            )
+
+
+# ============================================================
+# HCLTECH — HTML / RMK
+# ============================================================
 
 def inspect_hcl_page(session, label, url):
-    result = fetch(session, label, url)
+    result = fetch(
+        session,
+        label,
+        url,
+    )
 
-    parser, links, scripts = parse_page(
+    parser, links, scripts = parse_html(
         result,
         label,
     )
 
-    jobs = extract_hcl_jobs(links)
+    if result is None:
+        return set(), []
+
+    text = result["text"]
+
+    link_ids = extract_job_ids(
+        "\n".join(links)
+    )
+
+    html_ids = extract_job_ids(text)
+
+    embedded_ids = set()
+
+    if parser:
+        for script in parser.embedded:
+            embedded_ids.update(
+                extract_job_ids(
+                    script["text"]
+                )
+            )
+
+    all_ids = (
+        link_ids
+        | html_ids
+        | embedded_ids
+    )
 
     print(
         f"[{label}] "
-        f"unique_jobs={len(jobs)} "
-        f"known_job_present="
-        f"{HCL_KNOWN_JOB_ID in jobs}"
+        f"link_ids={len(link_ids)} "
+        f"html_ids={len(html_ids)} "
+        f"embedded_ids={len(embedded_ids)} "
+        f"union_ids={len(all_ids)}"
     )
 
-    for job_id, link in list(jobs.items())[:10]:
+    print(
+        f"[{label}] "
+        f"known_job_present="
+        f"{HCL_KNOWN_ID in all_ids}"
+    )
+
+    for job_id in sorted(all_ids)[:12]:
         print(
-            f"[{label}] "
-            f"JOB id={job_id} "
-            f"url={link}"
+            f"[{label}] JOB_ID={job_id}"
         )
 
-    pagination = [
-        link
-        for link in links
+    show_contexts(
+        label,
+        text,
+        (
+            "/job/",
+            "jobTitle",
+            "jobLocation",
+            "searchResults",
+            "startrow",
+            "pagination",
+            "resultList",
+            "jobSearch",
+            "J2W",
+        ),
+        max_hits=2,
+    )
+
+    pagination = []
+
+    for link in links:
+        parsed = urlparse(link)
+
+        if parsed.hostname != "careers.hcltech.com":
+            continue
+
+        query = parse_qs(parsed.query)
+
         if (
-            urlparse(link).netloc.lower()
-            == "careers.hcltech.com"
-            and re.search(
-                r"startrow|[?&]page=|/search/\d+",
-                link,
-                flags=re.IGNORECASE,
+            "startrow" in query
+            or "page" in query
+            or re.search(
+                r"/search/\d+/?$",
+                parsed.path,
             )
-        )
-    ]
-
-    for link in pagination[:15]:
-        print(
-            f"[{label}] "
-            f"PAGINATION_CANDIDATE={link}"
-        )
-
-    if result is not None:
-        text = result[2]
-
-        for pattern in (
-            r"Displaying\s+[^<]{0,100}",
-            r"Showing\s+[^<]{0,100}",
-            r"[\d,]+\s+(?:jobs|results)",
         ):
-            matches = re.findall(
-                pattern,
-                text,
-                flags=re.IGNORECASE,
+            pagination.append(link)
+
+    pagination = list(dict.fromkeys(
+        pagination
+    ))
+
+    for link in pagination[:12]:
+        print(
+            f"[{label}] PAGE_LINK={link}"
+        )
+
+    return all_ids, pagination
+
+
+# ============================================================
+# HCLTECH — RSS
+# ============================================================
+
+def probe_hcl_rss(session):
+    print()
+    print("========== HCL RSS ==========")
+
+    url = (
+        HCL
+        + "/services/rss/job/?locale=en_US"
+    )
+
+    result = fetch(
+        session,
+        "HCL-RSS",
+        url,
+    )
+
+    if result is None:
+        return
+
+    try:
+        root = ET.fromstring(
+            result["text"]
+        )
+    except ET.ParseError as exc:
+        print(
+            f"[HCL-RSS] XML_ERROR={exc}"
+        )
+        return
+
+    channel = root.find("channel")
+
+    if channel is None:
+        print(
+            "[HCL-RSS] NO_CHANNEL"
+        )
+        return
+
+    items = channel.findall("item")
+
+    print(
+        f"[HCL-RSS] items={len(items)}"
+    )
+
+    print(
+        "[HCL-RSS] "
+        f"channel_title={channel.findtext('title')!r}"
+    )
+
+    print(
+        "[HCL-RSS] "
+        f"description={clean(channel.findtext('description') or '')!r}"
+    )
+
+    atom_links = channel.findall(
+        "{http://www.w3.org/2005/Atom}link"
+    )
+
+    for atom in atom_links[:5]:
+        print(
+            f"[HCL-RSS] ATOM_LINK="
+            f"{atom.attrib}"
+        )
+
+    job_ids = set()
+    locations = Counter()
+    dates = Counter()
+
+    for item in items:
+        title = (
+            item.findtext("title") or ""
+        ).strip()
+
+        link = (
+            item.findtext("link") or ""
+        ).strip()
+
+        description = (
+            item.findtext("description") or ""
+        ).strip()
+
+        date = (
+            item.findtext("pubDate") or ""
+        ).strip()
+
+        match = JOB_PATTERN.search(link)
+
+        if match:
+            job_ids.add(
+                match.group(1)
             )
 
-            if matches:
-                print(
-                    f"[{label}] "
-                    f"RESULT_TEXT={matches[:5]}"
-                )
+        if date:
+            dates[date] += 1
 
-    return jobs, pagination
+        combined = (
+            title + " " + description
+        ).lower()
 
+        for city in (
+            "Mumbai",
+            "Navi Mumbai",
+            "Bangalore",
+            "Bengaluru",
+            "Pune",
+            "Hyderabad",
+        ):
+            if city.lower() in combined:
+                locations[city] += 1
+
+    print(
+        f"[HCL-RSS] "
+        f"unique_job_ids={len(job_ids)} "
+        f"known_job_present="
+        f"{HCL_KNOWN_ID in job_ids}"
+    )
+
+    print(
+        f"[HCL-RSS] "
+        f"location_mentions={locations.most_common()}"
+    )
+
+    print(
+        f"[HCL-RSS] "
+        f"dates={dates.most_common(5)}"
+    )
+
+    for item in items[:8]:
+        print(
+            "[HCL-RSS] JOB "
+            f"title={item.findtext('title')!r} "
+            f"url={item.findtext('link')!r}"
+        )
+
+    if len(items) == 20:
+        print(
+            "[HCL-RSS] WARNING "
+            "Exactly 20 items; inventory completeness "
+            "NOT established."
+        )
+
+
+# ============================================================
+# HCLTECH — MAIN
+# ============================================================
 
 def probe_hcltech(session):
     print()
     print("=" * 70)
-    print("HCLTECH / SUCCESSFACTORS")
+    print("HCLTECH — SUCCESSFACTORS")
     print("=" * 70)
 
     sources = {
         "HCL-SEARCH": (
-            HCL_BASE + "/search/"
+            HCL + "/search/"
         ),
         "HCL-INDIA": (
-            HCL_BASE + "/go/India/9553955/"
+            HCL + "/go/India/9553955/"
         ),
         "HCL-NONTP": (
-            HCL_BASE + "/go/NonTPDemand/9558355/"
+            HCL + "/go/NonTPDemand/9558355/"
         ),
     }
 
-    inventory = {}
+    inventories = {}
     navigation = {}
 
     for label, url in sources.items():
-        jobs, pagination = inspect_hcl_page(
+        ids, pages = inspect_hcl_page(
             session,
             label,
             url,
         )
 
-        inventory[label] = jobs
-        navigation[label] = pagination
+        inventories[label] = ids
+        navigation[label] = pages
 
-    search_ids = set(
-        inventory["HCL-SEARCH"]
-    )
+    search = inventories["HCL-SEARCH"]
+    india = inventories["HCL-INDIA"]
+    nontp = inventories["HCL-NONTP"]
 
-    india_ids = set(
-        inventory["HCL-INDIA"]
-    )
-
-    nontp_ids = set(
-        inventory["HCL-NONTP"]
+    print(
+        "[HCL-COMPARE] "
+        f"search={len(search)} "
+        f"india={len(india)} "
+        f"nontp={len(nontp)}"
     )
 
     print(
         "[HCL-COMPARE] "
-        f"search={len(search_ids)} "
-        f"india={len(india_ids)} "
-        f"nontp={len(nontp_ids)}"
+        f"india_search_overlap={len(india & search)} "
+        f"nontp_search_overlap={len(nontp & search)} "
+        f"india_nontp_overlap={len(india & nontp)}"
     )
 
-    print(
-        "[HCL-COMPARE] "
-        f"india_search_overlap="
-        f"{len(india_ids & search_ids)} "
-        f"nontp_search_overlap="
-        f"{len(nontp_ids & search_ids)} "
-        f"india_nontp_overlap="
-        f"{len(india_ids & nontp_ids)}"
-    )
+    # Follow a discovered page only.
+    followed = False
 
-    # Follow only a discovered pagination link.
-    for label in sources:
-        candidates = navigation[label]
-
-        if not candidates:
+    for label, pages in navigation.items():
+        if not pages:
             continue
 
-        target = candidates[0]
+        target = pages[0]
 
-        next_jobs, _ = inspect_hcl_page(
+        next_ids, _ = inspect_hcl_page(
             session,
             label + "-NEXT",
             target,
         )
 
-        first_ids = set(inventory[label])
-        next_ids = set(next_jobs)
+        first_ids = inventories[label]
 
         print(
             "[HCL-PAGINATION] "
             f"source={label} "
             f"next={target} "
-            f"first_count={len(first_ids)} "
+            f"first={len(first_ids)} "
             f"next_count={len(next_ids)} "
             f"overlap={len(first_ids & next_ids)} "
             f"distinct={first_ids != next_ids}"
         )
 
+        followed = True
         break
 
-    else:
+    if not followed:
         print(
             "[HCL-PAGINATION] "
-            "No discoverable pagination links"
+            "No explicit next-page link found."
         )
 
-    detail_url = (
-        HCL_BASE
-        + "/job/Senior-Full-Stack-Developer/"
-        + "136528-en_US/"
-    )
-
+    # Known job detail.
     detail = fetch(
         session,
         "HCL-DETAIL",
-        detail_url,
+        HCL
+        + "/job/Senior-Full-Stack-Developer/"
+        + "136528-en_US/",
     )
 
-    if detail is not None:
-        _, links, _ = parse_page(
-            detail,
-            "HCL-DETAIL",
-        )
-
+    if detail:
         print(
             "[HCL-DETAIL] "
             f"known_id_present="
-            f"{HCL_KNOWN_JOB_ID in detail[2]}"
+            f"{HCL_KNOWN_ID in detail['text']}"
         )
 
-        for link in links:
-            if "apply" in link.lower():
-                print(
-                    f"[HCL-DETAIL] "
-                    f"APPLY_CANDIDATE={link}"
-                )
-                break
+    probe_hcl_rss(session)
 
-    rss = fetch(
-        session,
-        "HCL-RSS",
-        HCL_BASE + "/services/rss/job/?locale=en_US",
+
+# ============================================================
+# IBM — NEXT.JS STATE
+# ============================================================
+
+def inspect_ibm_next_data(
+    parser,
+    label,
+):
+    if parser is None:
+        return None
+
+    for script in parser.embedded:
+        attrs = script["attrs"]
+
+        if attrs.get("id") != "__NEXT_DATA__":
+            continue
+
+        try:
+            data = json.loads(
+                script["text"]
+            )
+        except ValueError as exc:
+            print(
+                f"[{label}] NEXT_JSON_ERROR={exc}"
+            )
+            return None
+
+        print(
+            f"[{label}] "
+            f"NEXT_KEYS={list(data.keys())}"
+        )
+
+        print(
+            f"[{label}] "
+            f"BUILD_ID={data.get('buildId')!r}"
+        )
+
+        print(
+            f"[{label}] "
+            f"PAGE={data.get('page')!r}"
+        )
+
+        props = data.get(
+            "props", {}
+        )
+
+        if isinstance(props, dict):
+            print(
+                f"[{label}] "
+                f"PROPS_KEYS={list(props.keys())}"
+            )
+
+            page_props = props.get(
+                "pageProps", {}
+            )
+
+            if isinstance(page_props, dict):
+                print(
+                    f"[{label}] "
+                    f"PAGE_PROPS_KEYS="
+                    f"{list(page_props.keys())}"
+                )
+
+                for key, value in page_props.items():
+                    if any(
+                        marker in key.lower()
+                        for marker in (
+                            "job",
+                            "search",
+                            "career",
+                            "config",
+                            "endpoint",
+                        )
+                    ):
+                        print(
+                            f"[{label}] "
+                            f"PROP={key} "
+                            f"type={type(value).__name__} "
+                            f"preview={clean(value, 180)!r}"
+                        )
+
+        return data
+
+    print(
+        f"[{label}] NEXT_DATA_NOT_FOUND"
     )
 
-    if rss is not None:
-        try:
-            root = ET.fromstring(rss[2])
-            items = root.findall(".//channel/item")
-
-            print(
-                "[HCL-RSS] "
-                f"items={len(items)}"
-            )
-
-            job_ids = set()
-            locations = Counter()
-
-            for item in items:
-                title = (
-                    item.findtext("title") or ""
-                ).strip()
-
-                link = (
-                    item.findtext("link") or ""
-                ).strip()
-
-                description = (
-                    item.findtext("description") or ""
-                ).strip()
-
-                match = re.search(
-                    r"/job/[^?#]+?/(\d+)-",
-                    link,
-                )
-
-                if match:
-                    job_ids.add(match.group(1))
-
-                for city in (
-                    "Mumbai",
-                    "Navi Mumbai",
-                    "Bangalore",
-                    "Bengaluru",
-                    "Pune",
-                    "Hyderabad",
-                ):
-                    if city.lower() in (
-                        title + " " + description
-                    ).lower():
-                        locations[city] += 1
-
-            print(
-                "[HCL-RSS] "
-                f"unique_job_ids={len(job_ids)} "
-                f"known_job_present="
-                f"{HCL_KNOWN_JOB_ID in job_ids}"
-            )
-
-            print(
-                "[HCL-RSS] "
-                f"location_mentions={locations.most_common()}"
-            )
-
-            for item in items[:10]:
-                print(
-                    "[HCL-RSS] JOB "
-                    f"title={item.findtext('title')!r} "
-                    f"link={item.findtext('link')!r} "
-                    f"date={item.findtext('pubDate')!r}"
-                )
-
-            channel = root.find("channel")
-
-            if channel is not None:
-                print(
-                    "[HCL-RSS] "
-                    f"channel_title={channel.findtext('title')!r}"
-                )
-
-        except ET.ParseError as exc:
-            print(
-                f"[HCL-RSS] XML_ERROR={exc}"
-            )
+    return None
 
 
 # ============================================================
-# IBM
+# IBM — SCRIPT INSPECTION
 # ============================================================
 
+def inspect_ibm_scripts(
+    session,
+    scripts,
+):
+    print()
+    print("========== IBM JAVASCRIPT ==========")
 
-def extract_ibm_jobs(links):
-    return list(dict.fromkeys(
-        link
-        for link in links
-        if (
-            urlparse(link).netloc.lower().endswith(
-                "ibm.com"
-            )
-            and re.search(
-                r"/careers/(?:job|jobs|search/job|job-details)",
-                urlparse(link).path,
-                flags=re.IGNORECASE,
-            )
-        )
+    scripts = list(dict.fromkeys(
+        scripts
     ))
 
+    next_scripts = [
+        url
+        for url in scripts
+        if "/_next/static/" in url
+    ]
+
+    print(
+        f"[IBM-JS] "
+        f"total_scripts={len(scripts)} "
+        f"next_scripts={len(next_scripts)}"
+    )
+
+    for url in next_scripts[:20]:
+        print(
+            f"[IBM-JS] NEXT_SCRIPT={url}"
+        )
+
+    # Prefer actual Next.js application assets.
+    ranked = sorted(
+        next_scripts,
+        key=lambda url: (
+            -sum(
+                marker in url.lower()
+                for marker in (
+                    "pages",
+                    "career",
+                    "search",
+                    "webpack",
+                    "main",
+                    "chunk",
+                )
+            ),
+            url,
+        ),
+    )
+
+    selected = ranked[:MAX_JS_FILES]
+
+    if not selected:
+        print(
+            "[IBM-JS] No Next.js script assets "
+            "found in initial HTML."
+        )
+
+    for index, url in enumerate(
+        selected,
+        start=1,
+    ):
+        label = f"IBM-JS-{index}"
+
+        result = fetch(
+            session,
+            label,
+            url,
+            max_bytes=MAX_JS_BYTES,
+        )
+
+        if result is None:
+            continue
+
+        text = result["text"]
+
+        content_type = result[
+            "content_type"
+        ].lower()
+
+        if (
+            "html" in content_type
+            or "<html" in text[:1000].lower()
+        ):
+            print(
+                f"[{label}] HTML_NOT_JS"
+            )
+            continue
+
+        print(
+            f"[{label}] "
+            f"script_bytes={len(text)}"
+        )
+
+        show_contexts(
+            label,
+            text,
+            API_MARKERS,
+            max_hits=2,
+        )
+
+        urls = set(
+            URL_PATTERN.findall(text)
+        )
+
+        relevant = [
+            value
+            for value in urls
+            if any(
+                marker in value.lower()
+                for marker in (
+                    "career",
+                    "job",
+                    "api",
+                    "search",
+                    "ibm",
+                )
+            )
+        ]
+
+        print(
+            f"[{label}] "
+            f"candidate_urls={len(relevant)}"
+        )
+
+        for value in sorted(relevant)[:12]:
+            print(
+                f"[{label}] "
+                f"URL={clean(value, 220)!r}"
+            )
+
+
+# ============================================================
+# IBM — MAIN
+# ============================================================
 
 def probe_ibm(session):
     print()
     print("=" * 70)
-    print("IBM / BACKEND DISCOVERY")
+    print("IBM — CAREERS BACKEND")
     print("=" * 70)
 
     sources = {
         "IBM-SEARCH": (
-            IBM_BASE + "/careers/search"
+            IBM + "/careers/search"
         ),
         "IBM-INDIA": (
-            IBM_BASE
+            IBM
             + "/in-en/careers/search?"
             + "field_keyword_05%5B0%5D=India"
             + "&sort=dcdate_desc"
+        ),
+        "IBM-CAREERS": (
+            IBM_CAREERS
+            + "/en_US/careers/SearchJobs/"
         ),
     }
 
@@ -584,186 +993,76 @@ def probe_ibm(session):
             url,
         )
 
-        parser, links, scripts = parse_page(
+        if result is None:
+            continue
+
+        parser, links, scripts = parse_html(
             result,
             label,
         )
 
         all_scripts.extend(scripts)
 
-        jobs = extract_ibm_jobs(links)
-
         print(
             f"[{label}] "
-            f"candidate_job_links={len(jobs)}"
+            f"job_path_occurrences="
+            f"{len(re.findall('/job/', result['text'], re.I))}"
         )
 
-        for link in jobs[:10]:
-            print(
-                f"[{label}] "
-                f"JOB_CANDIDATE={link}"
+        show_contexts(
+            label,
+            result["text"],
+            (
+                "careers.ibm.com",
+                "SearchJobs",
+                "jobId",
+                "requisition",
+                "jobSearch",
+                "api/",
+                "graphql",
+            ),
+            max_hits=2,
+        )
+
+        if parser:
+            inspect_ibm_next_data(
+                parser,
+                label,
             )
 
-        pagination = [
+        job_links = [
             link
             for link in links
-            if re.search(
-                r"page=|offset=|start=|field_keyword",
-                link,
-                flags=re.IGNORECASE,
+            if any(
+                marker in link.lower()
+                for marker in (
+                    "/job/",
+                    "/jobdetails/",
+                    "jobid=",
+                    "requisition",
+                )
             )
         ]
 
-        for link in pagination[:10]:
-            print(
-                f"[{label}] "
-                f"NAV_CANDIDATE={link[:240]}"
-            )
-
-        if result is None:
-            continue
-
-        text = result[2]
-
-        markers = (
-            "__NEXT_DATA__",
-            "drupalSettings",
-            "application/ld+json",
-            "JobPosting",
-            "graphql",
-            "algolia",
-            "eightfold",
-            "workday",
+        print(
+            f"[{label}] "
+            f"candidate_job_links={len(job_links)}"
         )
 
-        for marker in markers:
+        for link in job_links[:10]:
             print(
-                f"[{label}] "
-                f"marker={marker!r} "
-                f"found={marker.lower() in text.lower()}"
+                f"[{label}] JOB_LINK={link}"
             )
 
-        if parser is not None:
-            for form in parser.forms[:5]:
-                print(
-                    f"[{label}] "
-                    f"FORM={form}"
-                )
-
-    # Inspect a bounded number of IBM-hosted JS assets.
-    scored_scripts = sorted(
-        set(all_scripts),
-        key=lambda url: (
-            -sum(
-                marker in url.lower()
-                for marker in (
-                    "career",
-                    "search",
-                    "job",
-                    "main",
-                    "bundle",
-                    "app",
-                )
-            ),
-            url,
-        ),
+    inspect_ibm_scripts(
+        session,
+        all_scripts,
     )
 
-    selected = [
-        url
-        for url in scored_scripts
-        if urlparse(url).hostname in (
-            "www.ibm.com",
-            "ibm.com",
-        )
-    ][:MAX_JS_FILES]
-
     print(
-        f"[IBM] selected_scripts="
-        f"{len(selected)}"
-    )
-
-    for index, script_url in enumerate(
-        selected,
-        start=1,
-    ):
-        label = f"IBM-JS-{index}"
-
-        result = fetch(
-            session,
-            label,
-            script_url,
-            max_bytes=MAX_JS_BYTES,
-        )
-
-        if result is None:
-            continue
-
-        _, content_type, text = result
-
-        if (
-            "html" in content_type.lower()
-            or "<html" in text[:1000].lower()
-        ):
-            print(
-                f"[{label}] "
-                "HTML_NOT_JAVASCRIPT"
-            )
-            continue
-
-        markers = (
-            "graphql",
-            "/api/",
-            "jobs/search",
-            "careers/search",
-            "algolia",
-            "workday",
-            "eightfold",
-            "fetch(",
-            "axios",
-        )
-
-        for marker in markers:
-            matches = list(
-                re.finditer(
-                    re.escape(marker),
-                    text,
-                    flags=re.IGNORECASE,
-                )
-            )
-
-            if not matches:
-                continue
-
-            print(
-                f"[{label}] "
-                f"marker={marker!r} "
-                f"hits={len(matches)}"
-            )
-
-            # Print only short, bounded context.
-            # Review logs before sharing externally.
-            for match in matches[:2]:
-                snippet = text[
-                    max(0, match.start() - 90):
-                    match.end() + 150
-                ]
-
-                snippet = re.sub(
-                    r"\s+",
-                    " ",
-                    snippet,
-                )
-
-                print(
-                    f"[{label}] "
-                    f"CONTEXT={snippet[:240]!r}"
-                )
-
-    print(
-        "[IBM] If no jobs backend is identified, "
-        "inspect one India-filtered search in "
-        "Chrome DevTools > Network > Fetch/XHR."
+        "[IBM] If no public job-results endpoint "
+        "is identified, inspect one India-filtered "
+        "search in browser DevTools Network."
     )
 
 
@@ -771,13 +1070,12 @@ def probe_ibm(session):
 # MAIN
 # ============================================================
 
-
 def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "--company",
-        choices=("all", "ibm", "hcl"),
+        choices=("all", "hcl", "ibm"),
         default="all",
     )
 
@@ -791,7 +1089,7 @@ def main():
                 probe_hcltech(session)
             except Exception as exc:
                 print(
-                    "[HCL] PROBE_FAILED "
+                    "[HCL] FAILED "
                     f"{type(exc).__name__}: {exc}"
                 )
 
@@ -800,9 +1098,12 @@ def main():
                 probe_ibm(session)
             except Exception as exc:
                 print(
-                    "[IBM] PROBE_FAILED "
+                    "[IBM] FAILED "
                     f"{type(exc).__name__}: {exc}"
                 )
+
+    print()
+    print("[BATCH-PROBE] Finished")
 
 
 if __name__ == "__main__":
