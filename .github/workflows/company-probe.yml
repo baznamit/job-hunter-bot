@@ -22,4 +22,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Probe BNP Paribas and Infosys
-        run: python -u -m research.bnp_infosys_probe
+        run: python -u -m research.company_probe
