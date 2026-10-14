@@ -449,90 +449,90 @@ def probe_hcltech(session):
                 break
 
     rss = fetch(
-    session,
-    "HCL-RSS",
-    HCL_BASE + "/services/rss/job/?locale=en_US",
-)
+        session,
+        "HCL-RSS",
+        HCL_BASE + "/services/rss/job/?locale=en_US",
+    )
 
-if rss is not None:
-    try:
-        root = ET.fromstring(rss[2])
-        items = root.findall(".//channel/item")
+    if rss is not None:
+        try:
+            root = ET.fromstring(rss[2])
+            items = root.findall(".//channel/item")
 
-        print(
-            "[HCL-RSS] "
-            f"items={len(items)}"
-        )
-
-        job_ids = set()
-        locations = Counter()
-
-        for item in items:
-            title = (
-                item.findtext("title") or ""
-            ).strip()
-
-            link = (
-                item.findtext("link") or ""
-            ).strip()
-
-            description = (
-                item.findtext("description") or ""
-            ).strip()
-
-            match = re.search(
-                r"/job/[^?#]+?/(\d+)-",
-                link,
-            )
-
-            if match:
-                job_ids.add(match.group(1))
-
-            for city in (
-                "Mumbai",
-                "Navi Mumbai",
-                "Bangalore",
-                "Bengaluru",
-                "Pune",
-                "Hyderabad",
-            ):
-                if city.lower() in (
-                    title + " " + description
-                ).lower():
-                    locations[city] += 1
-
-        print(
-            "[HCL-RSS] "
-            f"unique_job_ids={len(job_ids)} "
-            f"known_job_present="
-            f"{HCL_KNOWN_JOB_ID in job_ids}"
-        )
-
-        print(
-            "[HCL-RSS] "
-            f"location_mentions={locations.most_common()}"
-        )
-
-        for item in items[:10]:
-            print(
-                "[HCL-RSS] JOB "
-                f"title={item.findtext('title')!r} "
-                f"link={item.findtext('link')!r} "
-                f"date={item.findtext('pubDate')!r}"
-            )
-
-        channel = root.find("channel")
-
-        if channel is not None:
             print(
                 "[HCL-RSS] "
-                f"channel_title={channel.findtext('title')!r}"
+                f"items={len(items)}"
             )
 
-    except ET.ParseError as exc:
-        print(
-            f"[HCL-RSS] XML_ERROR={exc}"
-        )
+            job_ids = set()
+            locations = Counter()
+
+            for item in items:
+                title = (
+                    item.findtext("title") or ""
+                ).strip()
+
+                link = (
+                    item.findtext("link") or ""
+                ).strip()
+
+                description = (
+                    item.findtext("description") or ""
+                ).strip()
+
+                match = re.search(
+                    r"/job/[^?#]+?/(\d+)-",
+                    link,
+                )
+
+                if match:
+                    job_ids.add(match.group(1))
+
+                for city in (
+                    "Mumbai",
+                    "Navi Mumbai",
+                    "Bangalore",
+                    "Bengaluru",
+                    "Pune",
+                    "Hyderabad",
+                ):
+                    if city.lower() in (
+                        title + " " + description
+                    ).lower():
+                        locations[city] += 1
+
+            print(
+                "[HCL-RSS] "
+                f"unique_job_ids={len(job_ids)} "
+                f"known_job_present="
+                f"{HCL_KNOWN_JOB_ID in job_ids}"
+            )
+
+            print(
+                "[HCL-RSS] "
+                f"location_mentions={locations.most_common()}"
+            )
+
+            for item in items[:10]:
+                print(
+                    "[HCL-RSS] JOB "
+                    f"title={item.findtext('title')!r} "
+                    f"link={item.findtext('link')!r} "
+                    f"date={item.findtext('pubDate')!r}"
+                )
+
+            channel = root.find("channel")
+
+            if channel is not None:
+                print(
+                    "[HCL-RSS] "
+                    f"channel_title={channel.findtext('title')!r}"
+                )
+
+        except ET.ParseError as exc:
+            print(
+                f"[HCL-RSS] XML_ERROR={exc}"
+            )
 
 
 # ============================================================
