@@ -1,8 +1,8 @@
 {
   "atlassian": {
-    "failures": 16,
-    "last_failure": "2026-10-12T00:43:21.694774+00:00",
-    "retry_after": "2026-10-15T00:43:21.694774+00:00"
+    "failures": 17,
+    "last_failure": "2026-10-15T00:44:16.208102+00:00",
+    "retry_after": "2026-10-18T00:44:16.208102+00:00"
   },
   "coindcx": {
     "failures": 17,
