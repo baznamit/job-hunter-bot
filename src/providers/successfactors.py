@@ -75,8 +75,36 @@ class SuccessFactorsAdapter(ProviderAdapter):
         )
 
         query_params: dict[str, str | int] = {}
+
         if search_location and config.search_location_param:
             query_params[config.search_location_param] = search_location
+
+        search_params = getattr(config, "search_params", None) or {}
+
+        if not isinstance(search_params, dict):
+            raise ValueError(
+                f"{company.name}: search_params must be an object"
+            )
+
+        for key, value in search_params.items():
+            if (
+                not isinstance(key, str)
+                or not key
+                or not isinstance(value, (str, int))
+                or isinstance(value, bool)
+            ):
+                raise ValueError(
+                    f"{company.name}: invalid search parameter"
+                )
+
+            if key in query_params or key == (
+                config.pagination_param or "startrow"
+            ):
+                raise ValueError(
+                    f"{company.name}: conflicting search parameter {key!r}"
+                )
+
+            query_params[key] = value
 
         if offset:
             if pagination_mode == "path":

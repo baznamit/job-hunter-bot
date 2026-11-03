@@ -23,3 +23,6 @@ jobs:
 
       - name: Run company probe
         run: python -u research/company_probe.py
+
+      - name: Run new company stage 2 probe
+        run: python -u -m research.new_company_stage2_probe

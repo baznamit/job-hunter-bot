@@ -151,6 +151,50 @@ def test_successfactors_location_query_survives_pagination():
     )
 
 
+def test_successfactors_deloitte_search_pagination():
+    adapter = SuccessFactorsAdapter()
+
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://southasiacareers.deloitte.com",
+        listing_path="/go/Deloitte-India/718244/",
+        page_size=25,
+        pagination_mode="path",
+        search_params={
+            "q": "",
+            "title": "Java",
+        },
+    )
+
+    assert adapter._listing_url(company, 0) == (
+        "https://southasiacareers.deloitte.com/"
+        "go/Deloitte-India/718244/?q=&title=Java"
+    )
+
+    assert adapter._listing_url(company, 25) == (
+        "https://southasiacareers.deloitte.com/"
+        "go/Deloitte-India/718244/25/?q=&title=Java"
+    )
+
+
+def test_successfactors_rejects_pagination_override():
+    import pytest
+
+    adapter = SuccessFactorsAdapter()
+
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://example.com",
+        listing_path="/search/",
+        pagination_mode="query",
+        pagination_param="startrow",
+        search_params={"startrow": 100},
+    )
+
+    with pytest.raises(ValueError, match="conflicting"):
+        adapter._listing_url(company, 0)
+
+
 @patch.object(SuccessFactorsAdapter, "_fetch_html")
 def test_location_query_keeps_secondary_city_jobs(mock_fetch_html):
     adapter = SuccessFactorsAdapter()
