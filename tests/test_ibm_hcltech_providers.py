@@ -130,6 +130,47 @@ def test_hcltech_rejects_missing_positive_job_list(mock_session):
         HCLTechAdapter().fetch_jobs(test_company)
 
 
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_fetches_more_than_300_jobs(mock_session):
+    responses = []
+
+    for page in range(32):
+        page_size = 6 if page == 31 else 10
+        records = [
+            {
+                "response": {
+                    "id": f"hcl-{page * 10 + index}",
+                    "unifiedStandardTitle": "Engineer",
+                }
+            }
+            for index in range(page_size)
+        ]
+        response = Mock()
+        response.status_code = 200
+        response.headers = {
+            "Content-Type": "application/json"
+        }
+        response.json.return_value = {
+            "totalJobs": 316,
+            "jobSearchResult": records,
+        }
+        response.raise_for_status = Mock()
+        responses.append(response)
+
+    session = Mock()
+    session.post.side_effect = responses
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Mumbai"]
+    test_company.provider.config.max_pages = 40
+
+    jobs = HCLTechAdapter().fetch_jobs(test_company)
+
+    assert len(jobs) == 316
+    assert session.post.call_count == 32
+
+
 def test_ibm_payload():
     payload = IBMAdapter._payload(
         "Java", 2, 30

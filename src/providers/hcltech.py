@@ -66,7 +66,22 @@ class HCLTechAdapter(ProviderAdapter):
     def _fetch_raw(self, company: Company) -> list:
         cfg = company.provider.config
         terms = cfg.search_terms or ["java"]
-        max_pages = cfg.max_pages or 15
+        max_pages = (
+            cfg.max_pages
+            if cfg.max_pages is not None
+            else 15
+        )
+
+        if (
+            isinstance(max_pages, bool)
+            or not isinstance(max_pages, int)
+            or max_pages < 1
+        ):
+            raise ValueError(
+                f"{company.name}: max_pages must "
+                "be a positive integer"
+            )
+
         endpoint = cfg.api_url or API
 
         if endpoint != API:
@@ -186,9 +201,11 @@ class HCLTechAdapter(ProviderAdapter):
 
                     print(
                         f"[HCL-PAGE] term={term!r} "
-                        f"page={page} "
+                        f"page={page + 1}/{max_pages} "
                         f"received={received_hits}/{total} "
-                        f"unique={len(term_jobs)}"
+                        f"unique={len(term_jobs)} "
+                        f"duplicates="
+                        f"{received_hits - len(term_jobs)}"
                     )
 
                     if received_hits >= total:
