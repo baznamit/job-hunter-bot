@@ -113,43 +113,46 @@ class InfosysAdapter(ProviderAdapter):
         with requests.Session() as session:
             session.headers.update(_HEADERS)
 
-            config_response = session.get(
-                self._config_url(company),
-                timeout=_TIMEOUT,
-            )
+            configured_base = company.provider.config.api_url
 
-            self._check_response(
-                config_response,
-                company,
-            )
+            if configured_base:
+                api_base = self._validate_api_base(
+                    configured_base
+                )
+            else:
+                config_response = session.get(
+                    self._config_url(company),
+                    timeout=_TIMEOUT,
+                )
 
-            content_type = (
-                config_response.headers.get(
+                self._check_response(
+                    config_response,
+                    company,
+                )
+
+                content_type = config_response.headers.get(
                     "Content-Type", ""
                 ).lower()
-            )
 
-            if "json" not in content_type:
-                raise RuntimeError(
-                    f"{company.name}: Infosys runtime "
-                    "configuration was not JSON"
+                if "json" not in content_type:
+                    raise RuntimeError(
+                        f"{company.name}: Infosys runtime "
+                        "configuration was not JSON"
+                    )
+
+                config = config_response.json()
+
+                if not isinstance(config, dict):
+                    raise RuntimeError(
+                        f"{company.name}: invalid Infosys "
+                        "runtime configuration"
+                    )
+
+                api_base = self._validate_api_base(
+                    config.get("JobsUnAuthUrl")
                 )
 
-            config = config_response.json()
-
-            if not isinstance(config, dict):
-                raise RuntimeError(
-                    f"{company.name}: invalid Infosys "
-                    "runtime configuration"
-                )
-
-            api_base = self._validate_api_base(
-                config.get("JobsUnAuthUrl")
-            )
-
-            endpoint = (
-                api_base + _JOB_ENDPOINT
-            )
+            endpoint = api_base + _JOB_ENDPOINT
 
             response = session.get(
                 endpoint,

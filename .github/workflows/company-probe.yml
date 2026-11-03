@@ -74,6 +74,51 @@ jobs:
           print("[INFOSYS-VALIDATE] PASSED")
           PY
 
+      - name: Validate Infosys direct API
+        run: |
+          python -u - <<'PY'
+          import time
+          from research.loader import load_registry
+          from src.providers.infosys import InfosysAdapter
+
+          company = next(
+            c for c in load_registry().companies
+            if c.id == "infosys"
+          )
+
+          start = time.perf_counter()
+
+          jobs = InfosysAdapter().fetch_jobs(company)
+
+          elapsed = time.perf_counter() - start
+
+          ids = [job.id for job in jobs]
+
+          print(
+            f"[INFOSYS-DIRECT] "
+            f"jobs={len(jobs)} "
+            f"unique={len(set(ids))} "
+            f"elapsed={elapsed:.2f}s"
+          )
+
+          if not jobs:
+            raise RuntimeError("Infosys returned no jobs")
+
+          if len(ids) != len(set(ids)):
+            raise RuntimeError(
+              "Infosys returned duplicate job IDs"
+            )
+
+          for job in jobs[:5]:
+            print(
+              f"[INFOSYS-DIRECT] "
+              f"{job.id} | {job.title} | "
+              f"{job.location} | {job.url}"
+            )
+
+          print("[INFOSYS-DIRECT] PASSED")
+          PY
+
       - name: Company Probe
         run: python -u -m research.company_probe
 

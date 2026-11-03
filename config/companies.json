@@ -1337,6 +1337,7 @@
         "type": "infosys",
         "status": "verified",
         "config": {
+          "api_url": "https://intapgateway.infosysapps.com/careersci/search/intapjbsrch/",
           "config_url": "https://career.infosys.com/assets/environments/environment.json",
           "source_id": "1,21"
         }
@@ -1351,7 +1352,7 @@
       "name": "HCLTech",
       "category": "Product",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.hcltech.com/search/",
       "provider": {
         "type": "hcltech",

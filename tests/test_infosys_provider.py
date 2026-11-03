@@ -1,3 +1,5 @@
+from unittest.mock import Mock, patch
+
 import pytest
 
 from models.company import Company
@@ -110,3 +112,66 @@ def test_valid_api_base():
     assert base.endswith(
         "/careersci/search/intapjbsrch/"
     )
+
+
+@patch("src.providers.infosys.requests.Session")
+def test_configured_api_skips_environment(
+    mock_session_class,
+):
+    company = _company()
+
+    company.provider.config.api_url = (
+        "https://intapgateway.infosysapps.com/"
+        "careersci/search/intapjbsrch/"
+    )
+
+    response = Mock()
+    response.status_code = 200
+    response.headers = {
+        "Content-Type": "application/json"
+    }
+    response.iter_content.return_value = [
+        __import__("json").dumps(
+            [_sample()]
+        ).encode("utf-8")
+    ]
+
+    session = (
+        mock_session_class.return_value
+        .__enter__.return_value
+    )
+
+    session.get.return_value = response
+
+    jobs = InfosysAdapter().fetch_jobs(company)
+
+    assert len(jobs) == 1
+
+    assert session.get.call_count == 1
+
+    args, kwargs = session.get.call_args
+
+    assert args[0] == (
+        "https://intapgateway.infosysapps.com/"
+        "careersci/search/intapjbsrch/"
+        "getCareerSearchJobs"
+    )
+
+    assert kwargs["params"] == {
+        "sourceId": "1,21",
+        "searchText": "ALL",
+    }
+
+
+def test_reject_untrusted_configured_api():
+    company = _company()
+
+    company.provider.config.api_url = (
+        "https://example.com/other-api/"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="unexpected JobsUnAuthUrl",
+    ):
+        InfosysAdapter().fetch_jobs(company)
