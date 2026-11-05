@@ -1484,6 +1484,159 @@ def probe_new_workday(name, config, session):
     )
 
 
+def validate_new_workday(name, config):
+    """Validate a Workday candidate with the production adapter."""
+    from models.company import (
+        Company,
+        CompanyCategory,
+        Provider,
+        ProviderConfig,
+        ProviderStatus,
+        ProviderType,
+    )
+    from src.providers.workday import WorkdayAdapter
+
+    tenant = config["tenant"]
+    cluster = config["cluster"]
+    board = config["board"]
+    base = (
+        f"https://{tenant}."
+        f"{cluster}.myworkdayjobs.com"
+    )
+    display_names = {
+        "DUCKCREEK": "Duck Creek",
+        "BAKERHUGHES": "Baker Hughes",
+    }
+    display_name = display_names.get(name, name)
+
+    company = Company(
+        id=name.lower(),
+        name=display_name,
+        category=CompanyCategory.PRODUCT,
+        priority=1,
+        enabled=False,
+        career_page=f"{base}/en-US/{board}",
+        provider=Provider(
+            type=ProviderType.WORKDAY,
+            status=ProviderStatus.PARTIAL,
+            config=ProviderConfig(
+                tenant=tenant,
+                cluster=cluster,
+                board=board,
+            ),
+        ),
+    )
+
+    started = time.perf_counter()
+    jobs = WorkdayAdapter().fetch_jobs(company)
+    elapsed = time.perf_counter() - started
+
+    ids = [str(job.id) for job in jobs]
+    urls = [str(job.url) for job in jobs]
+    problems = []
+
+    print(
+        f"[{name}] normalized={len(jobs)} "
+        f"unique_ids={len(set(ids))} "
+        f"unique_urls={len(set(urls))} "
+        f"seconds={elapsed:.2f}"
+    )
+
+    if not jobs:
+        problems.append("no normalized jobs")
+
+    if len(set(ids)) != len(jobs):
+        problems.append("duplicate normalized IDs")
+
+    if len(set(urls)) != len(jobs):
+        problems.append("duplicate normalized URLs")
+
+    expected_host = (
+        f"{tenant}.{cluster}.myworkdayjobs.com"
+    )
+
+    for job in jobs:
+        if not job.id or not job.title.strip() or not job.location.strip():
+            problems.append(
+                f"incomplete normalized job: {job.id!r}"
+            )
+            continue
+
+        if urlparse(str(job.url)).hostname != expected_host:
+            problems.append(
+                f"unexpected job URL host: {job.url}"
+            )
+
+    # Independently check the current first-page total.
+    base = (
+        f"https://{config['tenant']}."
+        f"{config['cluster']}.myworkdayjobs.com"
+    )
+    endpoint = (
+        f"{base}/wday/cxs/{config['tenant']}/"
+        f"{config['board']}/jobs"
+    )
+
+    try:
+        response = requests.post(
+            endpoint,
+            json={
+                "appliedFacets": {},
+                "limit": 20,
+                "offset": 0,
+                "searchText": "",
+            },
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": base,
+                "Referer": (
+                    f"{base}/en-US/{config['board']}"
+                ),
+            },
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                "expected Workday JSON object"
+            )
+
+        reported_total = data.get("total")
+
+        print(
+            f"[{name}] authoritative_total="
+            f"{reported_total!r}"
+        )
+
+        if (
+            not isinstance(reported_total, int)
+            or reported_total < 0
+        ):
+            problems.append("invalid reported total")
+        elif len(jobs) != reported_total:
+            problems.append(
+                f"total mismatch: "
+                f"expected={reported_total}, "
+                f"normalized={len(jobs)}"
+            )
+
+    except (requests.RequestException, ValueError) as exc:
+        problems.append(
+            f"total verification failed: {exc}"
+        )
+
+    if problems:
+        for problem in problems:
+            print(f"[{name}] VALIDATION_PROBLEM {problem}")
+        return False
+
+    print(f"[{name}] ADAPTER_VALIDATION=PASS")
+    return True
+
+
 def probe_new_company_page(name, url, session):
     """Inspect official public pages without guessing APIs."""
     print(f"\n[{name}] requested={url}")
@@ -1567,29 +1720,185 @@ def probe_new_company_page(name, url, session):
         )
 
 
+def probe_mphasis_sources(session):
+    """Inspect officially published RippleHire sources."""
+    print("\n[MPHASIS] DEEP_SOURCE_DISCOVERY")
+
+    sources = [
+        (
+            "RIPPLEHIRE_CAREERS",
+            "https://mphasis.ripplehire.com/ripplehire/careers",
+        ),
+        (
+            "RIPPLEHIRE_CANDIDATE",
+            "https://mphasis.ripplehire.com/candidate/",
+        ),
+        (
+            "OFFICIAL_HOTJOBS",
+            "https://www2.mphasis.com/hot-jobs.html",
+        ),
+    ]
+
+    for label, url in sources:
+        try:
+            result = limited_get(session, url)
+
+            print(
+                f"[MPHASIS] source={label} "
+                f"status={result['status']} "
+                f"final={result['url']} "
+                f"bytes={result['bytes']} "
+                f"truncated={result['truncated']}"
+            )
+
+            if (
+                result["status"] != 200
+                or classify_page(result) != "HTML"
+            ):
+                continue
+
+            info = inspect_html(
+                result["content"],
+                result["url"],
+            )
+
+            print(
+                f"[MPHASIS] source={label} "
+                f"links={len(info['links'])} "
+                f"scripts={len(info['scripts'])} "
+                f"jsonld={len(info['json_ld'])}"
+            )
+
+            for link in info["links"]:
+                host = (
+                    urlparse(link).hostname or ""
+                ).lower()
+
+                if (
+                    host == "r.ripplehire.com"
+                    or host == "mphasis.ripplehire.com"
+                ):
+                    print(
+                        f"[MPHASIS] OFFICIAL_ATS_LINK "
+                        f"{link}"
+                    )
+
+            # Inspect a bounded set of script references.
+            # Do not fetch arbitrary scripts or guess APIs.
+            for script in info["scripts"][:8]:
+                print(
+                    f"[MPHASIS] SCRIPT_REFERENCE "
+                    f"{script}"
+                )
+
+            if label == "OFFICIAL_HOTJOBS":
+                short_links = [
+                    link
+                    for link in info["links"]
+                    if (
+                        urlparse(link).hostname
+                        == "r.ripplehire.com"
+                    )
+                ]
+
+                for link in list(
+                    dict.fromkeys(short_links)
+                )[:3]:
+                    try:
+                        redirected = limited_get(
+                            session, link
+                        )
+
+                        print(
+                            "[MPHASIS] HOTJOB_REDIRECT "
+                            f"source={link} "
+                            f"status={redirected['status']} "
+                            f"final={redirected['url']}"
+                        )
+
+                    except requests.RequestException as exc:
+                        print(
+                            "[MPHASIS] HOTJOB_ERROR "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+
+        except requests.RequestException as exc:
+            print(
+                f"[MPHASIS] SOURCE_ERROR "
+                f"source={label} "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    print(
+        "[MPHASIS] inventory_contract=UNVERIFIED "
+        "pagination=UNVERIFIED"
+    )
+
+
 def run_new_companies():
     print("=" * 70)
-    print("NEW COMPANY ATS RESEARCH - READ ONLY")
+    print("NEW COMPANY ATS VALIDATION - READ ONLY")
     print("=" * 70)
 
+    results = {}
+
+    # Full Workday adapter validation.
+    for name in ("DUCKCREEK", "BAKERHUGHES"):
+        config = NEW_COMPANY_SOURCES[name]
+
+        try:
+            results[name] = validate_new_workday(
+                name, config
+            )
+        except Exception as exc:
+            results[name] = False
+            print(
+                f"[{name}] VALIDATION_FAILED "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+        time.sleep(DELAY_SECONDS)
+
+    # Mphasis official-source investigation.
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # Validate Workday candidate endpoints.
-    for name, config in NEW_COMPANY_SOURCES.items():
-        probe_new_workday(name, config, session)
-        time.sleep(DELAY_SECONDS)
+    try:
+        probe_mphasis_sources(session)
+        results["MPHASIS"] = None
+    except Exception as exc:
+        results["MPHASIS"] = False
+        print(
+            "[MPHASIS] DISCOVERY_FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+    finally:
+        session.close()
 
-    # Inspect official careers and recruitment pages.
-    for name, url in NEW_COMPANY_PAGES.items():
-        probe_new_company_page(name, url, session)
-        time.sleep(DELAY_SECONDS)
+    print("\n[NEW_COMPANIES] SUMMARY")
 
-    print("\n[NEW_COMPANIES] COMPLETE")
+    for name, result in results.items():
+        status = (
+            "ADAPTER_PASS"
+            if result is True
+            else "PROBE_REQUIRED"
+            if result is None
+            else "VALIDATION_FAILED"
+        )
+
+        print(
+            f"[NEW_COMPANIES] {name}={status}"
+        )
+
     print("[NEW_COMPANIES] No registry changes")
     print("[NEW_COMPANIES] No state writes")
     print("[NEW_COMPANIES] No Telegram notifications")
-    print("[NEW_COMPANIES] No automatic ATS activation")
+    print("[NEW_COMPANIES] No automatic activation")
+
+    if any(result is False for result in results.values()):
+        raise RuntimeError(
+            "One or more company validations failed"
+        )
 
 
 if __name__ == "__main__":
