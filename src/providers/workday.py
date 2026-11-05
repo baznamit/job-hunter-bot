@@ -2,6 +2,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
+import re
 
 import requests
 
@@ -17,10 +18,254 @@ _PAGE_SIZE = 20
 # conservative so a large Workday board does not create dozens of
 # simultaneous requests.
 _PAGE_WORKERS = 3
+_DETAIL_WORKERS = 4
+
+_AMBIGUOUS_LOCATION_RE = re.compile(
+    r"^\s*\d+\s+Locations?\s*$",
+    re.IGNORECASE,
+)
 
 class WorkdayAdapter(ProviderAdapter):
 
     provider_name = "Workday"
+
+    @staticmethod
+    def _normalize_detail_location(
+        value: str,
+        country: str | None,
+    ) -> str:
+        """Normalize verified Workday location descriptors."""
+        value = re.sub(r"\s+", " ", value).strip()
+
+        if not value:
+            return ""
+
+        # Baker Hughes-style site identifiers.
+        # Apply this only when the detail response confirms India.
+        if country == "IN":
+            match = re.match(
+                r"^IN-(?:MH|Maharashtra)-MUMBAI(?:-|$)",
+                value,
+                re.I,
+            )
+            if match:
+                return "Mumbai, India"
+
+            match = re.match(
+                r"^IN-NAVI[- ]MUMBAI(?:-|$)",
+                value,
+                re.I,
+            )
+            if match:
+                return "Navi Mumbai, India"
+
+            match = re.match(
+                r"^IN-(?:KA|Karnataka)-(?:BANGALORE|BENGALURU)(?:-|$)",
+                value,
+                re.I,
+            )
+            if match:
+                return "Bengaluru, India"
+
+            match = re.match(
+                r"^IN-(?:Maharashtra|MH)-Pune(?:-|$)",
+                value,
+                re.I,
+            )
+            if match:
+                return "Pune, India"
+
+        # Already human-readable: "Mumbai, India".
+        return value
+
+    @classmethod
+    def _locations_from_detail(cls, data: dict) -> str | None:
+        """Extract actual locations from verified CXS detail fields."""
+        info = data.get("jobPostingInfo")
+
+        if not isinstance(info, dict):
+            return None
+
+        country_data = info.get("country")
+        requisition = info.get("jobRequisitionLocation")
+
+        country_code = None
+
+        if isinstance(requisition, dict):
+            requisition_country = requisition.get("country")
+            if isinstance(requisition_country, dict):
+                country_code = requisition_country.get(
+                    "alpha2Code"
+                )
+
+        if not country_code and isinstance(country_data, dict):
+            descriptor = country_data.get("descriptor")
+            if descriptor == "India":
+                country_code = "IN"
+
+        locations = []
+
+        primary = info.get("location")
+        if isinstance(primary, str) and primary.strip():
+            locations.append(primary)
+
+        additional = info.get("additionalLocations") or []
+
+        if isinstance(additional, list):
+            locations.extend(
+                value
+                for value in additional
+                if isinstance(value, str) and value.strip()
+            )
+
+        normalized = []
+        seen = set()
+
+        for value in locations:
+            location = cls._normalize_detail_location(
+                value,
+                country_code,
+            )
+
+            key = location.casefold()
+
+            if location and key not in seen:
+                seen.add(key)
+                normalized.append(location)
+
+        return " | ".join(normalized) if normalized else None
+
+    def _fetch_detail_location(
+        self,
+        company: Company,
+        board: str,
+        posting: dict,
+    ) -> str | None:
+        """Resolve one ambiguous location using public CXS JSON."""
+        config = company.provider.config
+
+        external_path = posting.get("externalPath")
+
+        if not isinstance(external_path, str):
+            return None
+
+        if not external_path.startswith("/job/"):
+            return None
+
+        base = (
+            f"https://{config.tenant}."
+            f"{config.cluster}.myworkdayjobs.com"
+        )
+
+        url = (
+            f"{base}/wday/cxs/"
+            f"{config.tenant}/{board}"
+            f"{external_path}"
+        )
+
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "Referer": f"{base}/en-US/{board}",
+                },
+                timeout=_TIMEOUT,
+            )
+
+            self._check_response(response, company)
+
+            data = response.json()
+
+            if not isinstance(data, dict):
+                return None
+
+            return self._locations_from_detail(data)
+
+        except (
+            requests.RequestException,
+            ValueError,
+        ) as exc:
+            print(
+                "[WORKDAY] LOCATION_DETAIL_FAILED "
+                f"company={company.id} "
+                f"board={board} "
+                f"path={external_path} "
+                f"error={type(exc).__name__}"
+            )
+            return None
+
+    def _enrich_ambiguous_locations(
+        self,
+        company: Company,
+        postings: list[dict],
+    ) -> None:
+        """Enrich only ambiguous Workday locations in place."""
+        candidates = []
+
+        for posting in postings:
+            location = str(
+                posting.get("locationsText") or ""
+            )
+
+            if not _AMBIGUOUS_LOCATION_RE.fullmatch(location):
+                continue
+
+            board = posting.get("_workday_board")
+
+            if not board:
+                board = company.provider.config.board
+
+            if not board:
+                continue
+
+            candidates.append((posting, board))
+
+        if not candidates:
+            return
+
+        resolved = 0
+        unresolved = 0
+
+        with ThreadPoolExecutor(
+            max_workers=_DETAIL_WORKERS
+        ) as executor:
+            futures = {
+                executor.submit(
+                    self._fetch_detail_location,
+                    company,
+                    board,
+                    posting,
+                ): posting
+                for posting, board in candidates
+            }
+
+            for future in as_completed(futures):
+                posting = futures[future]
+
+                try:
+                    location = future.result()
+                except Exception as exc:
+                    print(
+                        "[WORKDAY] LOCATION_ENRICHMENT_ERROR "
+                        f"company={company.id} "
+                        f"error={type(exc).__name__}"
+                    )
+                    location = None
+
+                if location:
+                    posting["_resolved_location"] = location
+                    resolved += 1
+                else:
+                    unresolved += 1
+
+        print(
+            "[WORKDAY] LOCATION_ENRICHMENT "
+            f"company={company.id} "
+            f"attempted={len(candidates)} "
+            f"resolved={resolved} "
+            f"unresolved={unresolved}"
+        )
 
     def _request_page(
         self,
@@ -127,6 +372,11 @@ class WorkdayAdapter(ProviderAdapter):
             deduplicated.append(
                 posting
             )
+
+        self._enrich_ambiguous_locations(
+            company,
+            deduplicated,
+        )
 
         return {
             "jobPostings":
@@ -408,7 +658,11 @@ class WorkdayAdapter(ProviderAdapter):
             else:
                 url = f"{base_url}/en-US/{board}"
 
-            location = item.get("locationsText") or "Unknown"
+            location = (
+                item.get("_resolved_location")
+                or item.get("locationsText")
+                or "Unknown"
+            )
             department = item.get("businessTitle") or None
             employment_type = item.get("timeType") or None
 
