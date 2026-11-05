@@ -323,3 +323,40 @@ def test_principal_software_engineer_remains_excluded(f):
     )
 
     assert not f.should_include(job)
+
+
+def test_hyphenated_full_stack_title_matches():
+    from src.filters import JobFilter
+
+    job_filter = JobFilter()
+
+    assert job_filter._include_keyword_match(
+        "Senior Full-Stack Developer"
+    )
+
+    assert job_filter._include_keyword_match(
+        "Full Stack Developer"
+    )
+
+    assert job_filter._include_keyword_match(
+        "Fullstack Developer"
+    )
+
+
+def test_unrelated_title_still_rejected():
+    from src.filters import JobFilter
+
+    job_filter = JobFilter()
+
+    assert not job_filter._include_keyword_match(
+        "Senior Sales Executive"
+    )
+
+
+def test_ambiguous_location_not_automatically_accepted():
+    from src.filters import JobFilter
+
+    job_filter = JobFilter()
+
+    assert not job_filter._location_match("2 Locations")
+    assert not job_filter._location_match("3 Locations")

@@ -190,11 +190,22 @@ class JobFilter:
 
         return FilterResult(included=True)
     
+    @staticmethod
+    def _normalize_role_text(value: str) -> str:
+        """Normalize equivalent separators in role titles."""
+        return re.sub(
+            r"\s+",
+            " ",
+            re.sub(r"[-‐‑–—_/]+", " ", value.casefold()),
+        ).strip()
+
     def _include_keyword_match(self, title: str) -> bool:
-        title = title.lower()
+        normalized_title = self._normalize_role_text(title)
+
         return any(
-            kw in title
-            for kw in self.include_keywords
+            self._normalize_role_text(keyword)
+            in normalized_title
+            for keyword in self.include_keywords
         )
 
     def _exclude_keyword_match(self, title: str) -> bool:

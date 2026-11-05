@@ -1901,8 +1901,124 @@ def run_new_companies():
         )
 
 
+def probe_workday_location_details():
+    """Inspect public Workday detail-location fields, read-only."""
+    import requests
+
+    targets = {
+        "DUCKCREEK": {
+            "tenant": "duckcreek",
+            "cluster": "wd1",
+            "board": "duckcreekcareers",
+            "paths": [
+                "/job/Mumbai-India/Software-Engineer-II_REQID55166-1",
+                "/job/Bengaluru-India/Senior-Associate-Software-Engineer_REQID55208-1",
+            ],
+        },
+        "BAKERHUGHES": {
+            "tenant": "bakerhughes",
+            "cluster": "wd5",
+            "board": "BakerHughes",
+            "paths": [
+                "/job/IN-MH-MUMBAI-HIRANANDANI-BUSINESS-PARK-POWAI/Engineering-Specialist---Applications-and-Software_R160606",
+                "/job/IN-MH-MUMBAI-HIRANANDANI-BUSINESS-PARK-POWAI/Digital-Technology-Professional---Software-Engineering_R169599-1",
+            ],
+        },
+    }
+
+    print("[WORKDAY_LOCATION] READ_ONLY")
+
+    for company_name, config in targets.items():
+        base = (
+            f"https://{config['tenant']}."
+            f"{config['cluster']}.myworkdayjobs.com"
+        )
+
+        for path in config["paths"]:
+            # Candidate CXS detail path derived from a verified
+            # public Workday job path; response unverified.
+            url = (
+                f"{base}/wday/cxs/"
+                f"{config['tenant']}/"
+                f"{config['board']}"
+                f"{path}"
+            )
+
+            try:
+                response = requests.get(
+                    url,
+                    headers={"Accept": "application/json"},
+                    timeout=20,
+                )
+
+                print(
+                    f"[WORKDAY_LOCATION] company={company_name} "
+                    f"status={response.status_code} "
+                    f"content_type="
+                    f"{response.headers.get('Content-Type')!r}"
+                )
+
+                if response.status_code != 200:
+                    continue
+
+                data = response.json()
+
+                if not isinstance(data, dict):
+                    print(
+                        "[WORKDAY_LOCATION] "
+                        "unexpected_response_shape"
+                    )
+                    continue
+
+                print(
+                    f"[WORKDAY_LOCATION] "
+                    f"top_level_keys={sorted(data.keys())}"
+                )
+
+                job_posting = data.get("jobPostingInfo", {})
+
+                if not isinstance(job_posting, dict):
+                    continue
+
+                print(
+                    f"[WORKDAY_LOCATION] "
+                    f"job_fields={sorted(job_posting.keys())}"
+                )
+
+                for key, value in job_posting.items():
+                    if any(
+                        marker in key.casefold()
+                        for marker in (
+                            "location",
+                            "country",
+                            "region",
+                            "city",
+                            "remote",
+                        )
+                    ):
+                        print(
+                            "[WORKDAY_LOCATION] "
+                            f"field={key!r} "
+                            f"value={str(value)[:500]!r}"
+                        )
+
+            except (
+                requests.RequestException,
+                ValueError,
+            ) as exc:
+                print(
+                    f"[WORKDAY_LOCATION] "
+                    f"company={company_name} "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+
+    print("[WORKDAY_LOCATION] COMPLETE")
+
+
 def run_activation_check():
     """Read-only activation check using production filter rules."""
+    probe_workday_location_details()
+
     from collections import Counter
 
     from research.loader import load_registry
