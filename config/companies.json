@@ -6,7 +6,7 @@
       "name": "Duck Creek Technologies",
       "category": "Product",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.duckcreek.com/careers/",
       "provider": {
         "type": "workday",
@@ -27,7 +27,7 @@
       "name": "Baker Hughes",
       "category": "Product",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.bakerhughes.com/global/en",
       "provider": {
         "type": "workday",

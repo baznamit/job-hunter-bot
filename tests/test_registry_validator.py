@@ -178,7 +178,7 @@ def test_duckcreek_uses_verified_workday_configuration(registry):
     config = company.provider.config
 
     assert company.name == "Duck Creek Technologies"
-    assert company.enabled is False
+    assert company.enabled is True
     assert company.priority == 1
     assert company.provider.type == ProviderType.WORKDAY
     assert company.provider.status == ProviderStatus.VERIFIED
@@ -202,7 +202,7 @@ def test_bakerhughes_uses_verified_workday_configuration(registry):
     config = company.provider.config
 
     assert company.name == "Baker Hughes"
-    assert company.enabled is False
+    assert company.enabled is True
     assert company.priority == 2
     assert company.provider.type == ProviderType.WORKDAY
     assert company.provider.status == ProviderStatus.VERIFIED
