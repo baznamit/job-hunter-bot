@@ -1901,6 +1901,215 @@ def run_new_companies():
         )
 
 
+def run_activation_check():
+    """Read-only activation check using production filter rules."""
+    from collections import Counter
+
+    from research.loader import load_registry
+    from src.filters import JobFilter
+    from src.providers.workday import WorkdayAdapter
+
+    targets = {
+        "duckcreek": "DUCKCREEK",
+        "bakerhughes": "BAKERHUGHES",
+    }
+
+    registry = load_registry()
+    job_filter = JobFilter()
+    adapter = WorkdayAdapter()
+    results = {}
+
+    print("=" * 70)
+    print("WORKDAY ACTIVATION READINESS - READ ONLY")
+    print("=" * 70)
+
+    for company_id, label in targets.items():
+        matches = [
+            company
+            for company in registry.companies
+            if company.id == company_id
+        ]
+
+        if len(matches) != 1:
+            print(
+                f"[{label}] REGISTRY_ERROR "
+                f"expected=1 found={len(matches)}"
+            )
+            results[label] = "REVIEW"
+            continue
+
+        company = matches[0].model_copy(deep=True)
+
+        if company.enabled:
+            print(
+                f"[{label}] WARNING "
+                "company is already enabled"
+            )
+            results[label] = "REVIEW"
+            continue
+
+        print(f"\n[{label}] fetching jobs")
+
+        try:
+            jobs = adapter.fetch_jobs(company)
+        except Exception as exc:
+            print(
+                f"[{label}] FETCH_FAILED "
+                f"{type(exc).__name__}: {exc}"
+            )
+            results[label] = "REVIEW"
+            continue
+
+        reasons = Counter()
+        included = []
+        ambiguous = []
+        india_candidates = []
+
+        ids = [str(job.id) for job in jobs]
+        urls = [str(job.url) for job in jobs]
+
+        for job in jobs:
+            evaluation = job_filter.evaluate(job)
+
+            if evaluation.included:
+                included.append(job)
+            else:
+                reason = (
+                    evaluation.reason.value
+                    if evaluation.reason
+                    else "unknown"
+                )
+                reasons[reason] += 1
+
+            location = str(job.location)
+            title = str(job.title)
+            url = str(job.url)
+
+            # Diagnostic only: this is not a replacement
+            # for the production location filter.
+            india_hint = bool(
+                NEW_COMPANY_INDIA_RE.search(location)
+                or re.search(
+                    r"/(?:Mumbai|Navi-Mumbai|Bengaluru|"
+                    r"Bangalore|Remote)-India/",
+                    url,
+                    re.I,
+                )
+                or re.search(
+                    r"/IN-[A-Z]{2}-",
+                    url,
+                    re.I,
+                )
+            )
+
+            if india_hint:
+                india_candidates.append(job)
+
+            if re.fullmatch(
+                r"\d+\s+Locations?",
+                location,
+                re.I,
+            ):
+                ambiguous.append(job)
+
+        print(
+            f"[{label}] fetched={len(jobs)} "
+            f"unique_ids={len(set(ids))} "
+            f"unique_urls={len(set(urls))}"
+        )
+
+        print(
+            f"[{label}] filter_matches={len(included)} "
+            f"filter_rejected={len(jobs)-len(included)}"
+        )
+
+        print(
+            f"[{label}] india_candidates="
+            f"{len(india_candidates)} "
+            f"ambiguous_locations={len(ambiguous)}"
+        )
+
+        print(
+            f"[{label}] rejection_reasons="
+            f"{dict(sorted(reasons.items()))}"
+        )
+
+        for job in included[:12]:
+            print(
+                f"[{label}] MATCH "
+                f"id={job.id!r} "
+                f"title={job.title!r} "
+                f"location={job.location!r} "
+                f"url={job.url}"
+            )
+
+        # Prioritize ambiguous locations with relevant titles.
+        relevant_ambiguous = [
+            job for job in ambiguous
+            if NEW_COMPANY_ROLE_RE.search(job.title)
+        ]
+
+        for job in relevant_ambiguous[:15]:
+            evaluation = job_filter.evaluate(job)
+
+            print(
+                f"[{label}] AMBIGUOUS "
+                f"id={job.id!r} "
+                f"title={job.title!r} "
+                f"location={job.location!r} "
+                f"reason="
+                f"{evaluation.reason.value if evaluation.reason else 'included'} "
+                f"url={job.url}"
+            )
+
+        for job in india_candidates[:10]:
+            evaluation = job_filter.evaluate(job)
+
+            print(
+                f"[{label}] INDIA_CANDIDATE "
+                f"id={job.id!r} "
+                f"title={job.title!r} "
+                f"location={job.location!r} "
+                f"filter_included={evaluation.included} "
+                f"reason="
+                f"{evaluation.reason.value if evaluation.reason else 'none'}"
+            )
+
+        valid_identity = (
+            bool(jobs)
+            and len(ids) == len(set(ids))
+            and len(urls) == len(set(urls))
+        )
+
+        if not valid_identity:
+            results[label] = "REVIEW"
+        elif relevant_ambiguous:
+            results[label] = "LOCATION_REVIEW"
+        elif label == "BAKERHUGHES":
+            results[label] = "SOURCE_COMPARISON_PENDING"
+        else:
+            results[label] = "FILTER_CHECK_PASS"
+
+    print("\n[ACTIVATION] SUMMARY")
+
+    for label, status in results.items():
+        print(
+            f"[ACTIVATION] {label}={status}"
+        )
+
+    print("[ACTIVATION] No registry modifications")
+    print("[ACTIVATION] No seen/recovery state writes")
+    print("[ACTIVATION] No Telegram notifications")
+
+    if any(
+        status == "REVIEW"
+        for status in results.values()
+    ):
+        raise RuntimeError(
+            "Activation validation encountered errors"
+        )
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1918,10 +2127,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Probe Duck Creek, Baker Hughes and Mphasis",
     )
+    parser.add_argument(
+        "--activation-check",
+        action="store_true",
+        help="Check Duck Creek and Baker Hughes activation readiness",
+    )
 
     args = parser.parse_args()
 
-    if args.new_companies:
+    if args.activation_check:
+        run_activation_check()
+    elif args.new_companies:
         run_new_companies()
     elif args.stale_recovery:
         run_stale_recovery()
