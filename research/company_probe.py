@@ -3315,6 +3315,18 @@ _TALISMATIC_JOB_RE = re.compile(
     r"^/jobs/([A-Za-z0-9_-]+)/?$"
 )
 
+_ZYCUS_ROLE_RE = re.compile(
+    r"java|spring|backend|full[\s-]?stack|"
+    r"software engineer|software developer|react",
+    re.I,
+)
+
+_ZYCUS_INDIA_RE = re.compile(
+    r"india|mumbai|bengaluru|bangalore|"
+    r"pune|hyderabad|chennai|noida",
+    re.I,
+)
+
 
 def _zycus_safe_url(url: str) -> str:
     """Remove query parameters and fragments from report URLs."""
@@ -3509,6 +3521,179 @@ def _zycus_structure(
     }
 
 
+def _zycus_public_jobposting_objects(html: str) -> list[dict]:
+    """Read public JSON-LD JobPosting objects, if present."""
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = []
+
+    def visit(value):
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            kinds = value.get("@type", [])
+            if isinstance(kinds, str):
+                kinds = [kinds]
+
+            if "JobPosting" in kinds:
+                jobs.append(value)
+
+            if "@graph" in value:
+                visit(value["@graph"])
+
+    for script in soup.select(
+        'script[type="application/ld+json"]'
+    ):
+        try:
+            value = json.loads(script.string or "")
+        except (TypeError, ValueError):
+            continue
+        visit(value)
+
+    return jobs[:20]
+
+
+def _zycus_nextjs_evidence(html: str) -> dict:
+    """Inspect bounded public frontend-state evidence."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    next_data = soup.select_one(
+        'script#__NEXT_DATA__[type="application/json"]'
+    )
+
+    next_data_keys = []
+    if next_data:
+        try:
+            payload = json.loads(next_data.string or "")
+            if isinstance(payload, dict):
+                next_data_keys = sorted(payload)[:20]
+        except (TypeError, ValueError):
+            pass
+
+    flight_scripts = [
+        script.get_text()
+        for script in soup.select("script")
+        if "self.__next_f.push" in script.get_text()
+    ]
+
+    flight_text = "\n".join(
+        text[:50000] for text in flight_scripts[:20]
+    )
+
+    # Evidence only: do not treat string matches as job records.
+    job_markers = {
+        marker: flight_text.lower().count(marker.lower())
+        for marker in (
+            "jobId",
+            "jobTitle",
+            "jobLocation",
+            "requisition",
+            "pagination",
+            "totalCount",
+        )
+    }
+
+    return {
+        "next_data_keys": next_data_keys,
+        "flight_script_count": len(flight_scripts),
+        "flight_bytes_inspected": len(flight_text),
+        "flight_job_markers": job_markers,
+        "has_jobposting_jsonld": bool(
+            _zycus_public_jobposting_objects(html)
+        ),
+    }
+
+
+def _zycus_detail_evidence(
+    html: str,
+    expected_job_id: str,
+) -> dict:
+    """Extract public detail evidence without guessing fields."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    postings = _zycus_public_jobposting_objects(html)
+
+    title = ""
+    location = ""
+    employment = ""
+
+    if postings:
+        posting = postings[0]
+
+        title = str(posting.get("title") or "")
+        employment = str(
+            posting.get("employmentType") or ""
+        )
+
+        places = posting.get("jobLocation") or []
+        if isinstance(places, dict):
+            places = [places]
+
+        location_parts = []
+
+        for place in places:
+            if not isinstance(place, dict):
+                continue
+
+            address = place.get("address")
+            if not isinstance(address, dict):
+                continue
+
+            location_parts.extend(
+                str(address.get(field) or "")
+                for field in (
+                    "addressLocality",
+                    "addressRegion",
+                    "addressCountry",
+                )
+            )
+
+        location = ", ".join(
+            part for part in location_parts if part
+        )
+
+    if not title:
+        heading = soup.select_one("h1")
+        if heading:
+            title = heading.get_text(" ", strip=True)
+
+    if not title and soup.title:
+        title = soup.title.get_text(" ", strip=True)
+
+    canonical = soup.select_one(
+        'link[rel="canonical"][href]'
+    )
+
+    canonical_url = ""
+    if canonical:
+        candidate = urljoin(
+            "https://zycus.talismatic.com",
+            canonical["href"],
+        )
+        parsed = urlparse(candidate)
+
+        if (
+            parsed.scheme == "https"
+            and parsed.hostname == "zycus.talismatic.com"
+            and parsed.path.rstrip("/")
+            == f"/jobs/{expected_job_id}"
+        ):
+            canonical_url = parsed._replace(
+                query="",
+                fragment="",
+            ).geturl()
+
+    return {
+        "id": expected_job_id,
+        "title": title[:150],
+        "location": location[:200],
+        "employment_type": employment[:100],
+        "canonical": canonical_url,
+        "jsonld_job_count": len(postings),
+        "nextjs": _zycus_nextjs_evidence(html),
+    }
+
+
 def probe_zycus_talismatic(session) -> None:
     """Validate official Zycus/Talismatic public sources."""
     print("\n[ZYCUS_TALISMATIC] START")
@@ -3588,6 +3773,15 @@ def probe_zycus_talismatic(session) -> None:
         if label == "BOARD":
             board_structure = structure
 
+            nextjs = _zycus_nextjs_evidence(
+                result["content"]
+            )
+
+            print(
+                "[ZYCUS_TALISMATIC] BOARD_NEXTJS "
+                f"evidence={nextjs!r}"
+            )
+
         time.sleep(DELAY_SECONDS)
 
     board_ids = set(
@@ -3605,6 +3799,30 @@ def probe_zycus_talismatic(session) -> None:
         f"shared={len(board_ids & india_ids)} "
         f"missing_from_board={len(india_ids - board_ids)}"
     )
+
+    official_jobs = inventories.get(
+        "OFFICIAL_INDIA", {}
+    )
+
+    relevant = [
+        job
+        for job in official_jobs.values()
+        if _ZYCUS_ROLE_RE.search(job["title"])
+    ]
+
+    print(
+        "[ZYCUS_TALISMATIC] OFFICIAL_RELEVANCE "
+        f"total_links={len(official_jobs)} "
+        f"technology_title_matches={len(relevant)}"
+    )
+
+    for job in relevant[:10]:
+        print(
+            "[ZYCUS_TALISMATIC] ROLE_CANDIDATE "
+            f"id={job['id']} "
+            f"title={job['title'][:100]!r} "
+            f"url={job['url']}"
+        )
 
     # Test at most two observed pagination links.
     # Do not invent page parameters or endpoints.
@@ -3684,6 +3902,32 @@ def probe_zycus_talismatic(session) -> None:
                 f"status={result['status']} "
                 f"bytes={result['bytes']}"
             )
+
+            if (
+                result["status"] == 200
+                and not result["truncated"]
+                and classify_page(result) == "HTML"
+            ):
+                evidence = _zycus_detail_evidence(
+                    result["content"],
+                    job_id,
+                )
+
+                print(
+                    "[ZYCUS_TALISMATIC] DETAIL_FIELDS "
+                    f"id={job_id} "
+                    f"title={evidence['title']!r} "
+                    f"location={evidence['location']!r} "
+                    f"employment={evidence['employment_type']!r} "
+                    f"canonical={evidence['canonical']!r} "
+                    f"jsonld_jobs={evidence['jsonld_job_count']}"
+                )
+
+                print(
+                    "[ZYCUS_TALISMATIC] DETAIL_NEXTJS "
+                    f"id={job_id} "
+                    f"evidence={evidence['nextjs']!r}"
+                )
 
         except requests.RequestException as exc:
             print(

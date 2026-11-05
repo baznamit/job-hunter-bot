@@ -1,5 +1,8 @@
 from research.company_probe import (
+    _zycus_detail_evidence,
     _zycus_job_links,
+    _zycus_nextjs_evidence,
+    _zycus_public_jobposting_objects,
     _zycus_structure,
     _zycus_valid_pagination_url,
 )
@@ -135,3 +138,118 @@ def test_no_credentials_in_canonical_job_url():
     assert jobs["J123"]["url"] == (
         "https://zycus.talismatic.com/jobs/J123"
     )
+
+
+def test_zycus_extracts_jobposting_jsonld():
+    html = """
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      "title": "Java Backend Engineer",
+      "employmentType": "FULL_TIME",
+      "jobLocation": {
+        "@type": "Place",
+        "address": {
+          "addressLocality": "Mumbai",
+          "addressCountry": "India"
+        }
+      }
+    }
+    </script>
+    """
+
+    jobs = _zycus_public_jobposting_objects(html)
+
+    assert len(jobs) == 1
+    assert jobs[0]["title"] == "Java Backend Engineer"
+
+
+def test_zycus_extracts_nested_jsonld_graph():
+    html = """
+    <script type="application/ld+json">
+    {
+      "@graph": [
+        {"@type": "Organization", "name": "Zycus"},
+        {"@type": "JobPosting", "title": "Java Developer"}
+      ]
+    }
+    </script>
+    """
+
+    jobs = _zycus_public_jobposting_objects(html)
+
+    assert len(jobs) == 1
+    assert jobs[0]["title"] == "Java Developer"
+
+
+def test_zycus_detail_extracts_location_and_canonical():
+    html = """
+    <html>
+      <head>
+        <link rel="canonical"
+              href="https://zycus.talismatic.com/jobs/J123">
+      </head>
+      <body>
+        <script type="application/ld+json">
+        {
+          "@type": "JobPosting",
+          "title": "Java Full Stack Developer",
+          "jobLocation": {
+            "address": {
+              "addressLocality": "Bengaluru",
+              "addressCountry": "India"
+            }
+          }
+        }
+        </script>
+      </body>
+    </html>
+    """
+
+    result = _zycus_detail_evidence(html, "J123")
+
+    assert result["title"] == "Java Full Stack Developer"
+    assert result["location"] == "Bengaluru, India"
+    assert result["canonical"] == (
+        "https://zycus.talismatic.com/jobs/J123"
+    )
+
+
+def test_zycus_rejects_unrelated_canonical():
+    html = """
+    <link rel="canonical"
+          href="https://other.example/jobs/J123">
+    <h1>Java Developer</h1>
+    """
+
+    result = _zycus_detail_evidence(html, "J123")
+
+    assert result["canonical"] == ""
+    assert result["title"] == "Java Developer"
+
+
+def test_zycus_nextjs_evidence_does_not_dump_state():
+    html = """
+    <script>
+      self.__next_f.push([
+        1, "jobId PRIVATE_SESSION_VALUE"
+      ])
+    </script>
+    """
+
+    result = _zycus_nextjs_evidence(html)
+
+    assert result["flight_script_count"] == 1
+    assert result["flight_job_markers"]["jobId"] == 1
+    assert "PRIVATE_SESSION_VALUE" not in str(result)
+
+
+def test_zycus_handles_invalid_jsonld():
+    html = """
+    <script type="application/ld+json">
+      {invalid json}
+    </script>
+    """
+
+    assert _zycus_public_jobposting_objects(html) == []
