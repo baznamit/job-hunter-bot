@@ -23,6 +23,7 @@ from models.company import (
 )
 from src.providers import (
     AlgoliaAdapter,
+    AtlassianAdapter,
     AshbyAdapter,
     BankOfAmericaAdapter,
     EightfoldAdapter,
@@ -41,6 +42,7 @@ from src.providers.exceptions import ProviderError
 
 
 _ADAPTERS = {
+    ProviderType.ATLASSIAN: AtlassianAdapter(),
     ProviderType.GREENHOUSE: GreenhouseAdapter(),
     ProviderType.LEVER: LeverAdapter(),
     ProviderType.ASHBY: AshbyAdapter(),
@@ -232,6 +234,13 @@ def validate_registry(registry: CompanyRegistry) -> None:
                     f"{company.name}: SuccessFactors provider "
                     f"is missing config fields: "
                     f"{', '.join(missing)}"
+                )
+
+        elif provider.type == ProviderType.ATLASSIAN:
+            if not config.base_url:
+                raise ValueError(
+                    f"{company.name}: Atlassian provider "
+                    "requires config.base_url"
                 )
 
         elif provider.type == ProviderType.TALENTBREW:

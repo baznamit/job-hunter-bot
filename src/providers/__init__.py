@@ -20,8 +20,10 @@ from .fynd import FyndAdapter
 from .infosys import InfosysAdapter
 from .hcltech import HCLTechAdapter
 from .ibm import IBMAdapter
+from .atlassian import AtlassianAdapter
 
 __all__ = [
+    "AtlassianAdapter",
     "ProviderAdapter",
     "GreenhouseAdapter",
     "LeverAdapter",

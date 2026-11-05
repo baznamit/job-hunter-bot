@@ -19,6 +19,7 @@ class ProviderType(str, Enum):
     GREENHOUSE = "greenhouse"
     LEVER = "lever"
     WORKDAY = "workday"
+    ATLASSIAN = "atlassian"
     ASHBY = "ashby"
     SMARTRECRUITERS = "smartrecruiters"
     EIGHTFOLD = "eightfold"
@@ -92,6 +93,11 @@ class ProviderConfig(BaseModel):
     source_id: str | None = None
 
     job_link_selector: str | None = None
+    detail_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=500,
+    )
     search_params: dict[str, str | int] = Field(
         default_factory=dict
     )

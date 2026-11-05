@@ -886,6 +886,55 @@ def probe_atlassian_details(session):
         )
 
 
+def validate_atlassian_adapter():
+    from research.loader import load_registry
+    from src.providers.atlassian import AtlassianAdapter
+
+    company = next(
+        c for c in load_registry().companies
+        if c.id == "atlassian"
+    )
+
+    if company.enabled:
+        raise AssertionError(
+            "Atlassian must remain disabled"
+        )
+
+    adapter = AtlassianAdapter()
+    jobs = adapter.fetch_jobs(company)
+
+    ids = [job.id for job in jobs]
+    urls = [str(job.url) for job in jobs]
+
+    print(f"[ATLASSIAN_ADAPTER] jobs={len(jobs)}")
+    print(
+        f"[ATLASSIAN_ADAPTER] unique_ids={len(set(ids))}"
+    )
+    print(
+        f"[ATLASSIAN_ADAPTER] unique_urls={len(set(urls))}"
+    )
+
+    if not jobs:
+        raise AssertionError("No normalized Atlassian jobs")
+
+    if len(ids) != len(set(ids)):
+        raise AssertionError("Duplicate Atlassian IDs")
+
+    if len(urls) != len(set(urls)):
+        raise AssertionError("Duplicate Atlassian URLs")
+
+    for job in jobs[:10]:
+        print(
+            "[ATLASSIAN_ADAPTER] SAMPLE "
+            f"id={job.id} "
+            f"title={job.title!r} "
+            f"location={job.location!r} "
+            f"url={job.url}"
+        )
+
+    print("[ATLASSIAN_ADAPTER] VALIDATION_COMPLETE")
+
+
 def _atlassian_context(element, limit=500):
     parent = element.parent
 
@@ -1224,12 +1273,12 @@ def run_stale_recovery():
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # Atlassian: inspect three representative details only.
+    # Atlassian: validate the bounded adapter configuration.
     try:
-        probe_atlassian_details(session)
-    except requests.RequestException as exc:
+        validate_atlassian_adapter()
+    except Exception as exc:
         print(
-            f"[ATLASSIAN] REQUEST_FAILED "
+            "[ATLASSIAN_ADAPTER] VALIDATION_FAILED "
             f"{type(exc).__name__}: {exc}"
         )
 

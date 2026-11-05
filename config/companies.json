@@ -143,19 +143,20 @@
       "name": "Atlassian",
       "category": "Developer Tools",
       "priority": 1,
-      "enabled": true,
+      "enabled": false,
       "career_page": "https://www.atlassian.com/company/careers",
       "provider": {
-        "type": "lever",
+        "type": "atlassian",
         "status": "partial",
         "config": {
-          "board": "atlassian"
+          "base_url": "https://www.atlassian.com/company/careers/all-jobs",
+          "detail_limit": 20
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": ""
+      "notes": "Official Atlassian structured HTML listing. Initial 20-job validation only. Full inventory and parsing coverage pending."
     },
     {
       "id": "cred",

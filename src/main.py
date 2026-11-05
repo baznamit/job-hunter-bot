@@ -35,6 +35,7 @@ from src.filters import JobFilter
 from src.notifier import TelegramNotifier
 from src.providers import (
     AlgoliaAdapter,
+    AtlassianAdapter,
     AshbyAdapter,
     BankOfAmericaAdapter,
     CognizantAdapter,
@@ -78,6 +79,7 @@ _ADAPTERS = {
     ProviderType.LEVER: LeverAdapter(),
     ProviderType.ASHBY: AshbyAdapter(),
     ProviderType.WORKDAY: WorkdayAdapter(),
+    ProviderType.ATLASSIAN: AtlassianAdapter(),
     ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
     ProviderType.ORACLE: OracleAdapter(),
     ProviderType.HIGHER: HigherAdapter(),
