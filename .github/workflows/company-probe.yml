@@ -38,3 +38,6 @@ jobs:
 
       - name: Validate S&P Global complete Workday inventory and Jibe metadata
         run: python -u -m research.spglobal_stage2_probe
+
+      - name: Probe stale ATS recovery candidates
+        run: python -u -m research.company_probe --stale-recovery

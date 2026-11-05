@@ -498,5 +498,277 @@ def main():
     print("\n[PROBE] Finished")
 
 
+# ============================================================
+# STALE ATS RECOVERY
+# Read-only diagnostics for four existing company mappings.
+# Run: python -u -m research.company_probe --stale-recovery
+# ============================================================
+
+RECOVERY_TARGETS = {
+    "ATLASSIAN": "https://www.atlassian.com/company/careers/all-jobs",
+    "COINDCX": "https://coindcx.com/opportunities",
+    "ZEPTO": "https://www.zepto.com/s/careers",
+}
+
+POSTMAN_TENANT = "postman"
+POSTMAN_CLUSTER = "wd108"
+POSTMAN_BOARD = "careers"
+
+RECOVERY_ROLE_PATTERN = re.compile(
+    r"java|spring|backend|back.end|full.stack|"
+    r"software engineer|developer|microservices",
+    re.I,
+)
+
+RECOVERY_INDIA_PATTERN = re.compile(
+    r"india|mumbai|navi mumbai|bengaluru|"
+    r"bangalore|pune|hyderabad|chennai|noida",
+    re.I,
+)
+
+
+def probe_postman_workday():
+    base = (
+        f"https://{POSTMAN_TENANT}."
+        f"{POSTMAN_CLUSTER}.myworkdayjobs.com"
+    )
+
+    endpoint = (
+        f"{base}/wday/cxs/"
+        f"{POSTMAN_TENANT}/{POSTMAN_BOARD}/jobs"
+    )
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": base,
+        "Referer": f"{base}/en-US/{POSTMAN_BOARD}",
+    }
+
+    page_paths = {}
+
+    print("\n[RECOVERY] POSTMAN WORKDAY")
+    print(f"[POSTMAN] endpoint={endpoint}")
+
+    for offset in (0, 20):
+        try:
+            response = requests.post(
+                endpoint,
+                json={
+                    "appliedFacets": {},
+                    "limit": 20,
+                    "offset": offset,
+                    "searchText": "",
+                },
+                headers=headers,
+                timeout=TIMEOUT,
+            )
+
+            print(
+                f"[POSTMAN] offset={offset} "
+                f"status={response.status_code} "
+                f"type={response.headers.get('Content-Type')!r}"
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            if not isinstance(data, dict):
+                raise ValueError("Expected JSON object")
+
+            postings = data.get("jobPostings")
+
+            if not isinstance(postings, list):
+                raise ValueError("Missing jobPostings list")
+
+            paths = {
+                str(job["externalPath"])
+                for job in postings
+                if isinstance(job, dict)
+                and job.get("externalPath")
+            }
+
+            page_paths[offset] = paths
+
+            print(
+                f"[POSTMAN] offset={offset} "
+                f"total={data.get('total')!r} "
+                f"count={len(postings)} "
+                f"unique_paths={len(paths)}"
+            )
+
+            for job in postings[:8]:
+                title = str(job.get("title", ""))
+                location = str(job.get("locationsText", ""))
+
+                print(
+                    "[POSTMAN] SAMPLE "
+                    f"title={title!r} "
+                    f"location={location!r} "
+                    f"path={job.get('externalPath')!r}"
+                )
+
+                if (
+                    RECOVERY_ROLE_PATTERN.search(title)
+                    and RECOVERY_INDIA_PATTERN.search(location)
+                ):
+                    print("[POSTMAN] RELEVANT_INDIA_ROLE")
+
+        except (
+            requests.RequestException,
+            ValueError,
+        ) as exc:
+            print(
+                f"[POSTMAN] offset={offset} "
+                f"ERROR={type(exc).__name__}: {exc}"
+            )
+
+    if 0 in page_paths and 20 in page_paths:
+        print(
+            "[POSTMAN] page_overlap="
+            f"{len(page_paths[0] & page_paths[20])}"
+        )
+        print(
+            "[POSTMAN] distinct_pages="
+            f"{page_paths[0] != page_paths[20]}"
+        )
+
+    print("[POSTMAN] Probe completed; inventory not yet certified")
+
+
+def probe_recovery_html(name, url, session):
+    print(f"\n[RECOVERY] {name}")
+    print(f"[{name}] requested={url}")
+
+    try:
+        result = limited_get(session, url)
+
+        print(
+            f"[{name}] status={result['status']} "
+            f"final={result['url']} "
+            f"type={result['type']!r} "
+            f"bytes={result['bytes']} "
+            f"truncated={result['truncated']}"
+        )
+
+        kind = classify_page(result)
+        print(f"[{name}] classification={kind}")
+
+        if kind != "HTML":
+            print(
+                f"[{name}] HTML inventory unavailable; "
+                "ATS remains unverified"
+            )
+            return
+
+        info = inspect_html(
+            result["content"],
+            result["url"],
+        )
+
+        print(
+            f"[{name}] title={info['title']!r} "
+            f"links={len(info['links'])} "
+            f"candidate_job_links={len(info['job_links'])} "
+            f"scripts={len(info['scripts'])} "
+            f"forms={len(info['forms'])} "
+            f"json_ld={len(info['json_ld'])}"
+        )
+
+        print(f"[{name}] markers={info['markers']}")
+
+        for link in info["job_links"][:20]:
+            print(f"[{name}] JOB_LINK {link}")
+
+        for script in info["scripts"][:10]:
+            print(f"[{name}] SCRIPT {script}")
+
+        for form in info["forms"][:5]:
+            print(
+                f"[{name}] FORM "
+                f"{json.dumps(form, ensure_ascii=False)}"
+            )
+
+        for entry in info["json_ld"][:5]:
+            if isinstance(entry, dict):
+                print(
+                    f"[{name}] JSONLD "
+                    f"type={entry.get('@type')!r}"
+                )
+
+        # Additional same-site link discovery, useful when
+        # the current careers page is only a landing page.
+        base_host = urlparse(result["url"]).hostname
+
+        candidate_links = [
+            link for link in info["links"]
+            if urlparse(link).hostname == base_host
+            and any(
+                token in urlparse(link).path.lower()
+                for token in (
+                    "career",
+                    "opening",
+                    "position",
+                    "job",
+                    "apply",
+                )
+            )
+        ]
+
+        for link in candidate_links[:15]:
+            print(f"[{name}] CAREER_CANDIDATE {link}")
+
+        print(
+            f"[{name}] observed_job_links="
+            f"{len(info['job_links'])} "
+            "authoritative_total=UNKNOWN "
+            "exhaustive_inventory=NO"
+        )
+
+    except requests.RequestException as exc:
+        print(
+            f"[{name}] REQUEST_ERROR "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+
+def run_stale_recovery():
+    print("=" * 70)
+    print("STALE ATS RECOVERY - READ ONLY")
+    print("=" * 70)
+
+    probe_postman_workday()
+
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    for name, url in RECOVERY_TARGETS.items():
+        probe_recovery_html(name, url, session)
+        time.sleep(DELAY_SECONDS)
+
+    print("\n[RECOVERY] COMPLETE")
+    print("[RECOVERY] No registry or state changes")
+    print("[RECOVERY] No Telegram notifications")
+    print("[RECOVERY] No automatic ATS replacement")
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Job Hunter Bot ATS research probes"
+    )
+
+    parser.add_argument(
+        "--stale-recovery",
+        action="store_true",
+        help="Probe Postman, Atlassian, CoinDCX and Zepto",
+    )
+
+    args = parser.parse_args()
+
+    if args.stale_recovery:
+        run_stale_recovery()
+    else:
+        main()
