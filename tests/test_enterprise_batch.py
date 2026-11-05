@@ -4,8 +4,10 @@ from unittest.mock import patch
 from research.company_probe import (
     _enterprise_page_evidence,
     _enterprise_validate_existing,
+    _kpmg_oracle_config_structure,
     _kpmg_oracle_evidence,
     _mastek_listing_evidence,
+    _mastek_pagination_structure,
 )
 from research.loader import load_registry
 
@@ -211,3 +213,100 @@ def test_kpmg_handles_no_embedded_configuration():
 
     assert result["site_number_candidates"] == []
     assert result["script_count"] == 0
+
+
+def test_mastek_detects_pager_control():
+    html = """
+    <button class="pagination-next"
+            data-startrow="12">
+        Next
+    </button>
+    """
+
+    result = _mastek_pagination_structure(html)
+
+    assert len(result["controls"]) == 1
+    assert result["controls"][0]["label"] == "Next"
+    assert result["markers"]["pagination"] is True
+
+
+def test_mastek_detects_total_count():
+    html = """
+    <div>Showing 1-12 of 46</div>
+    """
+
+    result = _mastek_pagination_structure(html)
+
+    assert "46" in result["total_candidates"]
+
+
+def test_mastek_does_not_log_hidden_values():
+    html = """
+    <form>
+      <input type="hidden"
+             name="__VIEWSTATE"
+             value="PRIVATE_SESSION_TOKEN">
+      <button name="nextPage">Next</button>
+    </form>
+    """
+
+    result = _mastek_pagination_structure(html)
+
+    assert "PRIVATE_SESSION_TOKEN" not in str(result)
+    assert result["forms"][0]["controls"][0]["name"] == (
+        "__VIEWSTATE"
+    )
+
+
+def test_kpmg_extracts_safe_script_references():
+    html = """
+    <script src="/hcmUI/config.js?token=secret"></script>
+    <script src="https://external.example/tracker.js"></script>
+    """
+
+    result = _kpmg_oracle_config_structure(
+        html,
+        "https://ejgk.fa.em2.oraclecloud.com/"
+        "hcmUI/CandidateExperience/en/sites/CX_3",
+    )
+
+    assert result["scripts"] == [
+        "https://ejgk.fa.em2.oraclecloud.com/hcmUI/config.js"
+    ]
+    assert "secret" not in str(result)
+
+
+def test_kpmg_does_not_infer_site_number_from_path():
+    html = """
+    <script>
+      window.location = "/sites/CX_3001";
+    </script>
+    """
+
+    result = _kpmg_oracle_config_structure(
+        html,
+        "https://ejgk.fa.em2.oraclecloud.com/"
+        "hcmUI/CandidateExperience/en/sites/CX_3001",
+    )
+
+    assert result["site_number_candidates"] == []
+
+
+def test_kpmg_detects_public_config_markers():
+    html = """
+    <script>
+      window.publicConfig = {
+        siteNumber: null,
+        siteName: "KPMG Global Services"
+      };
+    </script>
+    """
+
+    result = _kpmg_oracle_config_structure(
+        html,
+        "https://ejgk.fa.em2.oraclecloud.com/"
+        "hcmUI/CandidateExperience/en/sites/CX_3",
+    )
+
+    assert "siteNumber" in result["inline_markers"]
+    assert result["site_number_candidates"] == []

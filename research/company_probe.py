@@ -4320,6 +4320,108 @@ def _mastek_listing_evidence(html: str, base_url: str) -> dict:
     }
 
 
+def _mastek_pagination_structure(html: str) -> dict:
+    """Inspect actual RMK pagination and listing structure."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    forms = []
+    for form in soup.select("form")[:8]:
+        controls = []
+
+        for control in form.select(
+            "input[name], button[name], select[name]"
+        )[:40]:
+            controls.append({
+                "tag": control.name,
+                "name": control.get("name", "")[:100],
+                "type": control.get("type", "")[:30],
+            })
+
+        forms.append({
+            "id": form.get("id", "")[:100],
+            "method": form.get("method", "get").upper(),
+            "controls": controls,
+        })
+
+    controls = []
+    for element in soup.select(
+        "a, button, [role='button'], [data-page]"
+    )[:500]:
+        label = " ".join(
+            element.get_text(" ", strip=True).split()
+        )[:70]
+
+        attrs = {}
+        for key in (
+            "id", "class", "aria-label",
+            "data-page", "data-startrow",
+            "data-offset", "rel"
+        ):
+            value = element.get(key)
+            if value is not None:
+                attrs[key] = value
+
+        href = element.get("href", "")
+        onclick = element.get("onclick", "")
+
+        is_pager = bool(
+            re.search(
+                r"next|previous|pagination|pager|"
+                r"page\s*\d+|startrow|offset",
+                label + " " + str(attrs),
+                re.I,
+            )
+            or re.fullmatch(r"\d{1,3}", label)
+            or "startrow" in href.lower()
+            or "startrow" in onclick.lower()
+        )
+
+        if is_pager:
+            controls.append({
+                "label": label,
+                "attributes": attrs,
+                "has_href": bool(href),
+                "has_onclick": bool(onclick),
+            })
+
+        if len(controls) >= 30:
+            break
+
+    text = soup.get_text(" ", strip=True)
+
+    totals = []
+    for pattern in (
+        r"\b(\d+)\s+jobs?\s+found\b",
+        r"\bshowing\s+\d+\s*[-–]\s*\d+"
+        r"\s+of\s+(\d+)\b",
+        r"\b(\d+)\s+open\s+positions\b",
+        r"\btotal\s+jobs?\s*:?\s*(\d+)\b",
+    ):
+        totals.extend(
+            re.findall(pattern, text, re.I)[:5]
+        )
+
+    markers = {
+        "pagination": bool(
+            re.search(r"pagination|pager", html, re.I)
+        ),
+        "startrow": "startrow" in html.lower(),
+        "load_more": bool(
+            re.search(r"load.more|show.more", html, re.I)
+        ),
+        "jobs2web": "jobs2web" in html.lower(),
+    }
+
+    return {
+        "forms": forms,
+        "controls": controls,
+        "total_candidates": list(
+            dict.fromkeys(totals)
+        )[:10],
+        "markers": markers,
+    }
+
+
 def probe_mastek_successfactors(session) -> None:
     """Validate official Mastek listing and one observed next page."""
     print("\n[MASTEK_SF] START")
@@ -4345,6 +4447,27 @@ def probe_mastek_successfactors(session) -> None:
         result["content"],
         result["url"],
     )
+
+    structure = _mastek_pagination_structure(
+        result["content"]
+    )
+
+    print(
+        "[MASTEK_SF] STRUCTURE "
+        f"forms={len(structure['forms'])} "
+        f"pager_controls={len(structure['controls'])} "
+        f"total_candidates={structure['total_candidates']} "
+        f"markers={structure['markers']}"
+    )
+
+    for form in structure["forms"][:4]:
+        print(f"[MASTEK_SF] FORM {form!r}")
+
+    for control in structure["controls"][:15]:
+        print(
+            f"[MASTEK_SF] PAGER_CONTROL "
+            f"{control!r}"
+        )
 
     first_ids = set(first["jobs"])
 
@@ -4518,6 +4641,155 @@ def _kpmg_oracle_evidence(html: str) -> dict:
     }
 
 
+def _kpmg_oracle_config_structure(
+    html: str,
+    base_url: str,
+) -> dict:
+    """Inspect public Oracle configuration references safely."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    scripts = []
+    for script in soup.select("script[src]")[:30]:
+        absolute = urljoin(
+            base_url,
+            script.get("src", ""),
+        )
+
+        parsed = urlparse(absolute)
+
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname
+            != "ejgk.fa.em2.oraclecloud.com"
+            or parsed.username
+            or parsed.password
+        ):
+            continue
+
+        scripts.append(
+            parsed._replace(
+                query="",
+                fragment="",
+            ).geturl()
+        )
+
+    inline_markers = []
+
+    for script in soup.select("script:not([src])")[:20]:
+        content = script.get_text()
+
+        if len(content) > 100_000:
+            content = content[:100_000]
+
+        for marker in (
+            "siteNumber",
+            "siteId",
+            "siteCode",
+            "siteName",
+            "CandidateExperience",
+            "recruitingCEJobRequisitions",
+            "config",
+        ):
+            if marker.lower() in content.lower():
+                inline_markers.append(marker)
+
+    return {
+        "scripts": list(dict.fromkeys(scripts))[:12],
+        "inline_markers": sorted(set(inline_markers)),
+        "site_number_candidates": (
+            _kpmg_oracle_evidence(html)[
+                "site_number_candidates"
+            ]
+        ),
+        "forms": len(soup.select("form")),
+    }
+
+
+def _kpmg_inspect_public_scripts(
+    session,
+    scripts: list[str],
+    unit: str,
+) -> None:
+    """Inspect at most two page-referenced public scripts."""
+    for script_url in scripts[:2]:
+        parsed = urlparse(script_url)
+
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname
+            != "ejgk.fa.em2.oraclecloud.com"
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            continue
+
+        try:
+            result = limited_get(
+                session,
+                script_url,
+            )
+        except requests.RequestException as exc:
+            print(
+                f"[KPMG_{unit}] SCRIPT_FAILED "
+                f"type={type(exc).__name__}"
+            )
+            continue
+
+        if (
+            result["status"] != 200
+            or result["truncated"]
+        ):
+            print(
+                f"[KPMG_{unit}] SCRIPT_UNAVAILABLE "
+                f"status={result['status']}"
+            )
+            continue
+
+        final_url = urlparse(result["url"])
+
+        if (
+            final_url.scheme != "https"
+            or final_url.hostname
+            != "ejgk.fa.em2.oraclecloud.com"
+        ):
+            print(
+                f"[KPMG_{unit}] "
+                "SCRIPT_REDIRECTED_OUTSIDE_ALLOWED_HOST"
+            )
+            continue
+
+        content = result["content"]
+        if isinstance(content, bytes):
+            content = content.decode(
+                "utf-8", errors="replace"
+            )
+
+        response_text = content.lstrip().lower()
+
+        if response_text.startswith(
+            ("<!doctype html", "<html")
+        ):
+            print(
+                f"[KPMG_{unit}] "
+                "SCRIPT_RETURNED_HTML"
+            )
+            continue
+
+        evidence = _kpmg_oracle_evidence(content)
+
+        print(
+            f"[KPMG_{unit}] SCRIPT_EVIDENCE "
+            f"site_number_candidates="
+            f"{evidence['site_number_candidates']} "
+            f"site_number_marker="
+            f"{evidence['oracle_markers']['site_number_key']}"
+        )
+
+        time.sleep(DELAY_SECONDS)
+
+
 def probe_kpmg_oracle_sites(session) -> None:
     """Inspect KGS/KDN official public Oracle site pages."""
     print("\n[KPMG_ORACLE] START")
@@ -4559,6 +4831,11 @@ def probe_kpmg_oracle_sites(session) -> None:
             result["content"]
         )
 
+        structure = _kpmg_oracle_config_structure(
+            result["content"],
+            result["url"],
+        )
+
         print(
             f"[KPMG_{unit}] CONFIG_EVIDENCE "
             f"site_path={site_path} "
@@ -4566,6 +4843,19 @@ def probe_kpmg_oracle_sites(session) -> None:
             f"{evidence['site_number_candidates']} "
             f"scripts={evidence['script_count']} "
             f"markers={evidence['oracle_markers']}"
+        )
+
+        print(
+            f"[KPMG_{unit}] PUBLIC_CONFIG "
+            f"scripts={len(structure['scripts'])} "
+            f"inline_markers={structure['inline_markers']} "
+            f"forms={structure['forms']}"
+        )
+
+        _kpmg_inspect_public_scripts(
+            session,
+            structure["scripts"],
+            unit,
         )
 
         # A string match is a candidate, not sufficient proof
