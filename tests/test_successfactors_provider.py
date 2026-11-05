@@ -448,3 +448,74 @@ def test_extract_location_rejects_job_description_text():
     )
 
     assert location == "Mumbai"
+
+
+def test_scoped_extraction_excludes_promotion_and_deduplicates():
+    page = '''
+    <nav><a href="/job/Returnship/58332844/">Returnship</a></nav>
+    <div class="job-row"><a class="job-link" href="/job/Mumbai-Java/111/">Java</a></div>
+    <div class="job-row"><a class="job-link" href="/job/Pune-Java/222/">Java</a></div>
+    <div class="job-row"><a class="job-link" href="/job/Mumbai-Java/111/">Again</a></div>
+    '''
+
+    adapter = SuccessFactorsAdapter()
+
+    assert len(
+        adapter._extract_job_urls(
+            page,
+            "https://example.com",
+        )
+    ) == 3
+
+    assert adapter._extract_job_urls(
+        page,
+        "https://example.com",
+        ".job-row a.job-link",
+    ) == [
+        "https://example.com/job/Mumbai-Java/111/",
+        "https://example.com/job/Pune-Java/222/",
+    ]
+
+
+def test_scoped_extraction_invalid_selector():
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid job_link_selector",
+    ):
+        SuccessFactorsAdapter()._extract_job_urls(
+            '<a href="/job/X/1/">x</a>',
+            "https://example.com",
+            "a[",
+        )
+
+
+@patch.object(SuccessFactorsAdapter, "_fetch_html")
+def test_scoped_pagination_stops_after_short_page(mock_fetch_html):
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://example.com",
+        listing_path="/go/jobs/",
+        page_size=2,
+        job_link_selector=".job-row a",
+    )
+
+    mock_fetch_html.side_effect = [
+        '<div class="job-row"><a href="/job/A/1/">A</a></div>'
+        '<div class="job-row"><a href="/job/B/2/">B</a></div>'
+        '<nav><a href="/job/Returnship/58332844/">Promo</a></nav>',
+
+        '<div class="job-row"><a href="/job/C/3/">C</a></div>'
+        '<nav><a href="/job/Returnship/58332844/">Promo</a></nav>',
+    ]
+
+    urls = SuccessFactorsAdapter()._fetch_raw(company)
+
+    assert urls == [
+        "https://example.com/job/A/1/",
+        "https://example.com/job/B/2/",
+        "https://example.com/job/C/3/",
+    ]
+
+    assert mock_fetch_html.call_count == 2

@@ -10,6 +10,8 @@ from urllib.parse import (
 )
 
 import requests
+from bs4 import BeautifulSoup
+from soupsieve.util import SelectorSyntaxError
 
 from models import Job
 from models.company import Company
@@ -128,12 +130,37 @@ class SuccessFactorsAdapter(ProviderAdapter):
         self,
         page_html: str,
         base_url: str,
+        job_link_selector: str | None = None,
     ) -> list[str]:
-        hrefs = re.findall(
-            r'href=["\']([^"\']+)["\']',
-            page_html,
-            flags=re.IGNORECASE,
-        )
+        if job_link_selector is None:
+            hrefs = re.findall(
+                r'href=["\']([^"\']+)["\']',
+                page_html,
+                flags=re.IGNORECASE,
+            )
+        else:
+            if (
+                not isinstance(job_link_selector, str)
+                or not job_link_selector.strip()
+            ):
+                raise ValueError(
+                    "job_link_selector must be a non-empty CSS selector"
+                )
+
+            soup = BeautifulSoup(page_html, "html.parser")
+
+            try:
+                selected = soup.select(job_link_selector)
+            except SelectorSyntaxError as exc:
+                raise ValueError(
+                    "Invalid job_link_selector CSS selector"
+                ) from exc
+
+            hrefs = [
+                a.get("href", "")
+                for a in selected
+                if a.name == "a"
+            ]
 
         jobs: list[str] = []
         seen: set[str] = set()
@@ -144,10 +171,7 @@ class SuccessFactorsAdapter(ProviderAdapter):
             if "/job/" not in href:
                 continue
 
-            url = urljoin(
-                base_url,
-                href,
-            )
+            url = urljoin(base_url, href)
 
             if url in seen:
                 continue
@@ -530,6 +554,7 @@ class SuccessFactorsAdapter(ProviderAdapter):
             urls = self._extract_job_urls(
                 page_html,
                 config.base_url,
+                config.job_link_selector,
             )
 
             if not urls:

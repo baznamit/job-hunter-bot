@@ -62,6 +62,28 @@ def probe(name, url):
 
     soup = BeautifulSoup(response.text, "html.parser")
 
+    if name.startswith("DELOITTE") or name.startswith("WISSEN-SF"):
+        print(f"\n[{name}] JOB LINK STRUCTURE")
+
+        for anchor in soup.select('a[href*="/job/"]')[:35]:
+            href = anchor.get("href", "")
+
+            ancestors = [
+                {
+                    "tag": parent.name,
+                    "id": parent.get("id"),
+                    "class": parent.get("class"),
+                }
+                for parent in list(anchor.parents)[:5]
+            ]
+
+            print(
+                f"[{name}] "
+                f"href={href!r} "
+                f"text={anchor.get_text(' ', strip=True)[:100]!r} "
+                f"parents={ancestors}"
+            )
+
     adapter = SuccessFactorsAdapter()
 
     urls = adapter._extract_job_urls(

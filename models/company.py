@@ -91,6 +91,10 @@ class ProviderConfig(BaseModel):
     config_url: str | None = None
     source_id: str | None = None
 
+    job_link_selector: str | None = None
+    search_params: dict[str, str | int] = Field(
+        default_factory=dict
+    )
     search_terms: list[str] | None = None
     search_location: str | None = None
     search_location_param: str | None = None
