@@ -528,113 +528,208 @@ RECOVERY_INDIA_PATTERN = re.compile(
 
 
 def probe_postman_workday():
-    base = (
-        f"https://{POSTMAN_TENANT}."
-        f"{POSTMAN_CLUSTER}.myworkdayjobs.com"
+    """Validate Workday without changing the production registry."""
+    from models.company import (
+        Provider,
+        ProviderConfig,
+        ProviderStatus,
+        ProviderType,
+    )
+    from research.loader import load_registry
+    from src.providers.workday import WorkdayAdapter
+
+    matches = [
+        c for c in load_registry().companies
+        if c.id == "postman"
+    ]
+    if len(matches) != 1:
+        raise AssertionError("Expected one Postman registry entry")
+
+    company = matches[0].model_copy(deep=True)
+    company.provider = Provider(
+        type=ProviderType.WORKDAY,
+        status=ProviderStatus.PARTIAL,
+        config=ProviderConfig(
+            tenant="postman",
+            cluster="wd108",
+            board="careers",
+        ),
     )
 
-    endpoint = (
-        f"{base}/wday/cxs/"
-        f"{POSTMAN_TENANT}/{POSTMAN_BOARD}/jobs"
+    adapter = WorkdayAdapter()
+    started = time.perf_counter()
+    jobs = adapter.fetch_jobs(company)
+
+    urls = [str(job.url) for job in jobs]
+    ids = [job.id for job in jobs]
+
+    india = [
+        job for job in jobs
+        if RECOVERY_INDIA_PATTERN.search(job.location)
+    ]
+    relevant = [
+        job for job in india
+        if RECOVERY_ROLE_PATTERN.search(job.title)
+    ]
+
+    print(
+        f"[POSTMAN] normalized={len(jobs)} "
+        f"unique_ids={len(set(ids))} "
+        f"unique_urls={len(set(urls))} "
+        f"india={len(india)} "
+        f"india_tech={len(relevant)} "
+        f"seconds={time.perf_counter()-started:.2f}"
     )
 
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Origin": base,
-        "Referer": f"{base}/en-US/{POSTMAN_BOARD}",
-    }
+    if (
+        not jobs
+        or len(set(ids)) != len(jobs)
+        or len(set(urls)) != len(jobs)
+    ):
+        raise AssertionError(
+            "Postman missing jobs or duplicate IDs/URLs"
+        )
 
-    page_paths = {}
+    expected_host = "postman.wd108.myworkdayjobs.com"
 
-    print("\n[RECOVERY] POSTMAN WORKDAY")
-    print(f"[POSTMAN] endpoint={endpoint}")
-
-    for offset in (0, 20):
-        try:
-            response = requests.post(
-                endpoint,
-                json={
-                    "appliedFacets": {},
-                    "limit": 20,
-                    "offset": offset,
-                    "searchText": "",
-                },
-                headers=headers,
-                timeout=TIMEOUT,
+    for job in jobs:
+        if (
+            not job.id
+            or not job.title.strip()
+            or not job.location.strip()
+        ):
+            raise AssertionError(
+                "Postman incomplete normalized job"
             )
 
-            print(
-                f"[POSTMAN] offset={offset} "
-                f"status={response.status_code} "
-                f"type={response.headers.get('Content-Type')!r}"
+        if urlparse(str(job.url)).hostname != expected_host:
+            raise AssertionError(
+                f"Unexpected Postman URL: {job.url}"
             )
 
-            response.raise_for_status()
+    for job in relevant[:10]:
+        print(
+            f"[POSTMAN] INDIA_TECH "
+            f"title={job.title!r} "
+            f"location={job.location!r} "
+            f"url={job.url}"
+        )
 
-            data = response.json()
+    print(
+        "[POSTMAN] ADAPTER_VALIDATION=PASS "
+        "(listing total may change; no registry updates)"
+    )
 
-            if not isinstance(data, dict):
-                raise ValueError("Expected JSON object")
 
-            postings = data.get("jobPostings")
+ATLASSIAN_DETAIL_RE = re.compile(
+    r"^/company/careers/details/(\d+)/?$"
+)
 
-            if not isinstance(postings, list):
-                raise ValueError("Missing jobPostings list")
 
-            paths = {
-                str(job["externalPath"])
-                for job in postings
-                if isinstance(job, dict)
-                and job.get("externalPath")
-            }
+def atlassian_detail_links(links):
+    """Extract canonical numeric detail links."""
+    result = {}
 
-            page_paths[offset] = paths
+    for link in links:
+        parsed = urlparse(link)
+        match = ATLASSIAN_DETAIL_RE.fullmatch(parsed.path)
 
-            print(
-                f"[POSTMAN] offset={offset} "
-                f"total={data.get('total')!r} "
-                f"count={len(postings)} "
-                f"unique_paths={len(paths)}"
+        if (
+            parsed.hostname == "www.atlassian.com"
+            and match
+        ):
+            job_id = match.group(1)
+            result[job_id] = (
+                "https://www.atlassian.com/"
+                f"company/careers/details/{job_id}"
             )
 
-            for job in postings[:8]:
-                title = str(job.get("title", ""))
-                location = str(job.get("locationsText", ""))
+    return list(result.values())
 
+
+def probe_atlassian(session):
+    url = RECOVERY_TARGETS["ATLASSIAN"]
+    print(f"\n[ATLASSIAN] listing={url}")
+
+    # Previous response exceeded the default 2 MB cap.
+    # Raise it only for this listing request.
+    global MAX_BYTES
+    old_limit = MAX_BYTES
+
+    try:
+        MAX_BYTES = 6_000_000
+        result = limited_get(session, url)
+    finally:
+        MAX_BYTES = old_limit
+
+    print(
+        f"[ATLASSIAN] status={result['status']} "
+        f"bytes={result['bytes']} "
+        f"truncated={result['truncated']}"
+    )
+
+    if result["status"] != 200 or result["truncated"]:
+        print(
+            "[ATLASSIAN] INCOMPLETE_LISTING "
+            "- cannot certify inventory"
+        )
+        return
+
+    info = inspect_html(
+        result["content"],
+        result["url"],
+    )
+
+    links = atlassian_detail_links(info["links"])
+
+    print(
+        f"[ATLASSIAN] strict_unique_job_links={len(links)} "
+        "authoritative_total=UNKNOWN"
+    )
+
+    for link in links[:3]:
+        detail = limited_get(session, link)
+
+        print(
+            f"[ATLASSIAN] detail_status={detail['status']} "
+            f"url={detail['url']} "
+            f"truncated={detail['truncated']}"
+        )
+
+        if (
+            detail["status"] != 200
+            or detail["truncated"]
+        ):
+            continue
+
+        parsed = inspect_html(
+            detail["content"],
+            detail["url"],
+        )
+
+        jsonld_types = [
+            item.get("@type")
+            for item in parsed["json_ld"]
+            if isinstance(item, dict)
+        ]
+
+        print(
+            f"[ATLASSIAN] detail_title={parsed['title']!r} "
+            f"jsonld_types={jsonld_types}"
+        )
+
+        for candidate in parsed["links"]:
+            if "apply" in candidate.lower():
                 print(
-                    "[POSTMAN] SAMPLE "
-                    f"title={title!r} "
-                    f"location={location!r} "
-                    f"path={job.get('externalPath')!r}"
+                    "[ATLASSIAN] APPLY_CANDIDATE "
+                    f"{candidate[:250]}"
                 )
+                break
 
-                if (
-                    RECOVERY_ROLE_PATTERN.search(title)
-                    and RECOVERY_INDIA_PATTERN.search(location)
-                ):
-                    print("[POSTMAN] RELEVANT_INDIA_ROLE")
-
-        except (
-            requests.RequestException,
-            ValueError,
-        ) as exc:
-            print(
-                f"[POSTMAN] offset={offset} "
-                f"ERROR={type(exc).__name__}: {exc}"
-            )
-
-    if 0 in page_paths and 20 in page_paths:
-        print(
-            "[POSTMAN] page_overlap="
-            f"{len(page_paths[0] & page_paths[20])}"
-        )
-        print(
-            "[POSTMAN] distinct_pages="
-            f"{page_paths[0] != page_paths[20]}"
-        )
-
-    print("[POSTMAN] Probe completed; inventory not yet certified")
+    print(
+        "[ATLASSIAN] PROBE_REQUIRED: detail normalization "
+        "and authoritative completeness not established"
+    )
 
 
 def probe_recovery_html(name, url, session):
@@ -738,14 +833,36 @@ def run_stale_recovery():
     print("STALE ATS RECOVERY - READ ONLY")
     print("=" * 70)
 
-    probe_postman_workday()
+    # Postman: complete adapter validation.
+    try:
+        probe_postman_workday()
+    except Exception as exc:
+        print(
+            f"[POSTMAN] VALIDATION_FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
 
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    for name, url in RECOVERY_TARGETS.items():
-        probe_recovery_html(name, url, session)
-        time.sleep(DELAY_SECONDS)
+    # Atlassian: complete listing and representative details.
+    try:
+        probe_atlassian(session)
+    except requests.RequestException as exc:
+        print(
+            f"[ATLASSIAN] REQUEST_FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    # Avoid repeating previously blocked requests.
+    print(
+        "[COINDCX] UNRESOLVED: prior official page "
+        "returned HTTP 403"
+    )
+    print(
+        "[ZEPTO] UNRESOLVED: prior official page "
+        "returned AWS WAF challenge"
+    )
 
     print("\n[RECOVERY] COMPLETE")
     print("[RECOVERY] No registry or state changes")

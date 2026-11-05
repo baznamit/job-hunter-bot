@@ -33,11 +33,5 @@ jobs:
       # - name: Validate Deloitte and Wissen pre-activation identities
       #   run: python -u -m research.new_company_stage4_probe
 
-      - name: Probe S&P Global Workday and Jibe sources
-        run: python -u -m research.spglobal_ats_probe
-
-      - name: Validate S&P Global complete Workday inventory and Jibe metadata
-        run: python -u -m research.spglobal_stage2_probe
-
       - name: Probe stale ATS recovery candidates
         run: python -u -m research.company_probe --stale-recovery
