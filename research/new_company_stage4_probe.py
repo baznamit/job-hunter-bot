@@ -90,8 +90,8 @@ def main():
         "deloitte_india",
         "wissen_successfactors",
     ):
-        assert not companies[company_id].enabled, (
-            f"{company_id} must remain disabled"
+        assert companies[company_id].enabled, (
+            f"{company_id} must be enabled"
         )
 
     assert companies["wissen"].enabled

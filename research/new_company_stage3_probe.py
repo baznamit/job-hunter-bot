@@ -35,9 +35,9 @@ def validate_company(company):
     print(f"[STAGE3] Enabled: {company.enabled}")
     print(f"{'=' * 70}")
 
-    if company.enabled:
+    if not company.enabled:
         raise AssertionError(
-            f"{company.id}: must remain disabled"
+            f"{company.id}: must be enabled"
         )
 
     if not config.job_link_selector:

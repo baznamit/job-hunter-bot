@@ -1251,7 +1251,7 @@
       "name": "Deloitte India",
       "category": "Product",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://southasiacareers.deloitte.com/",
       "provider": {
         "type": "successfactors",
@@ -1278,7 +1278,7 @@
       "name": "Wissen Technology",
       "category": "Product",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://jobs.wissen.com/",
       "provider": {
         "type": "successfactors",

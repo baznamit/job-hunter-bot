@@ -23,8 +23,8 @@ def test_new_company_successfactors_configuration():
     deloitte = companies["deloitte_india"]
     wissen = companies["wissen_successfactors"]
 
-    assert not deloitte.enabled
-    assert not wissen.enabled
+    assert deloitte.enabled
+    assert wissen.enabled
 
     assert (
         deloitte.provider.config.job_link_selector
