@@ -4250,6 +4250,340 @@ def _enterprise_validate_existing(company_id, registry):
     )
 
 
+# ============================================================
+# Mastek SuccessFactors validation
+# ============================================================
+
+_MASTEK_BASE = "https://careers.mastek.com"
+_MASTEK_SEARCH = f"{_MASTEK_BASE}/search/"
+
+_MASTEK_JOB_ID_RE = re.compile(
+    r"/job/[^?#]+?/(\d+)/?$",
+    re.I,
+)
+
+
+def _mastek_listing_evidence(html: str, base_url: str) -> dict:
+    """Extract listing links and observed pagination."""
+    from src.providers.successfactors import SuccessFactorsAdapter
+
+    adapter = SuccessFactorsAdapter()
+    soup = BeautifulSoup(html, "html.parser")
+
+    job_urls = adapter._extract_job_urls(
+        html,
+        _MASTEK_BASE,
+    )
+
+    jobs = {}
+    for url in job_urls:
+        parsed = urlparse(url)
+        if parsed.hostname != "careers.mastek.com":
+            continue
+
+        match = _MASTEK_JOB_ID_RE.search(parsed.path)
+        if match:
+            jobs[match.group(1)] = url
+
+    pagination = set()
+
+    for anchor in soup.select("a[href]"):
+        label = anchor.get_text(" ", strip=True)
+        href = urljoin(base_url, anchor["href"])
+        parsed = urlparse(href)
+
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "careers.mastek.com"
+        ):
+            continue
+
+        is_pager = bool(
+            re.fullmatch(
+                r"\d+|next|previous|last",
+                label,
+                re.I,
+            )
+            or re.search(
+                r"(?:startrow|/search/\d+/)",
+                href,
+                re.I,
+            )
+        )
+
+        if is_pager:
+            pagination.add(href)
+
+    return {
+        "jobs": jobs,
+        "pagination": sorted(pagination),
+    }
+
+
+def probe_mastek_successfactors(session) -> None:
+    """Validate official Mastek listing and one observed next page."""
+    print("\n[MASTEK_SF] START")
+
+    try:
+        result = limited_get(session, _MASTEK_SEARCH)
+    except requests.RequestException as exc:
+        print(
+            "[MASTEK_SF] LISTING_FAILED "
+            f"type={type(exc).__name__}"
+        )
+        return
+
+    if (
+        result["status"] != 200
+        or result["truncated"]
+        or classify_page(result) != "HTML"
+    ):
+        print("[MASTEK_SF] LISTING_NOT_VERIFIED")
+        return
+
+    first = _mastek_listing_evidence(
+        result["content"],
+        result["url"],
+    )
+
+    first_ids = set(first["jobs"])
+
+    print(
+        "[MASTEK_SF] PAGE_1 "
+        f"jobs={len(first_ids)} "
+        f"pagination_candidates={len(first['pagination'])}"
+    )
+
+    for job_id, url in list(first["jobs"].items())[:8]:
+        safe_url = urlparse(url)._replace(
+            query="",
+            fragment="",
+        ).geturl()
+        print(
+            f"[MASTEK_SF] JOB id={job_id} url={safe_url}"
+        )
+
+    # Follow only a next-page URL observed in the actual HTML.
+    # Do not invent pagination parameters.
+    candidates = []
+
+    for url in first["pagination"]:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        # Supported RMK pagination patterns.
+        path_match = re.fullmatch(
+            r"/search/(\d+)/?",
+            parsed.path,
+        )
+
+        if path_match:
+            offset = int(path_match.group(1))
+            mode = "path"
+            parameter = None
+
+        elif (
+            parsed.path.rstrip("/") == "/search"
+            and len(params.get("startrow", [])) == 1
+            and params["startrow"][0].isdigit()
+            and set(params) == {"startrow"}
+        ):
+            offset = int(params["startrow"][0])
+            mode = "query"
+            parameter = "startrow"
+
+        else:
+            continue
+
+        if offset <= 0 or offset > 1000:
+            continue
+
+        candidates.append(
+            (offset, mode, parameter, url)
+        )
+
+    if not candidates:
+        print(
+            "[MASTEK_SF] PAGINATION=UNVERIFIED "
+            "reason=NO_SUPPORTED_OBSERVED_NEXT_PAGE"
+        )
+        return
+
+    offset, mode, parameter, next_url = min(
+        candidates,
+        key=lambda item: item[0],
+    )
+
+    try:
+        second_result = limited_get(session, next_url)
+    except requests.RequestException as exc:
+        print(
+            "[MASTEK_SF] PAGE_2_FAILED "
+            f"type={type(exc).__name__}"
+        )
+        return
+
+    if (
+        second_result["status"] != 200
+        or second_result["truncated"]
+        or classify_page(second_result) != "HTML"
+    ):
+        print("[MASTEK_SF] PAGE_2_NOT_VERIFIED")
+        return
+
+    second = _mastek_listing_evidence(
+        second_result["content"],
+        second_result["url"],
+    )
+
+    second_ids = set(second["jobs"])
+
+    print(
+        "[MASTEK_SF] PAGINATION "
+        f"mode={mode} "
+        f"parameter={parameter or 'none'} "
+        f"offset={offset} "
+        f"page1={len(first_ids)} "
+        f"page2={len(second_ids)} "
+        f"overlap={len(first_ids & second_ids)} "
+        f"new={len(second_ids - first_ids)}"
+    )
+
+    if second_ids - first_ids:
+        print(
+            "[MASTEK_SF] PAGINATION_DISTINCT=YES "
+            "full_inventory=NOT_YET_VERIFIED"
+        )
+    else:
+        print(
+            "[MASTEK_SF] PAGINATION_DISTINCT=NO "
+            "adapter_activation=BLOCKED"
+        )
+
+
+# ============================================================
+# KPMG Oracle Recruiting Cloud site discovery
+# ============================================================
+
+_KPMG_ORACLE_HOST = "ejgk.fa.em2.oraclecloud.com"
+
+_KPMG_ORACLE_SITES = {
+    "KGS": "CX_3",
+    "KDN": "CX_3001",
+}
+
+
+def _kpmg_oracle_evidence(html: str) -> dict:
+    """Find bounded public Oracle configuration evidence."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    scripts = []
+    for script in soup.select("script[src]")[:50]:
+        src = script.get("src", "")
+        if src:
+            scripts.append(src.split("?", 1)[0][:200])
+
+    # Inspect only short context around public configuration keys.
+    # A CX_* site path is not a site number.
+    candidates = []
+
+    patterns = (
+        r'["\']siteNumber["\']\s*:\s*["\']?(\d+)',
+        r'["\']site_number["\']\s*:\s*["\']?(\d+)',
+        r'\bsiteNumber\s*=\s*["\']?(\d+)',
+    )
+
+    for pattern in patterns:
+        for match in re.finditer(
+            pattern,
+            html,
+            re.I,
+        ):
+            candidates.append(match.group(1))
+
+    return {
+        "site_number_candidates": sorted(set(candidates)),
+        "script_count": len(scripts),
+        "oracle_markers": {
+            "candidate_experience": (
+                "CandidateExperience" in html
+            ),
+            "recruiting_api": (
+                "recruitingCEJobRequisitions" in html
+            ),
+            "site_number_key": (
+                "siteNumber" in html
+            ),
+        },
+    }
+
+
+def probe_kpmg_oracle_sites(session) -> None:
+    """Inspect KGS/KDN official public Oracle site pages."""
+    print("\n[KPMG_ORACLE] START")
+
+    for unit, site_path in _KPMG_ORACLE_SITES.items():
+        url = (
+            f"https://{_KPMG_ORACLE_HOST}/"
+            "hcmUI/CandidateExperience/en/sites/"
+            f"{site_path}"
+        )
+
+        try:
+            result = limited_get(session, url)
+        except requests.RequestException as exc:
+            print(
+                f"[KPMG_{unit}] REQUEST_FAILED "
+                f"type={type(exc).__name__}"
+            )
+            continue
+
+        print(
+            f"[KPMG_{unit}] SOURCE "
+            f"status={result['status']} "
+            f"bytes={result['bytes']} "
+            f"truncated={result['truncated']}"
+        )
+
+        if (
+            result["status"] != 200
+            or result["truncated"]
+            or classify_page(result) != "HTML"
+        ):
+            print(
+                f"[KPMG_{unit}] SITE_NUMBER=UNVERIFIED"
+            )
+            continue
+
+        evidence = _kpmg_oracle_evidence(
+            result["content"]
+        )
+
+        print(
+            f"[KPMG_{unit}] CONFIG_EVIDENCE "
+            f"site_path={site_path} "
+            f"number_candidates="
+            f"{evidence['site_number_candidates']} "
+            f"scripts={evidence['script_count']} "
+            f"markers={evidence['oracle_markers']}"
+        )
+
+        # A string match is a candidate, not sufficient proof
+        # that the number belongs to this particular site.
+        print(
+            f"[KPMG_{unit}] "
+            "SITE_NUMBER=REQUIRES_ASSOCIATION_VALIDATION "
+            "ORACLE_ADAPTER=NOT_YET_VALIDATED"
+        )
+
+        time.sleep(DELAY_SECONDS)
+
+    print(
+        "[KPMG_ORACLE] KI_TALENTRECRUIT=SEPARATE_SOURCE"
+    )
+    print("[KPMG_ORACLE] COMPLETE")
+
+
 def run_enterprise_batch():
     from research.loader import load_registry
 
@@ -4272,6 +4606,10 @@ def run_enterprise_batch():
         _enterprise_validate_existing(
             "ltmindtree", registry
         )
+
+        probe_mastek_successfactors(session)
+
+        probe_kpmg_oracle_sites(session)
     finally:
         session.close()
 

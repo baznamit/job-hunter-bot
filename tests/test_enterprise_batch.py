@@ -4,6 +4,8 @@ from unittest.mock import patch
 from research.company_probe import (
     _enterprise_page_evidence,
     _enterprise_validate_existing,
+    _kpmg_oracle_evidence,
+    _mastek_listing_evidence,
 )
 from research.loader import load_registry
 
@@ -118,3 +120,94 @@ def test_ltimindtree_already_registered():
     assert company.provider.config.base_url == (
         "https://careers.ltm.com"
     )
+
+
+def test_mastek_extracts_requisition_ids():
+    html = """
+    <a href="/job/Mumbai-Java-Developer/123456/">
+      Java Developer
+    </a>
+    <a href="/job/Pune-Backend-Engineer/789012/">
+      Backend Engineer
+    </a>
+    """
+
+    result = _mastek_listing_evidence(
+        html,
+        "https://careers.mastek.com/search/",
+    )
+
+    assert set(result["jobs"]) == {
+        "123456",
+        "789012",
+    }
+
+
+def test_mastek_detects_observed_path_pagination():
+    html = """
+    <a href="/search/12/">2</a>
+    <a href="/search/24/">3</a>
+    """
+
+    result = _mastek_listing_evidence(
+        html,
+        "https://careers.mastek.com/search/",
+    )
+
+    assert (
+        "https://careers.mastek.com/search/12/"
+        in result["pagination"]
+    )
+
+
+def test_mastek_detects_observed_query_pagination():
+    html = """
+    <a href="/search/?startrow=12">Next</a>
+    """
+
+    result = _mastek_listing_evidence(
+        html,
+        "https://careers.mastek.com/search/",
+    )
+
+    assert (
+        "https://careers.mastek.com/search/?startrow=12"
+        in result["pagination"]
+    )
+
+
+def test_kpmg_detects_explicit_site_number_candidate():
+    html = """
+    <script>
+      window.publicConfig = {
+        "siteNumber": "1234"
+      };
+    </script>
+    """
+
+    result = _kpmg_oracle_evidence(html)
+
+    assert result["site_number_candidates"] == [
+        "1234"
+    ]
+
+
+def test_kpmg_does_not_infer_number_from_site_path():
+    html = """
+    <a href="/hcmUI/CandidateExperience/en/sites/CX_3001">
+      KPMG Delivery Network
+    </a>
+    """
+
+    result = _kpmg_oracle_evidence(html)
+
+    assert result["site_number_candidates"] == []
+
+
+def test_kpmg_handles_no_embedded_configuration():
+    result = _kpmg_oracle_evidence(
+        "<html><body>Careers</body></html>"
+    )
+
+    assert result["site_number_candidates"] == []
+    assert result["script_count"] == 0
