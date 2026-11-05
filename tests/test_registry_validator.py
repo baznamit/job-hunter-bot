@@ -163,3 +163,62 @@ def test_weatherford_uses_oracle_cx(
     )
 
     assert site.enabled is True
+
+
+def test_duckcreek_uses_verified_workday_configuration(registry):
+    matches = [
+        company
+        for company in registry.companies
+        if company.id == "duckcreek"
+    ]
+
+    assert len(matches) == 1
+
+    company = matches[0]
+    config = company.provider.config
+
+    assert company.name == "Duck Creek Technologies"
+    assert company.enabled is False
+    assert company.priority == 1
+    assert company.provider.type == ProviderType.WORKDAY
+    assert company.provider.status == ProviderStatus.VERIFIED
+
+    assert config.tenant == "duckcreek"
+    assert config.cluster == "wd1"
+    assert config.board == "duckcreekcareers"
+    assert config.boards == []
+
+
+def test_bakerhughes_uses_verified_workday_configuration(registry):
+    matches = [
+        company
+        for company in registry.companies
+        if company.id == "bakerhughes"
+    ]
+
+    assert len(matches) == 1
+
+    company = matches[0]
+    config = company.provider.config
+
+    assert company.name == "Baker Hughes"
+    assert company.enabled is False
+    assert company.priority == 2
+    assert company.provider.type == ProviderType.WORKDAY
+    assert company.provider.status == ProviderStatus.VERIFIED
+
+    assert config.tenant == "bakerhughes"
+    assert config.cluster == "wd5"
+    assert config.board == "BakerHughes"
+    assert config.boards == []
+
+    assert "Phenom" in company.notes
+    assert "not yet verified" in company.notes
+
+
+def test_new_workday_companies_have_unique_ids(registry):
+    ids = [company.id for company in registry.companies]
+
+    assert ids.count("duckcreek") == 1
+    assert ids.count("bakerhughes") == 1
+    assert len(ids) == len(set(ids))
