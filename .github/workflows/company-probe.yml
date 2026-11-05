@@ -35,3 +35,6 @@ jobs:
 
       - name: Probe S&P Global Workday and Jibe sources
         run: python -u -m research.spglobal_ats_probe
+
+      - name: Validate S&P Global complete Workday inventory and Jibe metadata
+        run: python -u -m research.spglobal_stage2_probe
