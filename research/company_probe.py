@@ -3980,6 +3980,311 @@ def run_integration_batch():
     print("[INTEGRATION_BATCH] No provider switching")
 
 
+# ============================================================
+# Mastek / LTIMindtree / KPMG
+# Consolidated enterprise ATS validation
+# ============================================================
+
+_ENTERPRISE_SOURCES = {
+    "MASTEK": [
+        "https://www.mastek.com/careers/",
+        "https://careers.mastek.com/search/",
+    ],
+    "LTIMINDTREE": [
+        "https://careers.ltm.com/search/",
+        "https://www.ltm.com/india-careers",
+    ],
+    "KPMG": [
+        "https://kpmg.com/in/en/careers.html",
+    ],
+}
+
+_ENTERPRISE_ROLE_RE = re.compile(
+    r"java|spring|backend|back[\s-]?end|"
+    r"full[\s-]?stack|react|microservices|"
+    r"software engineer|software developer",
+    re.I,
+)
+
+_ENTERPRISE_INDIA_RE = re.compile(
+    r"india|mumbai|navi.mumbai|bengaluru|"
+    r"bangalore|pune|hyderabad|chennai|noida",
+    re.I,
+)
+
+_ENTERPRISE_ATS_HOSTS = (
+    "oraclecloud.com",
+    "ripplehire.com",
+    "talentrecruit.com",
+    "successfactors.com",
+    "jobs2web.com",
+)
+
+
+def _enterprise_safe_url(value):
+    parsed = urlparse(value)
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        return None
+
+    return parsed._replace(
+        query="", fragment=""
+    ).geturl()
+
+
+def _enterprise_page_evidence(html, base_url):
+    """Extract bounded public recruitment evidence."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    job_links = {}
+    ats_links = set()
+    pagination = set()
+
+    for anchor in soup.select("a[href]"):
+        raw_url = urljoin(
+            base_url, anchor["href"]
+        )
+        safe_url = _enterprise_safe_url(raw_url)
+
+        if not safe_url:
+            continue
+
+        parsed = urlparse(safe_url)
+
+        title = " ".join(
+            anchor.get_text(" ", strip=True).split()
+        )
+
+        if any(
+            host in (parsed.hostname or "")
+            for host in _ENTERPRISE_ATS_HOSTS
+        ):
+            ats_links.add(safe_url)
+
+        if (
+            _ENTERPRISE_ROLE_RE.search(title)
+            and (
+                "/job/" in parsed.path
+                or "/jobs/" in parsed.path
+            )
+        ):
+            job_links[safe_url] = title[:120]
+
+        if re.fullmatch(
+            r"\d+|next|previous|last",
+            title, re.I
+        ):
+            pagination.add(safe_url)
+
+    oracle_sites = set()
+
+    for link in ats_links:
+        parsed = urlparse(link)
+        match = re.search(
+            r"/sites/([^/?#]+)",
+            parsed.path,
+            re.I,
+        )
+        if (
+            match
+            and "oraclecloud.com"
+            in (parsed.hostname or "")
+        ):
+            oracle_sites.add(
+                (
+                    parsed.hostname,
+                    match.group(1),
+                )
+            )
+
+    return {
+        "job_links": job_links,
+        "ats_links": sorted(ats_links),
+        "pagination": sorted(pagination),
+        "oracle_sites": sorted(oracle_sites),
+        "forms": len(soup.select("form")),
+        "scripts": len(soup.select("script")),
+    }
+
+
+def _enterprise_inspect_sources(session, name, urls):
+    """Inspect official sources without changing registry state."""
+    print(f"\n[{name}] SOURCE_DISCOVERY")
+
+    for url in urls:
+        try:
+            result = limited_get(session, url)
+        except requests.RequestException as exc:
+            print(
+                f"[{name}] REQUEST_FAILED "
+                f"type={type(exc).__name__}"
+            )
+            continue
+
+        print(
+            f"[{name}] SOURCE "
+            f"status={result['status']} "
+            f"bytes={result['bytes']} "
+            f"truncated={result['truncated']}"
+        )
+
+        if (
+            result["status"] != 200
+            or result["truncated"]
+            or classify_page(result) != "HTML"
+        ):
+            print(f"[{name}] PARSE_NOT_VERIFIED")
+            continue
+
+        evidence = _enterprise_page_evidence(
+            result["content"],
+            result["url"],
+        )
+
+        print(
+            f"[{name}] STRUCTURE "
+            f"job_links={len(evidence['job_links'])} "
+            f"ats_links={len(evidence['ats_links'])} "
+            f"pagination_links={len(evidence['pagination'])} "
+            f"forms={evidence['forms']} "
+            f"scripts={evidence['scripts']}"
+        )
+
+        for link in evidence["ats_links"][:12]:
+            print(f"[{name}] ATS_LINK={link}")
+
+        for host, site_path in evidence[
+            "oracle_sites"
+        ]:
+            print(
+                f"[{name}] ORACLE_SITE "
+                f"host={host} site_path={site_path} "
+                "site_number=UNVERIFIED"
+            )
+
+        for link, title in list(
+            evidence["job_links"].items()
+        )[:10]:
+            print(
+                f"[{name}] JOB_CANDIDATE "
+                f"title={title!r} url={link}"
+            )
+
+        time.sleep(DELAY_SECONDS)
+
+
+def _enterprise_validate_existing(company_id, registry):
+    """Validate an existing SuccessFactors mapping."""
+    from src.providers.successfactors import (
+        SuccessFactorsAdapter,
+    )
+
+    matches = [
+        company for company in registry.companies
+        if company.id == company_id
+    ]
+
+    if len(matches) != 1:
+        print(
+            f"[{company_id}] REGISTRY_MATCHES={len(matches)}"
+        )
+        return False
+
+    company = matches[0].model_copy(deep=True)
+
+    if company.provider.type.value != "successfactors":
+        print(
+            f"[{company_id}] PROVIDER_MISMATCH="
+            f"{company.provider.type.value}"
+        )
+        return False
+
+    try:
+        jobs = SuccessFactorsAdapter().fetch_jobs(
+            company
+        )
+    except Exception as exc:
+        print(
+            f"[{company_id}] ADAPTER_FAILED "
+            f"type={type(exc).__name__}"
+        )
+        return False
+
+    ids = [str(job.id) for job in jobs]
+    urls = [str(job.url) for job in jobs]
+
+    relevant = [
+        job for job in jobs
+        if (
+            _ENTERPRISE_ROLE_RE.search(job.title)
+            and _ENTERPRISE_INDIA_RE.search(
+                job.location
+            )
+        )
+    ]
+
+    print(
+        f"[{company_id}] ADAPTER "
+        f"normalized={len(jobs)} "
+        f"unique_ids={len(set(ids))} "
+        f"unique_urls={len(set(urls))} "
+        f"india_tech={len(relevant)}"
+    )
+
+    for job in relevant[:10]:
+        print(
+            f"[{company_id}] INDIA_TECH "
+            f"title={job.title!r} "
+            f"location={job.location!r} "
+            f"url={job.url}"
+        )
+
+    return (
+        bool(jobs)
+        and len(ids) == len(set(ids))
+        and len(urls) == len(set(urls))
+    )
+
+
+def run_enterprise_batch():
+    from research.loader import load_registry
+
+    print("=" * 70)
+    print("MASTEK / LTIMINDTREE / KPMG")
+    print("ENTERPRISE ATS RESEARCH - READ ONLY")
+    print("=" * 70)
+
+    registry = load_registry()
+
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    try:
+        for name, urls in _ENTERPRISE_SOURCES.items():
+            _enterprise_inspect_sources(
+                session, name, urls
+            )
+
+        _enterprise_validate_existing(
+            "ltmindtree", registry
+        )
+    finally:
+        session.close()
+
+    print("[MASTEK] ADAPTER=NOT_YET_VALIDATED")
+    print("[LTIMINDTREE] RIPPLEHIRE_COVERAGE=UNVERIFIED")
+    print("[KPMG] ORACLE_SITE_NUMBERS=UNVERIFIED")
+    print("[KPMG] ORACLE_ADAPTER=NOT_YET_VALIDATED")
+    print("[ENTERPRISE_BATCH] COMPLETE")
+    print("[ENTERPRISE_BATCH] No registry changes")
+    print("[ENTERPRISE_BATCH] No state writes")
+    print("[ENTERPRISE_BATCH] No Telegram notifications")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -4012,10 +4317,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Validate BrowserStack, Barclays and Zycus",
     )
+    parser.add_argument(
+        "--enterprise-batch",
+        action="store_true",
+        help="Research Mastek, LTIMindtree and KPMG",
+    )
 
     args = parser.parse_args()
 
-    if args.integration_batch:
+    if args.enterprise_batch:
+        run_enterprise_batch()
+    elif args.integration_batch:
         run_integration_batch()
     elif args.company_batch:
         run_company_batch()
