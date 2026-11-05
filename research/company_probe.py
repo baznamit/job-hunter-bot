@@ -3035,6 +3035,296 @@ def run_company_batch():
     print("[COMPANY_BATCH] No Telegram notifications")
 
 
+# ============================================================
+# BrowserStack / Barclays / Zycus integration research
+# ============================================================
+
+_INTEGRATION_ROLE_RE = re.compile(
+    r"java|spring|backend|back.end|full.stack|"
+    r"software engineer|software developer|react|"
+    r"microservices",
+    re.I,
+)
+
+_INTEGRATION_INDIA_RE = re.compile(
+    r"india|mumbai|navi.mumbai|bengaluru|"
+    r"bangalore|hyderabad|pune|chennai|noida",
+    re.I,
+)
+
+
+def _integration_summary(name, jobs):
+    ids = [str(job.id) for job in jobs]
+    urls = [str(job.url) for job in jobs]
+
+    relevant = [
+        job for job in jobs
+        if (
+            _INTEGRATION_ROLE_RE.search(job.title)
+            and _INTEGRATION_INDIA_RE.search(
+                job.location
+            )
+        )
+    ]
+
+    print(
+        f"[{name}] normalized={len(jobs)} "
+        f"unique_ids={len(set(ids))} "
+        f"unique_urls={len(set(urls))} "
+        f"india_tech={len(relevant)}"
+    )
+
+    for job in relevant[:10]:
+        print(
+            f"[{name}] INDIA_TECH "
+            f"id={job.id!r} "
+            f"title={job.title!r} "
+            f"location={job.location!r} "
+            f"url={job.url}"
+        )
+
+    return (
+        bool(jobs)
+        and len(ids) == len(set(ids))
+        and len(urls) == len(set(urls))
+    )
+
+
+def _probe_existing_workday(company_id, registry):
+    from src.providers.workday import WorkdayAdapter
+
+    matches = [
+        company for company in registry.companies
+        if company.id == company_id
+    ]
+
+    if len(matches) != 1:
+        print(
+            f"[{company_id}] REGISTRY_ERROR "
+            f"matches={len(matches)}"
+        )
+        return False
+
+    company = matches[0].model_copy(deep=True)
+
+    print(
+        f"[{company_id}] provider="
+        f"{company.provider.type.value} "
+        f"enabled={company.enabled}"
+    )
+
+    if company.provider.type.value != "workday":
+        print(
+            f"[{company_id}] PROVIDER_CHANGED "
+            "manual review required"
+        )
+        return False
+
+    try:
+        jobs = WorkdayAdapter().fetch_jobs(company)
+    except Exception as exc:
+        print(
+            f"[{company_id}] WORKDAY_FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return False
+
+    return _integration_summary(
+        company_id.upper(), jobs
+    )
+
+
+def _probe_barclays_talentbrew(registry):
+    from models.company import (
+        Provider,
+        ProviderConfig,
+        ProviderStatus,
+        ProviderType,
+    )
+    from src.providers.talentbrew import TalentBrewAdapter
+
+    matches = [
+        company for company in registry.companies
+        if company.id == "barclays"
+    ]
+
+    if len(matches) != 1:
+        print("[BARCLAYS_TB] REGISTRY_ERROR")
+        return
+
+    # Temporary configuration: never change the registry.
+    company = matches[0].model_copy(deep=True)
+    company.provider = Provider(
+        type=ProviderType.TALENTBREW,
+        status=ProviderStatus.PARTIAL,
+        config=ProviderConfig(
+            base_url="https://search.jobs.barclays",
+            page_size=16,
+        ),
+    )
+
+    adapter = TalentBrewAdapter()
+    all_jobs = []
+
+    # Validate two pages, not a full 500-page crawl.
+    for page in (1, 2):
+        try:
+            html = adapter._fetch_html(
+                "https://search.jobs.barclays/search-jobs",
+                company,
+                params={"p": page},
+            )
+
+            jobs = adapter._extract_jobs(
+                html, company
+            )
+
+            total = adapter._extract_total(html)
+
+            print(
+                f"[BARCLAYS_TB] page={page} "
+                f"parsed={len(jobs)} "
+                f"reported_total={total!r}"
+            )
+
+            all_jobs.extend(jobs)
+
+        except Exception as exc:
+            print(
+                f"[BARCLAYS_TB] page={page} "
+                f"ERROR={type(exc).__name__}: {exc}"
+            )
+            return
+
+    _integration_summary(
+        "BARCLAYS_TB", all_jobs
+    )
+
+    print(
+        "[BARCLAYS_TB] "
+        "full_inventory=NOT_VERIFIED "
+        "provider_switch=NOT_APPROVED"
+    )
+
+
+def _probe_zycus(session):
+    sources = (
+        "https://www.zycus.com/company/careers",
+        "https://www.zycus.com/company/careers/india-careers",
+    )
+
+    for url in sources:
+        print(f"[ZYCUS] SOURCE={url}")
+
+        try:
+            result = limited_get(session, url)
+        except requests.RequestException as exc:
+            print(
+                f"[ZYCUS] REQUEST_FAILED "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
+
+        print(
+            f"[ZYCUS] status={result['status']} "
+            f"final={result['url']} "
+            f"bytes={result['bytes']}"
+        )
+
+        if (
+            result["status"] != 200
+            or result["truncated"]
+            or classify_page(result) != "HTML"
+        ):
+            continue
+
+        soup = BeautifulSoup(
+            result["content"], "html.parser"
+        )
+
+        links = []
+
+        for anchor in soup.select("a[href]"):
+            href = urljoin(
+                result["url"],
+                anchor.get("href", ""),
+            )
+
+            if urlparse(href).scheme not in (
+                "http", "https"
+            ):
+                continue
+
+            title = anchor.get_text(
+                " ", strip=True
+            )
+
+            if (
+                _INTEGRATION_ROLE_RE.search(title)
+                or re.search(
+                    r"jobs|openings|apply|careers",
+                    title + " " + href,
+                    re.I,
+                )
+            ):
+                links.append((title, href))
+
+        print(
+            f"[ZYCUS] candidate_links="
+            f"{len(links)}"
+        )
+
+        for title, href in links[:15]:
+            parsed = urlparse(href)
+            safe_url = parsed._replace(
+                query="", fragment=""
+            ).geturl()
+
+            print(
+                f"[ZYCUS] LINK "
+                f"title={title[:100]!r} "
+                f"url={safe_url}"
+            )
+
+    print(
+        "[ZYCUS] ATS=UNVERIFIED "
+        "inventory=UNVERIFIED "
+        "pagination=UNVERIFIED"
+    )
+
+
+def run_integration_batch():
+    from research.loader import load_registry
+
+    print("=" * 70)
+    print("BROWSERSTACK / BARCLAYS / ZYCUS")
+    print("INTEGRATION RESEARCH - READ ONLY")
+    print("=" * 70)
+
+    registry = load_registry()
+
+    for company_id in ("browserstack", "barclays"):
+        _probe_existing_workday(
+            company_id, registry
+        )
+
+    _probe_barclays_talentbrew(registry)
+
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    try:
+        _probe_zycus(session)
+    finally:
+        session.close()
+
+    print("[INTEGRATION_BATCH] COMPLETE")
+    print("[INTEGRATION_BATCH] No registry changes")
+    print("[INTEGRATION_BATCH] No state writes")
+    print("[INTEGRATION_BATCH] No Telegram notifications")
+    print("[INTEGRATION_BATCH] No provider switching")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -3062,10 +3352,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Research CRISIL, Clover Infotech and Tech Mahindra",
     )
+    parser.add_argument(
+        "--integration-batch",
+        action="store_true",
+        help="Validate BrowserStack, Barclays and Zycus",
+    )
 
     args = parser.parse_args()
 
-    if args.company_batch:
+    if args.integration_batch:
+        run_integration_batch()
+    elif args.company_batch:
         run_company_batch()
     elif args.activation_check:
         run_activation_check()
