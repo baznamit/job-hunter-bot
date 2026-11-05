@@ -647,6 +647,245 @@ def atlassian_detail_links(links):
     return list(result.values())
 
 
+def probe_atlassian_details(session):
+    """Inspect three official Atlassian vacancies, read-only."""
+    from bs4 import BeautifulSoup
+
+    job_ids = {
+        "27346": "Software Engineer II",
+        "25540": "Backend Software Engineer II",
+        "25561": "Full Stack Software Engineer",
+    }
+
+    base = "https://www.atlassian.com"
+    detail_prefix = f"{base}/company/careers/details/"
+
+    def clean(value, limit=300):
+        return re.sub(r"\s+", " ", value or "").strip()[:limit]
+
+    def show_element(label, element, limit=400):
+        if element is None:
+            return
+
+        text = clean(element.get_text(" ", strip=True), limit)
+        if not text:
+            return
+
+        classes = element.get("class") or []
+        print(
+            f"[ATLASSIAN_DETAIL] {label} "
+            f"tag={element.name!r} "
+            f"id={element.get('id')!r} "
+            f"class={classes!r} "
+            f"text={text!r}"
+        )
+
+    for job_id, expected_title in job_ids.items():
+        url = f"{detail_prefix}{job_id}"
+        print(
+            f"\n[ATLASSIAN_DETAIL] job_id={job_id} "
+            f"expected_title={expected_title!r}"
+        )
+
+        try:
+            result = limited_get(session, url)
+        except requests.RequestException as exc:
+            print(
+                f"[ATLASSIAN_DETAIL] REQUEST_ERROR "
+                f"job_id={job_id} error={exc}"
+            )
+            continue
+
+        print(
+            f"[ATLASSIAN_DETAIL] status={result['status']} "
+            f"bytes={result['bytes']} "
+            f"truncated={result['truncated']} "
+            f"final_url={result['url']}"
+        )
+
+        if result["status"] != 200 or result["truncated"]:
+            print("[ATLASSIAN_DETAIL] PAGE_NOT_USABLE")
+            continue
+
+        soup = BeautifulSoup(
+            result["content"],
+            "html.parser",
+        )
+
+        # 1. Actual heading and surrounding job container.
+        heading = soup.find(
+            "h1",
+            string=lambda text: (
+                bool(text)
+                and expected_title.casefold()
+                in clean(text).casefold()
+            ),
+        )
+
+        if heading is None:
+            heading = soup.find("h1")
+
+        show_element("HEADING", heading)
+
+        if heading is not None:
+            for parent in list(heading.parents)[:5]:
+                if parent.name in ("html", "body"):
+                    break
+
+                show_element(
+                    "HEADING_PARENT",
+                    parent,
+                    limit=180,
+                )
+
+        # 2. Scoped metadata candidates.
+        selectors = {
+            "MAIN": "main",
+            "ARTICLE": "article",
+            "JOB_CONTAINER": (
+                '[class*="job-detail" i], '
+                '[class*="job-description" i], '
+                '[class*="job-content" i], '
+                '[data-testid*="job" i]'
+            ),
+            "LOCATION": (
+                '[class*="location" i], '
+                '[data-testid*="location" i]'
+            ),
+            "DESCRIPTION": (
+                'main [class*="description" i], '
+                'article [class*="description" i]'
+            ),
+        }
+
+        for label, selector in selectors.items():
+            matches = soup.select(selector)
+
+            print(
+                f"[ATLASSIAN_DETAIL] {label}_COUNT="
+                f"{len(matches)}"
+            )
+
+            for element in matches[:3]:
+                show_element(label, element)
+
+        # 3. Job-related embedded state clues.
+        for script in soup.find_all("script"):
+            script_id = script.get("id", "")
+            script_type = script.get("type", "")
+            content = script.string or ""
+
+            if not content:
+                continue
+
+            markers = (
+                "jobDescription",
+                "jobLocation",
+                "jobPosting",
+                "requisitionId",
+                "employmentType",
+                "applyUrl",
+                "applicationUrl",
+            )
+
+            matched = [
+                marker
+                for marker in markers
+                if marker.casefold() in content.casefold()
+            ]
+
+            if not matched:
+                continue
+
+            print(
+                "[ATLASSIAN_DETAIL] EMBEDDED_STATE "
+                f"id={script_id!r} "
+                f"type={script_type!r} "
+                f"markers={matched}"
+            )
+
+            for marker in matched[:3]:
+                match = re.search(
+                    re.escape(marker),
+                    content,
+                    re.I,
+                )
+
+                if match:
+                    start = max(0, match.start() - 100)
+                    end = min(
+                        len(content),
+                        match.end() + 200,
+                    )
+
+                    print(
+                        "[ATLASSIAN_DETAIL] STATE_CONTEXT "
+                        f"marker={marker!r} "
+                        f"text={clean(content[start:end], 300)!r}"
+                    )
+
+        # 4. Actual application-action candidates.
+        application_links = []
+
+        for anchor in soup.find_all("a", href=True):
+            text = clean(
+                anchor.get_text(" ", strip=True),
+                80,
+            )
+            href = urljoin(result["url"], anchor["href"])
+
+            if (
+                re.search(r"\bapply(?:\s+now)?\b", text, re.I)
+                or re.search(
+                    r"/(?:apply|application)(?:/|\?|$)",
+                    href,
+                    re.I,
+                )
+            ):
+                application_links.append((text, href))
+
+        for text, href in application_links[:8]:
+            print(
+                "[ATLASSIAN_DETAIL] APPLY_LINK "
+                f"text={text!r} url={href}"
+            )
+
+        # 5. Experience clues from the job-specific area.
+        # Avoid treating global site navigation as a job description.
+        scope = (
+            heading.find_parent("main")
+            if heading is not None
+            else None
+        ) or soup.find("main")
+
+        if scope is not None:
+            scoped_text = scope.get_text(" ", strip=True)
+
+            experience_pattern = re.compile(
+                r".{0,90}(?:"
+                r"\d+\s*(?:\+|[-–]\s*\d+)?\s*years?"
+                r"|experience required"
+                r"|professional experience"
+                r").{0,120}",
+                re.I,
+            )
+
+            matches = experience_pattern.findall(
+                scoped_text
+            )
+
+            for match in matches[:5]:
+                print(
+                    "[ATLASSIAN_DETAIL] EXPERIENCE "
+                    f"{clean(match, 220)!r}"
+                )
+
+        print(
+            f"[ATLASSIAN_DETAIL] job_id={job_id} "
+            "INSPECTION_COMPLETE"
+        )
+
+
 def _atlassian_context(element, limit=500):
     parent = element.parent
 
@@ -985,9 +1224,9 @@ def run_stale_recovery():
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # Atlassian: complete listing and representative details.
+    # Atlassian: inspect three representative details only.
     try:
-        probe_atlassian(session)
+        probe_atlassian_details(session)
     except requests.RequestException as exc:
         print(
             f"[ATLASSIAN] REQUEST_FAILED "
