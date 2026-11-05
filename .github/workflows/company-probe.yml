@@ -21,17 +21,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run company probe
-        run: python -u research/company_probe.py
+      # - name: Run company probe
+      #   run: python -u research/company_probe.py
 
-      - name: Run new company stage 2 probe
-        run: python -u -m research.new_company_stage2_probe
+      # - name: Run new company stage 2 probe
+      #   run: python -u -m research.new_company_stage2_probe
 
-      - name: Validate Deloitte and Wissen SuccessFactors adapters
-        run: python -u -m research.new_company_stage3_probe
+      # - name: Validate Deloitte and Wissen SuccessFactors adapters
+      #   run: python -u -m research.new_company_stage3_probe
 
-      - name: Validate Deloitte and Wissen pre-activation identities
-        run: python -u -m research.new_company_stage4_probe
+      # - name: Validate Deloitte and Wissen pre-activation identities
+      #   run: python -u -m research.new_company_stage4_probe
 
       - name: Probe S&P Global Workday and Jibe sources
         run: python -u -m research.spglobal_ats_probe
