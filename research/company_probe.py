@@ -647,6 +647,77 @@ def atlassian_detail_links(links):
     return list(result.values())
 
 
+def _atlassian_context(element, limit=500):
+    parent = element.parent
+
+    if parent is None:
+        return ""
+
+    return parent.get_text(" ", strip=True)[:limit]
+
+
+def _atlassian_embedded_job_summaries(soup, limit=20):
+    summaries = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            lowered_keys = {
+                str(key).lower(): key
+                for key in value
+            }
+            if any(
+                key in lowered_keys
+                for key in ("title", "jobtitle", "name")
+            ) and any(
+                token in " ".join(lowered_keys)
+                for token in ("job", "location", "description")
+            ):
+                summaries.append({
+                    str(key): value[key]
+                    for key in value
+                    if str(key).lower() in {
+                        "title",
+                        "jobtitle",
+                        "name",
+                        "location",
+                        "locations",
+                        "description",
+                        "url",
+                        "id",
+                    }
+                })
+
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    for script in soup.find_all("script"):
+        script_type = script.get("type", "").lower()
+        script_id = script.get("id", "").lower()
+        text = script.string or script.get_text()
+
+        if not text or len(summaries) >= limit:
+            continue
+
+        if (
+            script_type == "application/ld+json"
+            or "json" in script_type
+            or "state" in script_id
+            or script_id in {"__next_data__", "__initial_state__"}
+        ):
+            try:
+                visit(json.loads(text))
+            except (ValueError, TypeError):
+                continue
+
+        if len(summaries) >= limit:
+            break
+
+    return summaries[:limit]
+
+
 def probe_atlassian(session):
     url = RECOVERY_TARGETS["ATLASSIAN"]
     print(f"\n[ATLASSIAN] listing={url}")
@@ -681,11 +752,51 @@ def probe_atlassian(session):
     )
 
     links = atlassian_detail_links(info["links"])
+    soup = BeautifulSoup(result["content"], "html.parser")
+    total_hints = []
+
+    for tag in soup.select(
+        '[data-total], [data-count], [aria-label], '
+        'meta[name], meta[property]'
+    ):
+        value = " ".join(
+            str(item)
+            for item in (
+                tag.get("data-total", ""),
+                tag.get("data-count", ""),
+                tag.get("aria-label", ""),
+                tag.get("content", ""),
+            )
+        ).strip()
+
+        if re.search(r"\b(?:349|jobs?|openings?|positions?)\b", value, re.I):
+            total_hints.append(value[:250])
 
     print(
         f"[ATLASSIAN] strict_unique_job_links={len(links)} "
         "authoritative_total=UNKNOWN"
     )
+
+    for hint in total_hints[:10]:
+        print(f"[ATLASSIAN] LISTING_TOTAL_HINT {hint!r}")
+
+    detail_link_set = set(links)
+    for anchor in soup.find_all("a", href=True):
+        absolute = urljoin(result["url"], anchor["href"])
+
+        if absolute in detail_link_set:
+            print(
+                f"[ATLASSIAN] LISTING_JOB "
+                f"url={absolute} "
+                f"text={anchor.get_text(' ', strip=True)[:160]!r} "
+                f"context={_atlassian_context(anchor)!r}"
+            )
+
+    for summary in _atlassian_embedded_job_summaries(soup):
+        print(
+            "[ATLASSIAN] EMBEDDED_JOB "
+            f"{json.dumps(summary, ensure_ascii=False)[:700]}"
+        )
 
     for link in links[:3]:
         detail = limited_get(session, link)
@@ -706,6 +817,10 @@ def probe_atlassian(session):
             detail["content"],
             detail["url"],
         )
+        detail_soup = BeautifulSoup(
+            detail["content"],
+            "html.parser",
+        )
 
         jsonld_types = [
             item.get("@type")
@@ -717,6 +832,31 @@ def probe_atlassian(session):
             f"[ATLASSIAN] detail_title={parsed['title']!r} "
             f"jsonld_types={jsonld_types}"
         )
+
+        for selector in (
+            "h1",
+            '[class*="title" i]',
+            '[class*="location" i]',
+            '[class*="description" i]',
+        ):
+            for element in detail_soup.select(selector)[:3]:
+                text = element.get_text(" ", strip=True)
+
+                if text:
+                    print(
+                        f"[ATLASSIAN] DETAIL_FIELD "
+                        f"selector={selector!r} "
+                        f"text={text[:500]!r}"
+                    )
+
+        for summary in _atlassian_embedded_job_summaries(
+            detail_soup,
+            limit=10,
+        ):
+            print(
+                "[ATLASSIAN] DETAIL_EMBEDDED_JOB "
+                f"{json.dumps(summary, ensure_ascii=False)[:700]}"
+            )
 
         for candidate in parsed["links"]:
             if "apply" in candidate.lower():

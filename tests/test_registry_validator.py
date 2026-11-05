@@ -17,6 +17,22 @@ def test_registry_is_valid(registry):
     validate_registry(registry)
 
 
+def test_postman_uses_verified_workday_configuration(
+    registry,
+):
+    company = next(
+        company
+        for company in registry.companies
+        if company.id == "postman"
+    )
+
+    assert company.provider.type == ProviderType.WORKDAY
+    assert company.provider.status == ProviderStatus.VERIFIED
+    assert company.provider.config.tenant == "postman"
+    assert company.provider.config.cluster == "wd108"
+    assert company.provider.config.board == "careers"
+
+
 def test_freshworks_uses_smartrecruiters(
     registry,
 ):

@@ -9,10 +9,12 @@
       "enabled": true,
       "career_page": "https://www.postman.com/company/careers/",
       "provider": {
-        "type": "greenhouse",
-        "status": "partial",
+        "type": "workday",
+        "status": "verified",
         "config": {
-          "board": "postman"
+          "tenant": "postman",
+          "cluster": "wd108",
+          "board": "careers"
         }
       },
       "locations": [],
