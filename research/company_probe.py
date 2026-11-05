@@ -2260,6 +2260,291 @@ _COMPANY_BATCH_INDIA_RE = re.compile(
     re.I,
 )
 
+_TECH_MAHINDRA_URL = (
+    "https://careers.techmahindra.com/"
+    "CurrentOpportunity.aspx"
+)
+
+_TM_ROLE_RE = re.compile(
+    r"java|spring|full[\s-]?stack|backend|"
+    r"back[\s-]?end|software developer|"
+    r"software engineer|react|microservices",
+    re.I,
+)
+
+_TM_INDIA_RE = re.compile(
+    r"mumbai|navi mumbai|bengaluru|bangalore|"
+    r"hyderabad|pune|chennai|noida|india",
+    re.I,
+)
+
+
+def extract_techmahindra_jobs(html: str) -> list[dict]:
+    """Extract job cards from the verified ASP.NET DataList."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    table = soup.select_one(
+        '[id$="DataListRecommended"]'
+    )
+
+    if table is None:
+        return []
+
+    jobs = []
+    seen = set()
+
+    for hidden in table.select(
+        'input[type="hidden"][name$="HdnJobCode"]'
+    ):
+        job_id = (hidden.get("value") or "").strip()
+
+        if not job_id or job_id in seen:
+            continue
+
+        # Each repeated job is rendered inside a table cell.
+        card = hidden.find_parent("td")
+
+        if card is None:
+            continue
+
+        text = re.sub(
+            r"\s+",
+            " ",
+            card.get_text(" ", strip=True),
+        )
+
+        if not text:
+            continue
+
+        button = card.select_one(
+            'input[name$="btn_jobs"],'
+            'button[name$="btn_jobs"]'
+        )
+
+        if button is None:
+            continue
+
+        name = button.get("name", "")
+
+        # Keep raw text as evidence. Field extraction is
+        # best-effort until the actual card DOM is confirmed.
+        skill = re.search(
+            r"Skill\s*Set\s*:\s*(.*?)"
+            r"(?=\s*Experience\s*:|$)",
+            text,
+            re.I,
+        )
+        experience = re.search(
+            r"Experience\s*:\s*(.*?)"
+            r"(?=\s*Location\s*:|$)",
+            text,
+            re.I,
+        )
+        location = re.search(
+            r"Location\s*:\s*(.*)$",
+            text,
+            re.I,
+        )
+
+        title = re.split(
+            r"\bSkill\s*Set\s*:",
+            text,
+            maxsplit=1,
+            flags=re.I,
+        )[0].strip()
+
+        jobs.append({
+            "id": job_id,
+            "title": title,
+            "skills": (
+                skill.group(1).strip()
+                if skill else ""
+            ),
+            "experience": (
+                experience.group(1).strip()
+                if experience else ""
+            ),
+            "location": (
+                location.group(1).strip()
+                if location else ""
+            ),
+            "button_name": name,
+            "button_value": button.get("value", ""),
+        })
+
+        seen.add(job_id)
+
+    return jobs
+
+
+def summarize_techmahindra_jobs(
+    label: str,
+    jobs: list[dict],
+) -> None:
+    """Report bounded India/technology evidence."""
+    relevant = []
+
+    for job in jobs:
+        title = job["title"]
+        skills = job["skills"]
+        location = job["location"]
+
+        if (
+            _TM_ROLE_RE.search(title + " " + skills)
+            and _TM_INDIA_RE.search(location)
+        ):
+            relevant.append(job)
+
+    print(
+        f"[TECHMAHINDRA] {label} "
+        f"jobs={len(jobs)} "
+        f"unique_ids={len({j['id'] for j in jobs})} "
+        f"india_tech={len(relevant)}"
+    )
+
+    for job in relevant[:12]:
+        print(
+            "[TECHMAHINDRA] INDIA_TECH "
+            f"id={job['id']!r} "
+            f"title={job['title']!r} "
+            f"skills={job['skills']!r} "
+            f"experience={job['experience']!r} "
+            f"location={job['location']!r}"
+        )
+
+
+def _tm_form_payload(
+    html: str,
+    button_name: str | None = None,
+    button_value: str = "",
+    event_target: str = "",
+) -> dict:
+    """Build a public Web Forms navigation payload."""
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.select_one("form")
+
+    if form is None:
+        raise ValueError("ASP.NET form not found")
+
+    payload = {}
+
+    # Preserve page-provided state for this session.
+    # Never print these values.
+    for field in form.select("input[name]"):
+        name = field.get("name", "")
+        kind = field.get("type", "text").lower()
+
+        if kind in ("hidden", "text"):
+            payload[name] = field.get("value", "")
+
+    payload["__EVENTTARGET"] = event_target
+    payload["__EVENTARGUMENT"] = ""
+
+    if button_name:
+        payload[button_name] = button_value
+
+    return payload
+
+
+def probe_techmahindra_navigation(session) -> None:
+    """Verify one public pager without triggering a job action."""
+    print("\n[TECHMAHINDRA] NAVIGATION_VALIDATION")
+
+    response = session.get(
+        _TECH_MAHINDRA_URL,
+        timeout=TIMEOUT,
+    )
+    response.raise_for_status()
+
+    initial_html = response.text
+    initial_jobs = extract_techmahindra_jobs(
+        initial_html
+    )
+
+    summarize_techmahindra_jobs(
+        "PAGE_1", initial_jobs
+    )
+
+    if not initial_jobs:
+        print(
+            "[TECHMAHINDRA] "
+            "BLOCKER=NO_STRUCTURED_JOB_CARDS"
+        )
+        return
+
+    soup = BeautifulSoup(
+        initial_html,
+        "html.parser",
+    )
+
+    pager = None
+
+    for anchor in soup.select("a[href]"):
+        if anchor.get_text(" ", strip=True) != "2":
+            continue
+
+        href = anchor.get("href", "")
+
+        match = re.search(
+            r"__doPostBack\('([^']+)','([^']*)'\)",
+            href,
+        )
+
+        if match:
+            pager = match
+            break
+
+    if pager is None:
+        print(
+            "[TECHMAHINDRA] "
+            "PAGE_2=NOT_AVAILABLE"
+        )
+    else:
+        payload = _tm_form_payload(
+            initial_html,
+            event_target=pager.group(1),
+        )
+        payload["__EVENTARGUMENT"] = pager.group(2)
+
+        page2_response = session.post(
+            _TECH_MAHINDRA_URL,
+            data=payload,
+            timeout=TIMEOUT,
+            allow_redirects=True,
+        )
+        page2_response.raise_for_status()
+
+        page2_jobs = extract_techmahindra_jobs(
+            page2_response.text
+        )
+
+        first_ids = {
+            job["id"] for job in initial_jobs
+        }
+        second_ids = {
+            job["id"] for job in page2_jobs
+        }
+
+        summarize_techmahindra_jobs(
+            "PAGE_2", page2_jobs
+        )
+
+        print(
+            "[TECHMAHINDRA] PAGINATION "
+            f"page1={len(first_ids)} "
+            f"page2={len(second_ids)} "
+            f"overlap={len(first_ids & second_ids)} "
+            f"distinct={bool(second_ids - first_ids)}"
+        )
+
+    # The btn_jobs handler has not been verified as a read-only
+    # detail action, so do not submit it.
+    print(
+        "[TECHMAHINDRA] DETAIL_NAVIGATION=SKIPPED "
+        "reason=button_behavior_unverified "
+        "canonical_url=NOT_VERIFIED"
+    )
+
 
 def inspect_company_page_structure(
     name: str,
@@ -2702,6 +2987,21 @@ def run_company_batch():
                     discovered.update(page["links"])
 
                 time.sleep(DELAY_SECONDS)
+
+            if name == "TECHMAHINDRA":
+                try:
+                    probe_techmahindra_navigation(
+                        session
+                    )
+                except (
+                    requests.RequestException,
+                    ValueError,
+                ) as exc:
+                    print(
+                        "[TECHMAHINDRA] "
+                        "NAVIGATION_FAILED "
+                        f"type={type(exc).__name__}"
+                    )
 
             india_candidates = [
                 (url, title)
