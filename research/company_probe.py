@@ -22,7 +22,12 @@ import re
 import time
 from collections import Counter
 from html import unescape
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import (
+    parse_qs,
+    urldefrag,
+    urljoin,
+    urlparse,
+)
 
 import requests
 from bs4 import BeautifulSoup
@@ -3293,6 +3298,412 @@ def _probe_zycus(session):
     )
 
 
+# ============================================================
+# Zycus / Talismatic public inventory validation
+# Research only - no registry or state changes
+# ============================================================
+
+_ZYCUS_BOARD = "https://zycus.talismatic.com/jobs"
+
+_ZYCUS_INDIA = (
+    "https://www.zycus.com/company/careers/india-careers"
+)
+
+_TALISMATIC_HOST = "zycus.talismatic.com"
+
+_TALISMATIC_JOB_RE = re.compile(
+    r"^/jobs/([A-Za-z0-9_-]+)/?$"
+)
+
+
+def _zycus_safe_url(url: str) -> str:
+    """Remove query parameters and fragments from report URLs."""
+    parsed = urlparse(url)
+
+    return parsed._replace(
+        query="",
+        fragment="",
+    ).geturl()
+
+
+def _zycus_job_links(
+    html: str,
+    base_url: str,
+) -> dict:
+    """Extract public Talismatic job links from HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    jobs = {}
+
+    for anchor in soup.select("a[href]"):
+        absolute = urljoin(
+            base_url,
+            anchor["href"],
+        )
+
+        parsed = urlparse(absolute)
+
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != _TALISMATIC_HOST
+            or parsed.username
+            or parsed.password
+        ):
+            continue
+
+        match = _TALISMATIC_JOB_RE.fullmatch(
+            parsed.path
+        )
+
+        if not match:
+            continue
+
+        job_id = match.group(1)
+
+        title = " ".join(
+            anchor.get_text(
+                " ",
+                strip=True,
+            ).split()
+        )
+
+        # Deduplicate by canonical job ID.
+        if job_id in jobs:
+            if not jobs[job_id]["title"] and title:
+                jobs[job_id]["title"] = title
+            continue
+
+        jobs[job_id] = {
+            "id": job_id,
+            "title": title,
+            "url": _zycus_safe_url(absolute),
+        }
+
+    return jobs
+
+
+def _zycus_valid_pagination_url(
+    url: str,
+) -> bool:
+    """Allow only bounded, explicit public page navigation."""
+    parsed = urlparse(url)
+
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != _TALISMATIC_HOST
+        or parsed.username
+        or parsed.password
+        or parsed.path.rstrip("/") != "/jobs"
+        or parsed.fragment
+    ):
+        return False
+
+    params = parse_qs(
+        parsed.query,
+        keep_blank_values=True,
+    )
+
+    if set(params) != {"page"}:
+        return False
+
+    values = params["page"]
+
+    if len(values) != 1:
+        return False
+
+    if not re.fullmatch(r"[0-9]+", values[0]):
+        return False
+
+    page = int(values[0])
+
+    return 2 <= page <= 100
+
+
+def _zycus_structure(
+    html: str,
+    base_url: str,
+) -> dict:
+    """Inspect public HTML and observable inventory structure."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    scripts = []
+
+    for script in soup.select("script[src]"):
+        url = urljoin(
+            base_url,
+            script["src"],
+        )
+
+        parsed = urlparse(url)
+
+        if (
+            parsed.scheme not in ("http", "https")
+            or parsed.username
+            or parsed.password
+        ):
+            continue
+
+        scripts.append(_zycus_safe_url(url))
+
+    json_ld = []
+
+    for script in soup.select(
+        'script[type="application/ld+json"]'
+    ):
+        try:
+            value = json.loads(
+                script.string or ""
+            )
+        except (ValueError, TypeError):
+            continue
+
+        entries = (
+            value
+            if isinstance(value, list)
+            else [value]
+        )
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            json_ld.append({
+                "type": entry.get("@type"),
+                "has_graph": "@graph" in entry,
+            })
+
+    pagination = set()
+
+    for anchor in soup.select("a[href]"):
+        label = anchor.get_text(
+            " ",
+            strip=True,
+        )
+
+        if not re.fullmatch(
+            r"\d+|Next|Previous|Last",
+            label,
+            re.IGNORECASE,
+        ):
+            continue
+
+        # Preserve query parameters for actual navigation.
+        url = urljoin(
+            base_url,
+            anchor["href"],
+        )
+
+        if _zycus_valid_pagination_url(url):
+            pagination.add(url)
+
+    return {
+        "job_links": _zycus_job_links(
+            html,
+            base_url,
+        ),
+        "pagination_links": sorted(pagination),
+        "scripts": list(dict.fromkeys(scripts))[:15],
+        "json_ld": json_ld[:10],
+        "has_next_data": "__NEXT_DATA__" in html,
+        "has_nuxt_data": "__NUXT__" in html,
+    }
+
+
+def probe_zycus_talismatic(session) -> None:
+    """Validate official Zycus/Talismatic public sources."""
+    print("\n[ZYCUS_TALISMATIC] START")
+
+    sources = (
+        ("BOARD", _ZYCUS_BOARD),
+        ("OFFICIAL_INDIA", _ZYCUS_INDIA),
+    )
+
+    inventories = {}
+    board_structure = None
+
+    for label, url in sources:
+        try:
+            result = limited_get(
+                session,
+                url,
+            )
+        except requests.RequestException as exc:
+            print(
+                f"[ZYCUS_TALISMATIC] {label} "
+                f"REQUEST_FAILED={type(exc).__name__}"
+            )
+            continue
+
+        print(
+            f"[ZYCUS_TALISMATIC] {label} "
+            f"status={result['status']} "
+            f"bytes={result['bytes']} "
+            f"truncated={result['truncated']}"
+        )
+
+        if (
+            result["status"] != 200
+            or result["truncated"]
+            or classify_page(result) != "HTML"
+        ):
+            print(
+                f"[ZYCUS_TALISMATIC] {label} "
+                "INVENTORY_NOT_VERIFIED"
+            )
+            continue
+
+        structure = _zycus_structure(
+            result["content"],
+            result["url"],
+        )
+
+        inventories[label] = structure["job_links"]
+
+        print(
+            f"[ZYCUS_TALISMATIC] {label} "
+            f"unique_ids={len(structure['job_links'])} "
+            f"pagination_links="
+            f"{len(structure['pagination_links'])} "
+            f"json_ld={len(structure['json_ld'])} "
+            f"next_data={structure['has_next_data']} "
+            f"nuxt_data={structure['has_nuxt_data']}"
+        )
+
+        for script in structure["scripts"][:8]:
+            print(
+                "[ZYCUS_TALISMATIC] SCRIPT "
+                f"{script}"
+            )
+
+        for job in list(
+            structure["job_links"].values()
+        )[:12]:
+            print(
+                "[ZYCUS_TALISMATIC] JOB "
+                f"id={job['id']} "
+                f"title={job['title'][:100]!r} "
+                f"url={job['url']}"
+            )
+
+        if label == "BOARD":
+            board_structure = structure
+
+        time.sleep(DELAY_SECONDS)
+
+    board_ids = set(
+        inventories.get("BOARD", {})
+    )
+
+    india_ids = set(
+        inventories.get("OFFICIAL_INDIA", {})
+    )
+
+    print(
+        "[ZYCUS_TALISMATIC] OVERLAP "
+        f"board={len(board_ids)} "
+        f"india={len(india_ids)} "
+        f"shared={len(board_ids & india_ids)} "
+        f"missing_from_board={len(india_ids - board_ids)}"
+    )
+
+    # Test at most two observed pagination links.
+    # Do not invent page parameters or endpoints.
+    if board_structure is not None:
+        visited = {_ZYCUS_BOARD}
+
+        for page_url in board_structure[
+            "pagination_links"
+        ][:2]:
+            if page_url in visited:
+                continue
+
+            if not _zycus_valid_pagination_url(page_url):
+                print(
+                    "[ZYCUS_TALISMATIC] "
+                    "PAGINATION_SKIPPED"
+                )
+                continue
+
+            visited.add(page_url)
+
+            try:
+                result = limited_get(
+                    session,
+                    page_url,
+                )
+
+                if (
+                    result["status"] != 200
+                    or result["truncated"]
+                    or classify_page(result) != "HTML"
+                ):
+                    print(
+                        "[ZYCUS_TALISMATIC] PAGE_FAILED "
+                        f"status={result['status']}"
+                    )
+                    continue
+
+                page_jobs = _zycus_job_links(
+                    result["content"],
+                    result["url"],
+                )
+
+                page_ids = set(page_jobs)
+
+                print(
+                    "[ZYCUS_TALISMATIC] PAGE "
+                    f"jobs={len(page_ids)} "
+                    f"overlap={len(board_ids & page_ids)} "
+                    f"new={len(page_ids - board_ids)}"
+                )
+
+            except requests.RequestException as exc:
+                print(
+                    "[ZYCUS_TALISMATIC] PAGE_ERROR "
+                    f"{type(exc).__name__}"
+                )
+
+            time.sleep(DELAY_SECONDS)
+
+    # Verify only two previously observed official job URLs.
+    for job_id in (
+        "JLYSPUJVX",
+        "JLSEKA3V3",
+    ):
+        url = f"{_ZYCUS_BOARD}/{job_id}"
+
+        try:
+            result = limited_get(
+                session,
+                url,
+            )
+
+            print(
+                "[ZYCUS_TALISMATIC] DETAIL "
+                f"id={job_id} "
+                f"status={result['status']} "
+                f"bytes={result['bytes']}"
+            )
+
+        except requests.RequestException as exc:
+            print(
+                "[ZYCUS_TALISMATIC] DETAIL_ERROR "
+                f"id={job_id} "
+                f"{type(exc).__name__}"
+            )
+
+        time.sleep(DELAY_SECONDS)
+
+    print(
+        "[ZYCUS_TALISMATIC] "
+        "authoritative_total=UNKNOWN "
+        "exhaustive_inventory=NO "
+        "adapter_compatibility=NOT_VERIFIED"
+    )
+
+    print("[ZYCUS_TALISMATIC] COMPLETE")
+
+
 def run_integration_batch():
     from research.loader import load_registry
 
@@ -3314,7 +3725,7 @@ def run_integration_batch():
     session.headers.update(HEADERS)
 
     try:
-        _probe_zycus(session)
+        probe_zycus_talismatic(session)
     finally:
         session.close()
 
