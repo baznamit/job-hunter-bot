@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 
 from models.company import (
     Company,
@@ -131,3 +132,110 @@ def test_registry_atlassian_is_disabled():
     assert entries[0].enabled is False
     assert entries[0].provider.type == ProviderType.ATLASSIAN
     assert entries[0].provider.config.detail_limit == 20
+
+
+def test_full_inventory_without_detail_limit():
+    listing = """
+    <a href="/company/careers/details/27346">
+        Software Engineer II
+    </a>
+    <a href="/company/careers/details/25540">
+        Backend Software Engineer II
+    </a>
+    <a href="/company/careers/details/25561">
+        Full Stack Software Engineer
+    </a>
+    """
+
+    def fake_get(url, company):
+        if url.endswith("/all-jobs"):
+            return listing
+
+        job_id = url.rstrip("/").split("/")[-1]
+
+        return f"""
+        <main id="content">
+          <div>
+            <h1>Engineer {job_id}</h1>
+            <span>
+              Engineering | Bengaluru, India
+              | Remote, Remote
+            </span>
+            <a href="https://careers-apac-atlassian.icims.com/jobs/{job_id}/job?mode=apply">
+              Apply for this job
+            </a>
+          </div>
+        </main>
+        """
+
+    with patch.object(
+        AtlassianAdapter,
+        "_get_html",
+        side_effect=fake_get,
+    ):
+        jobs = AtlassianAdapter().fetch_jobs(
+            company(detail_limit=None)
+        )
+
+    assert len(jobs) == 3
+    assert [job.id for job in jobs] == [
+        "27346",
+        "25540",
+        "25561",
+    ]
+
+
+def test_detail_failure_does_not_silently_truncate():
+    listing = """
+    <a href="/company/careers/details/27346">
+        Software Engineer II
+    </a>
+    <a href="/company/careers/details/25540">
+        Backend Software Engineer II
+    </a>
+    """
+
+    def fake_get(url, company):
+        if url.endswith("/all-jobs"):
+            return listing
+
+        if url.endswith("/25540"):
+            raise requests.Timeout("simulated timeout")
+
+        return DETAIL
+
+    with patch.object(
+        AtlassianAdapter,
+        "_get_html",
+        side_effect=fake_get,
+    ):
+        with pytest.raises(
+            ValueError,
+            match="incomplete detail fetch",
+        ):
+            AtlassianAdapter().fetch_jobs(
+                company(detail_limit=None)
+            )
+
+
+def test_detail_limit_remains_available_for_validation():
+    listing = """
+    <a href="/company/careers/details/27346">
+        Software Engineer II
+    </a>
+    <a href="/company/careers/details/25540">
+        Backend Software Engineer II
+    </a>
+    """
+
+    with patch.object(
+        AtlassianAdapter,
+        "_get_html",
+        side_effect=[listing, DETAIL],
+    ) as mock_get:
+        jobs = AtlassianAdapter().fetch_jobs(
+            company(detail_limit=1)
+        )
+
+    assert len(jobs) == 1
+    assert mock_get.call_count == 2

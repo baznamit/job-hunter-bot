@@ -1,6 +1,8 @@
 """Atlassian official careers HTML adapter."""
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
+from time import perf_counter
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -14,6 +16,7 @@ from .base import ProviderAdapter
 _LISTING = "https://www.atlassian.com/company/careers/all-jobs"
 _BASE = "https://www.atlassian.com"
 _TIMEOUT = (8, 20)
+_DETAIL_WORKERS = 4
 
 _JOB_PATH = re.compile(
     r"^/company/careers/details/(\d+)/?$"
@@ -166,39 +169,115 @@ class AtlassianAdapter(ProviderAdapter):
         config = company.provider.config
         listing_url = config.base_url or _LISTING
 
+        started = perf_counter()
+
         listing_html = self._get_html(
             listing_url, company
         )
-        items = self._listing_items(listing_html)
+        all_items = self._listing_items(listing_html)
 
-        if not items:
+        if not all_items:
             raise ValueError(
                 f"{company.name}: zero listing job links"
             )
 
-        limit = config.detail_limit
-        if limit is not None:
-            items = items[:limit]
+        listing_count = len(all_items)
 
-        results = []
-        for item in items:
-            try:
-                detail_html = self._get_html(
-                    item["url"], company
-                )
-                metadata = self._detail_metadata(
-                    detail_html, item["title"]
-                )
-                results.append({
-                    **item,
-                    **metadata,
-                })
-            except (requests.RequestException, ValueError) as exc:
-                print(
-                    f"[ATLASSIAN] DETAIL_FAILED "
-                    f"id={item['id']} "
-                    f"error={type(exc).__name__}: {exc}"
-                )
+        limit = config.detail_limit
+        items = (
+            all_items[:limit]
+            if limit is not None
+            else all_items
+        )
+
+        print(
+            f"[ATLASSIAN] listing_count={listing_count} "
+            f"selected_count={len(items)} "
+            f"detail_limit={limit}"
+        )
+
+        def fetch_detail(item: dict) -> dict:
+            detail_html = self._get_html(
+                item["url"], company
+            )
+
+            metadata = self._detail_metadata(
+                detail_html,
+                item["title"],
+            )
+
+            return {
+                **item,
+                **metadata,
+            }
+
+        results_by_id = {}
+        failures = []
+
+        with ThreadPoolExecutor(
+            max_workers=_DETAIL_WORKERS
+        ) as executor:
+            futures = {
+                executor.submit(fetch_detail, item): item
+                for item in items
+            }
+
+            for future in as_completed(futures):
+                item = futures[future]
+
+                try:
+                    result = future.result()
+
+                    results_by_id[item["id"]] = result
+
+                except (
+                    requests.RequestException,
+                    ValueError,
+                ) as exc:
+                    failures.append(
+                        (
+                            item["id"],
+                            type(exc).__name__,
+                            str(exc),
+                        )
+                    )
+
+        # Restore the official listing order.
+        results = [
+            results_by_id[item["id"]]
+            for item in items
+            if item["id"] in results_by_id
+        ]
+
+        print(
+            f"[ATLASSIAN] detail_success={len(results)} "
+            f"detail_failures={len(failures)} "
+            f"elapsed_seconds="
+            f"{perf_counter() - started:.2f}"
+        )
+
+        for job_id, error_type, message in failures[:10]:
+            print(
+                "[ATLASSIAN] DETAIL_FAILED "
+                f"id={job_id} "
+                f"type={error_type} "
+                f"message={message[:200]}"
+            )
+
+        if failures:
+            raise ValueError(
+                f"{company.name}: incomplete detail fetch; "
+                f"expected={len(items)} "
+                f"received={len(results)} "
+                f"failed={len(failures)}"
+            )
+
+        if len(results) != len(items):
+            raise ValueError(
+                f"{company.name}: detail count mismatch "
+                f"expected={len(items)} "
+                f"received={len(results)}"
+            )
 
         if not results:
             raise ValueError(

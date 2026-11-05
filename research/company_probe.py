@@ -895,13 +895,24 @@ def validate_atlassian_adapter():
         if c.id == "atlassian"
     )
 
+    company = company.model_copy(deep=True)
+
     if company.enabled:
         raise AssertionError(
             "Atlassian must remain disabled"
         )
 
+    # Full-inventory validation only.
+    # Does not modify config/companies.json.
+    company.provider.config.detail_limit = None
+
     adapter = AtlassianAdapter()
     jobs = adapter.fetch_jobs(company)
+
+    print(
+        "[ATLASSIAN_ADAPTER] validation_scope="
+        "FULL_INVENTORY"
+    )
 
     ids = [job.id for job in jobs]
     urls = [str(job.url) for job in jobs]
@@ -1281,6 +1292,7 @@ def run_stale_recovery():
             "[ATLASSIAN_ADAPTER] VALIDATION_FAILED "
             f"{type(exc).__name__}: {exc}"
         )
+        raise
 
     # Avoid repeating previously blocked requests.
     print(
