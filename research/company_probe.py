@@ -1310,6 +1310,288 @@ def run_stale_recovery():
     print("[RECOVERY] No automatic ATS replacement")
 
 
+# ============================================================
+# NEW COMPANY RESEARCH
+# Duck Creek, Baker Hughes, Mphasis
+# Run: python -u -m research.company_probe --new-companies
+# ============================================================
+
+NEW_COMPANY_SOURCES = {
+    "DUCKCREEK": {
+        "tenant": "duckcreek",
+        "cluster": "wd1",
+        "board": "duckcreekcareers",
+    },
+    "BAKERHUGHES": {
+        # Candidate source only; inventory not verified.
+        "tenant": "bakerhughes",
+        "cluster": "wd5",
+        "board": "BakerHughes",
+    },
+}
+
+NEW_COMPANY_PAGES = {
+    "DUCKCREEK_CAREERS": "https://www.duckcreek.com/careers/",
+    "BAKERHUGHES_CAREERS": "https://careers.bakerhughes.com/global/en",
+    "MPHASIS_CAREERS": "https://careers.mphasis.com/home.html",
+    "MPHASIS_HOTJOBS": "https://www2.mphasis.com/hot-jobs.html",
+    "MPHASIS_RIPPLEHIRE": "https://mphasis.ripplehire.com/candidate/",
+}
+
+NEW_COMPANY_ROLE_RE = re.compile(
+    r"java|spring|backend|back.end|full.stack|"
+    r"software engineer|developer|microservices",
+    re.I,
+)
+
+NEW_COMPANY_INDIA_RE = re.compile(
+    r"india|mumbai|navi mumbai|bengaluru|"
+    r"bangalore|hyderabad|pune|chennai|noida",
+    re.I,
+)
+
+
+def probe_new_workday(name, config, session):
+    """Inspect two public CXS pages; do not change registry."""
+    tenant = config["tenant"]
+    cluster = config["cluster"]
+    board = config["board"]
+
+    base = (
+        f"https://{tenant}.{cluster}.myworkdayjobs.com"
+    )
+    endpoint = (
+        f"{base}/wday/cxs/{tenant}/{board}/jobs"
+    )
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": base,
+        "Referer": f"{base}/en-US/{board}",
+    }
+
+    page_paths = {}
+    reported_totals = []
+
+    print(f"\n[{name}] WORKDAY_CANDIDATE={endpoint}")
+
+    for offset in (0, 20):
+        try:
+            response = session.post(
+                endpoint,
+                json={
+                    "appliedFacets": {},
+                    "limit": 20,
+                    "offset": offset,
+                    "searchText": "",
+                },
+                headers=headers,
+                timeout=TIMEOUT,
+            )
+
+            print(
+                f"[{name}] offset={offset} "
+                f"status={response.status_code} "
+                f"content_type="
+                f"{response.headers.get('Content-Type')!r}"
+            )
+
+            response.raise_for_status()
+
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError(
+                    "Expected Workday JSON object"
+                )
+
+            postings = data.get("jobPostings")
+            if not isinstance(postings, list):
+                raise ValueError(
+                    "Missing jobPostings list"
+                )
+
+            paths = [
+                str(item["externalPath"])
+                for item in postings
+                if isinstance(item, dict)
+                and item.get("externalPath")
+            ]
+
+            page_paths[offset] = set(paths)
+
+            total = data.get("total")
+            reported_totals.append(total)
+
+            print(
+                f"[{name}] offset={offset} "
+                f"total={total!r} "
+                f"count={len(postings)} "
+                f"unique_paths={len(set(paths))}"
+            )
+
+            india_count = 0
+            relevant_count = 0
+
+            for item in postings:
+                title = str(item.get("title", ""))
+                location = str(
+                    item.get("locationsText", "")
+                )
+
+                if NEW_COMPANY_INDIA_RE.search(location):
+                    india_count += 1
+
+                    if NEW_COMPANY_ROLE_RE.search(title):
+                        relevant_count += 1
+
+            print(
+                f"[{name}] offset={offset} "
+                f"india_observed={india_count} "
+                f"india_tech_observed={relevant_count}"
+            )
+
+            for item in postings[:5]:
+                print(
+                    f"[{name}] SAMPLE "
+                    f"title={item.get('title')!r} "
+                    f"location={item.get('locationsText')!r} "
+                    f"path={item.get('externalPath')!r}"
+                )
+
+        except (
+            requests.RequestException,
+            ValueError,
+        ) as exc:
+            print(
+                f"[{name}] offset={offset} "
+                f"ERROR={type(exc).__name__}: {exc}"
+            )
+
+    if 0 in page_paths and 20 in page_paths:
+        overlap = page_paths[0] & page_paths[20]
+
+        print(
+            f"[{name}] page_overlap={len(overlap)} "
+            f"distinct_pages="
+            f"{page_paths[0] != page_paths[20]}"
+        )
+
+    print(
+        f"[{name}] reported_totals={reported_totals} "
+        "exhaustive_inventory=NO "
+        "adapter_validation=PENDING"
+    )
+
+
+def probe_new_company_page(name, url, session):
+    """Inspect official public pages without guessing APIs."""
+    print(f"\n[{name}] requested={url}")
+
+    try:
+        result = limited_get(session, url)
+
+        print(
+            f"[{name}] status={result['status']} "
+            f"final={result['url']} "
+            f"type={result['type']!r} "
+            f"bytes={result['bytes']} "
+            f"truncated={result['truncated']} "
+            f"redirects={result['redirects']}"
+        )
+
+        kind = classify_page(result)
+        print(f"[{name}] classification={kind}")
+
+        if kind != "HTML":
+            print(
+                f"[{name}] inventory=UNVERIFIED"
+            )
+            return
+
+        info = inspect_html(
+            result["content"],
+            result["url"],
+        )
+
+        print(
+            f"[{name}] title={info['title']!r} "
+            f"links={len(info['links'])} "
+            f"job_candidates={len(info['job_links'])} "
+            f"scripts={len(info['scripts'])} "
+            f"jsonld={len(info['json_ld'])}"
+        )
+
+        for link in info["job_links"][:10]:
+            print(f"[{name}] JOB_CANDIDATE {link}")
+
+        # Officially linked recruitment destinations only.
+        ats_links = [
+            link
+            for link in info["links"]
+            if any(
+                token in (
+                    urlparse(link).hostname or ""
+                ).lower()
+                for token in (
+                    "myworkdayjobs.com",
+                    "ripplehire.com",
+                    "icims.com",
+                    "greenhouse.io",
+                    "lever.co",
+                    "ashbyhq.com",
+                )
+            )
+        ]
+
+        for link in ats_links[:10]:
+            print(f"[{name}] ATS_LINK {link}")
+
+        for entry in info["json_ld"][:5]:
+            if isinstance(entry, dict):
+                print(
+                    f"[{name}] JSONLD "
+                    f"type={entry.get('@type')!r}"
+                )
+
+        print(
+            f"[{name}] authoritative_total=UNKNOWN "
+            "pagination_verified=NO "
+            "exhaustive_inventory=NO"
+        )
+
+    except requests.RequestException as exc:
+        print(
+            f"[{name}] REQUEST_ERROR "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+
+def run_new_companies():
+    print("=" * 70)
+    print("NEW COMPANY ATS RESEARCH - READ ONLY")
+    print("=" * 70)
+
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    # Validate Workday candidate endpoints.
+    for name, config in NEW_COMPANY_SOURCES.items():
+        probe_new_workday(name, config, session)
+        time.sleep(DELAY_SECONDS)
+
+    # Inspect official careers and recruitment pages.
+    for name, url in NEW_COMPANY_PAGES.items():
+        probe_new_company_page(name, url, session)
+        time.sleep(DELAY_SECONDS)
+
+    print("\n[NEW_COMPANIES] COMPLETE")
+    print("[NEW_COMPANIES] No registry changes")
+    print("[NEW_COMPANIES] No state writes")
+    print("[NEW_COMPANIES] No Telegram notifications")
+    print("[NEW_COMPANIES] No automatic ATS activation")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1322,10 +1604,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Probe Postman, Atlassian, CoinDCX and Zepto",
     )
+    parser.add_argument(
+        "--new-companies",
+        action="store_true",
+        help="Probe Duck Creek, Baker Hughes and Mphasis",
+    )
 
     args = parser.parse_args()
 
-    if args.stale_recovery:
+    if args.new_companies:
+        run_new_companies()
+    elif args.stale_recovery:
         run_stale_recovery()
     else:
         main()

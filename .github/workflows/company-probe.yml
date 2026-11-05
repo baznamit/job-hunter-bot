@@ -2,6 +2,16 @@ name: Company ATS Probe
 
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        description: "Select research probe"
+        required: true
+        type: choice
+        default: new-companies
+        options:
+          - new-companies
+          - stale-recovery
+          - legacy
 
 permissions:
   contents: read
@@ -33,5 +43,22 @@ jobs:
       # - name: Validate Deloitte and Wissen pre-activation identities
       #   run: python -u -m research.new_company_stage4_probe
 
-      - name: Probe stale ATS recovery candidates
-        run: python -u -m research.company_probe --stale-recovery
+      - name: Run selected ATS research probe
+        env:
+          PROBE_MODE: ${{ inputs.probe }}
+        run: |
+          case "$PROBE_MODE" in
+            new-companies)
+              python -u -m research.company_probe --new-companies
+              ;;
+            stale-recovery)
+              python -u -m research.company_probe --stale-recovery
+              ;;
+            legacy)
+              python -u -m research.company_probe
+              ;;
+            *)
+              echo "Unknown probe mode: $PROBE_MODE"
+              exit 1
+              ;;
+          esac
