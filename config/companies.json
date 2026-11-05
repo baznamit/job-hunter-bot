@@ -1247,6 +1247,56 @@
       "notes": "First-party Cognizant XML jobs feed verified from GitHub Actions. Structured job records expose requisition ID, title, posting date, canonical URL, city, state and country."
     },
     {
+      "id": "deloitte_india",
+      "name": "Deloitte India",
+      "category": "Product",
+      "priority": 1,
+      "enabled": false,
+      "career_page": "https://southasiacareers.deloitte.com/",
+      "provider": {
+        "type": "successfactors",
+        "status": "partial",
+        "config": {
+          "base_url": "https://southasiacareers.deloitte.com",
+          "listing_path": "/go/Deloitte-India/718244/",
+          "page_size": 25,
+          "pagination_mode": "path",
+          "search_params": {
+            "q": "",
+            "title": "Java"
+          },
+          "job_link_selector": "#searchresults tr.data-row td.colTitle a[href*=\"/job/\"]"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Deloitte India SuccessFactors Java search. Result-row selector verified from GitHub Actions HTML diagnostics. Full adapter validation pending."
+    },
+    {
+      "id": "wissen_successfactors",
+      "name": "Wissen Technology",
+      "category": "Product",
+      "priority": 1,
+      "enabled": false,
+      "career_page": "https://jobs.wissen.com/",
+      "provider": {
+        "type": "successfactors",
+        "status": "partial",
+        "config": {
+          "base_url": "https://jobs.wissen.com",
+          "listing_path": "/search/",
+          "page_size": 25,
+          "pagination_mode": "path",
+          "job_link_selector": "#searchresults tr.data-row td.colTitle a[href*=\"/job/\"]"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Separate Wissen SuccessFactors source. Unfiltered search selected because Java keyword filtering remains unverified. Existing Wissen Zoho Recruit integration remains enabled. Full adapter validation pending."
+    },
+    {
       "id": "wissen",
       "name": "Wissen Technology",
       "category": "Product",

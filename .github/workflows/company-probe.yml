@@ -26,3 +26,6 @@ jobs:
 
       - name: Run new company stage 2 probe
         run: python -u -m research.new_company_stage2_probe
+
+      - name: Validate Deloitte and Wissen SuccessFactors adapters
+        run: python -u -m research.new_company_stage3_probe
