@@ -25,6 +25,16 @@ _AMBIGUOUS_LOCATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SINGLE_LOCATION_CODE_RE = re.compile(
+    r"^IN-(?:"
+    r"(?:MH|Maharashtra)-MUMBAI(?:-|$)"
+    r"|NAVI[- ]MUMBAI(?:-|$)"
+    r"|(?:KA|Karnataka)-(?:BANGALORE|BENGALURU)(?:-|$)"
+    r"|(?:MH|Maharashtra)-Pune(?:-|$)"
+    r")",
+    re.IGNORECASE,
+)
+
 class WorkdayAdapter(ProviderAdapter):
 
     provider_name = "Workday"
@@ -100,8 +110,28 @@ class WorkdayAdapter(ProviderAdapter):
 
         if not country_code and isinstance(country_data, dict):
             descriptor = country_data.get("descriptor")
-            if descriptor == "India":
+            if (
+                isinstance(descriptor, str)
+                and descriptor.casefold() == "india"
+            ):
                 country_code = "IN"
+
+        # A conflicting country code must never be interpreted
+        # as India, even when the location text begins with IN-.
+        if isinstance(country_code, str):
+            country_code = country_code.upper()
+
+        if (
+            country_code == "IN"
+            and isinstance(country_data, dict)
+        ):
+            descriptor = country_data.get("descriptor")
+            if (
+                isinstance(descriptor, str)
+                and descriptor.strip()
+                and descriptor.casefold() != "india"
+            ):
+                return None
 
         locations = []
 
@@ -180,7 +210,63 @@ class WorkdayAdapter(ProviderAdapter):
             if not isinstance(data, dict):
                 return None
 
-            return self._locations_from_detail(data)
+            resolved = self._locations_from_detail(data)
+
+            original_location = str(
+                posting.get("locationsText") or ""
+            ).strip()
+
+            if _SINGLE_LOCATION_CODE_RE.match(original_location):
+                info = data.get("jobPostingInfo")
+
+                if not isinstance(info, dict):
+                    return None
+
+                requisition = info.get(
+                    "jobRequisitionLocation"
+                ) or {}
+
+                country = (
+                    requisition.get("country")
+                    if isinstance(requisition, dict)
+                    else None
+                )
+
+                alpha2 = (
+                    country.get("alpha2Code")
+                    if isinstance(country, dict)
+                    else None
+                )
+
+                descriptor_data = info.get("country")
+                descriptor = (
+                    descriptor_data.get("descriptor")
+                    if isinstance(descriptor_data, dict)
+                    else None
+                )
+
+                if alpha2 is not None and (
+                    not isinstance(alpha2, str)
+                    or alpha2.upper() != "IN"
+                ):
+                    return None
+
+                if descriptor is not None and (
+                    not isinstance(descriptor, str)
+                    or descriptor.casefold() != "india"
+                ):
+                    return None
+
+                if not (
+                    alpha2 == "IN"
+                    or (
+                        isinstance(descriptor, str)
+                        and descriptor.casefold() == "india"
+                    )
+                ):
+                    return None
+
+            return resolved
 
         except (
             requests.RequestException,
@@ -208,7 +294,15 @@ class WorkdayAdapter(ProviderAdapter):
                 posting.get("locationsText") or ""
             )
 
-            if not _AMBIGUOUS_LOCATION_RE.fullmatch(location):
+            is_multi_location = bool(
+                _AMBIGUOUS_LOCATION_RE.fullmatch(location)
+            )
+
+            is_site_code = bool(
+                _SINGLE_LOCATION_CODE_RE.match(location.strip())
+            )
+
+            if not (is_multi_location or is_site_code):
                 continue
 
             board = posting.get("_workday_board")

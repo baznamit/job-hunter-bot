@@ -2226,6 +2226,277 @@ def run_activation_check():
         )
 
 
+# ============================================================
+# CRISIL / CLOVER INFOTECH / TECH MAHINDRA
+# Consolidated public careers research
+# ============================================================
+
+COMPANY_BATCH_TARGETS = {
+    "CRISIL": [
+        "https://www.crisil.com/en/home/careers.html",
+        "https://career.crisil.com/crisil/",
+    ],
+    "CLOVER": [
+        "https://www.cloverinfotech.com/careers/",
+        "https://www.cloverinfotech.com/job-openings/",
+        "https://www.cloverinfotech.com/jobs/",
+    ],
+    "TECHMAHINDRA": [
+        "https://careers.techmahindra.com/",
+        "https://careers.techmahindra.com/CurrentOpportunity.aspx",
+    ],
+}
+
+_COMPANY_BATCH_ROLE_RE = re.compile(
+    r"java|spring|backend|back.end|full.stack|"
+    r"software engineer|software developer|react|"
+    r"microservices|application developer",
+    re.I,
+)
+
+_COMPANY_BATCH_INDIA_RE = re.compile(
+    r"india|mumbai|navi.mumbai|bengaluru|"
+    r"bangalore|hyderabad|pune|chennai|noida",
+    re.I,
+)
+
+
+def _company_batch_page(name, url, session):
+    """Inspect a public careers page with bounded output."""
+    print(f"\n[{name}] PAGE={url}")
+
+    try:
+        result = limited_get(session, url)
+    except requests.RequestException as exc:
+        print(
+            f"[{name}] REQUEST_FAILED "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+    print(
+        f"[{name}] status={result['status']} "
+        f"final_url={result['url']} "
+        f"bytes={result['bytes']} "
+        f"truncated={result['truncated']}"
+    )
+
+    if (
+        result["status"] != 200
+        or result["truncated"]
+        or classify_page(result) != "HTML"
+    ):
+        print(f"[{name}] INVENTORY_NOT_VERIFIED")
+        return None
+
+    soup = BeautifulSoup(
+        result["content"],
+        "html.parser",
+    )
+
+    links = {}
+    pagination = []
+    ats_links = []
+
+    for anchor in soup.select("a[href]"):
+        href = urljoin(
+            result["url"],
+            anchor.get("href", ""),
+        )
+
+        parsed = urlparse(href)
+
+        if parsed.scheme not in ("http", "https"):
+            continue
+
+        title = re.sub(
+            r"\s+",
+            " ",
+            anchor.get_text(" ", strip=True),
+        ).strip()
+
+        if not title:
+            continue
+
+        if _COMPANY_BATCH_ROLE_RE.search(title):
+            links[href] = title
+
+        if re.search(
+            r"^(?:next|[2-9]|\d{2,}|last)$",
+            title,
+            re.I,
+        ):
+            pagination.append(href)
+
+        if any(
+            marker in (parsed.hostname or "").lower()
+            for marker in (
+                "myworkdayjobs.com",
+                "successfactors.com",
+                "greenhouse.io",
+                "lever.co",
+                "icims.com",
+                "ripplehire.com",
+                "smartrecruiters.com",
+            )
+        ):
+            ats_links.append(href)
+
+    print(
+        f"[{name}] role_link_candidates={len(links)} "
+        f"pagination_links={len(set(pagination))} "
+        f"ats_links={len(set(ats_links))}"
+    )
+
+    for href, title in list(links.items())[:12]:
+        print(
+            f"[{name}] ROLE_CANDIDATE "
+            f"title={title!r} url={href}"
+        )
+
+    for href in list(dict.fromkeys(ats_links))[:8]:
+        print(f"[{name}] ATS_LINK={href}")
+
+    # Detect structured data without dumping scripts.
+    scripts = soup.select("script")
+
+    markers = (
+        "__NEXT_DATA__",
+        "JobPosting",
+        "jobPosting",
+        "requisition",
+        "jobOpenings",
+        "__VIEWSTATE",
+        "__EVENTVALIDATION",
+        "wp-json",
+    )
+
+    page_text = str(soup)
+
+    for marker in markers:
+        if marker.casefold() in page_text.casefold():
+            print(
+                f"[{name}] STRUCTURE_MARKER={marker}"
+            )
+
+    print(
+        f"[{name}] scripts={len(scripts)} "
+        f"pagination_verified=NO "
+        f"authoritative_total=UNKNOWN"
+    )
+
+    return {
+        "url": result["url"],
+        "links": links,
+        "pagination": list(
+            dict.fromkeys(pagination)
+        ),
+        "soup": soup,
+    }
+
+
+def run_company_batch():
+    print("=" * 70)
+    print("THREE COMPANY ATS RESEARCH - READ ONLY")
+    print("=" * 70)
+
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    try:
+        for name, urls in COMPANY_BATCH_TARGETS.items():
+            print(f"\n[{name}] RESEARCH_START")
+
+            discovered = {}
+            pages = []
+
+            for url in urls:
+                page = _company_batch_page(
+                    name,
+                    url,
+                    session,
+                )
+
+                if page is not None:
+                    pages.append(page)
+                    discovered.update(page["links"])
+
+                time.sleep(DELAY_SECONDS)
+
+            # Follow only observed same-host pagination links.
+            # Never fabricate page query parameters.
+            visited = {
+                page["url"]
+                for page in pages
+            }
+
+            extra_pages = []
+
+            for page in pages:
+                source_host = urlparse(
+                    page["url"]
+                ).hostname
+
+                for next_url in page["pagination"]:
+                    if next_url in visited:
+                        continue
+
+                    if urlparse(next_url).hostname != source_host:
+                        continue
+
+                    visited.add(next_url)
+                    extra_pages.append(next_url)
+
+                    if len(extra_pages) >= 3:
+                        break
+
+                if len(extra_pages) >= 3:
+                    break
+
+            for url in extra_pages:
+                page = _company_batch_page(
+                    name,
+                    url,
+                    session,
+                )
+
+                if page is not None:
+                    discovered.update(page["links"])
+
+                time.sleep(DELAY_SECONDS)
+
+            india_candidates = [
+                (url, title)
+                for url, title in discovered.items()
+                if (
+                    _COMPANY_BATCH_INDIA_RE.search(title)
+                    or _COMPANY_BATCH_INDIA_RE.search(url)
+                )
+            ]
+
+            print(
+                f"[{name}] SUMMARY "
+                f"pages_inspected={len(pages) + len(extra_pages)} "
+                f"distinct_role_links={len(discovered)} "
+                f"india_hints={len(india_candidates)} "
+                "exhaustive_inventory=NO"
+            )
+
+            print(
+                f"[{name}] DECISION=PROBE_REQUIRED "
+                "unless authoritative inventory "
+                "and pagination were independently verified"
+            )
+
+    finally:
+        session.close()
+
+    print("\n[COMPANY_BATCH] COMPLETE")
+    print("[COMPANY_BATCH] No registry changes")
+    print("[COMPANY_BATCH] No state writes")
+    print("[COMPANY_BATCH] No Telegram notifications")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -2248,10 +2519,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Check Duck Creek and Baker Hughes activation readiness",
     )
+    parser.add_argument(
+        "--company-batch",
+        action="store_true",
+        help="Research CRISIL, Clover Infotech and Tech Mahindra",
+    )
 
     args = parser.parse_args()
 
-    if args.activation_check:
+    if args.company_batch:
+        run_company_batch()
+    elif args.activation_check:
         run_activation_check()
     elif args.new_companies:
         run_new_companies()

@@ -12,6 +12,7 @@ on:
           - new-companies
           - stale-recovery
           - activation-check
+          - company-batch
           - legacy
 
 permissions:
@@ -57,6 +58,9 @@ jobs:
               ;;
             activation-check)
               python -u -m research.company_probe --activation-check
+              ;;
+            company-batch)
+              python -u -m research.company_probe --company-batch
               ;;
             legacy)
               python -u -m research.company_probe
