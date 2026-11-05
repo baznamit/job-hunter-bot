@@ -22,7 +22,7 @@ import re
 import time
 from collections import Counter
 from html import unescape
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -2261,6 +2261,224 @@ _COMPANY_BATCH_INDIA_RE = re.compile(
 )
 
 
+def inspect_company_page_structure(
+    name: str,
+    content: str,
+    base_url: str,
+) -> dict:
+    """Inspect public careers HTML without submitting forms."""
+    soup = BeautifulSoup(content, "html.parser")
+
+    result = {
+        "forms": [],
+        "tables": [],
+        "pagination": [],
+        "job_references": [],
+        "scripts": [],
+        "embedded_markers": [],
+    }
+
+    # 1. Forms and public field names.
+    for form in soup.select("form")[:8]:
+        action = urljoin(
+            base_url,
+            form.get("action") or base_url,
+        )
+        parsed_action = urlparse(action)
+        safe_action = parsed_action._replace(
+            query="",
+            fragment="",
+        ).geturl()
+
+        fields = []
+        hidden_names = []
+
+        for control in form.select(
+            "input[name], select[name], textarea[name]"
+        ):
+            field_name = control.get("name", "")
+            field_type = control.get(
+                "type", control.name
+            ).lower()
+
+            if field_type == "hidden":
+                hidden_names.append(field_name)
+            else:
+                fields.append({
+                    "name": field_name,
+                    "type": field_type,
+                })
+
+        result["forms"].append({
+            "action": safe_action,
+            "method": form.get(
+                "method", "GET"
+            ).upper(),
+            "fields": fields[:30],
+            "hidden_names": hidden_names[:30],
+        })
+
+    # 2. Table structure and bounded row samples.
+    for table in soup.select("table")[:12]:
+        headers = [
+            th.get_text(" ", strip=True)
+            for th in table.select("th")
+        ][:15]
+
+        rows = []
+
+        for tr in table.select("tr")[:6]:
+            cells = [
+                re.sub(
+                    r"\s+", " ",
+                    td.get_text(" ", strip=True),
+                )[:120]
+                for td in tr.select("td")
+            ]
+
+            if cells:
+                rows.append(cells[:12])
+
+        if headers or rows:
+            result["tables"].append({
+                "id": table.get("id", ""),
+                "headers": headers,
+                "rows": rows,
+                "row_count_in_html": len(
+                    table.select("tr")
+                ),
+            })
+
+    # 3. Real navigation links and ASP.NET postbacks.
+    for anchor in soup.select("a")[:500]:
+        label = re.sub(
+            r"\s+", " ",
+            anchor.get_text(" ", strip=True),
+        )[:100]
+
+        href = anchor.get("href", "")
+        onclick = anchor.get("onclick", "")
+
+        is_pagination = bool(
+            re.fullmatch(
+                r"(?:\d+|next|previous|prev|last|first|»|«)",
+                label,
+                re.I,
+            )
+            or "__doPostBack" in href
+            or "__doPostBack" in onclick
+        )
+
+        if not is_pagination:
+            continue
+
+        result["pagination"].append({
+            "label": label,
+            "href": href[:250],
+            "onclick": onclick[:250],
+        })
+
+        if len(result["pagination"]) >= 25:
+            break
+
+    # 4. Job reference patterns in visible page text.
+    visible = soup.get_text(" ", strip=True)
+
+    patterns = (
+        r"\b(?:Job\s*Reference|Job\s*ID|Req(?:uisition)?\s*ID)"
+        r"\s*[:#-]?\s*([A-Za-z0-9_-]{4,30})",
+    )
+
+    result["job_references"] = list(
+        dict.fromkeys(
+            re.findall(patterns[0], visible, re.I)
+        )
+    )[:25]
+
+    # 5. Script URLs only, not script contents.
+    for script in soup.select("script[src]")[:40]:
+        src = urljoin(
+            base_url, script.get("src", "")
+        )
+
+        if urlparse(src).scheme in ("http", "https"):
+            parsed = urlparse(src)
+
+            safe_src = parsed._replace(
+                query="",
+                fragment="",
+            ).geturl()
+
+            result["scripts"].append(safe_src)
+
+    # 6. Identify embedded-data mechanisms.
+    html = content.lower()
+
+    markers = {
+        "ASP_NET_VIEWSTATE": "__viewstate",
+        "ASP_NET_EVENTVALIDATION": "__eventvalidation",
+        "NEXT_DATA": "__next_data__",
+        "JSON_LD": "application/ld+json",
+        "WORDPRESS_API": "wp-json",
+        "GRAPHQL": "graphql",
+        "JOB_POSTING": "jobposting",
+        "RECRUITMENT_API": "api/jobs",
+    }
+
+    result["embedded_markers"] = [
+        key
+        for key, marker in markers.items()
+        if marker in html
+    ]
+
+    print(
+        f"[{name}] STRUCTURE "
+        f"forms={len(result['forms'])} "
+        f"tables={len(result['tables'])} "
+        f"pagination_controls={len(result['pagination'])} "
+        f"job_references={len(result['job_references'])} "
+        f"script_refs={len(result['scripts'])}"
+    )
+
+    for form in result["forms"]:
+        print(
+            f"[{name}] FORM "
+            f"method={form['method']} "
+            f"action={form['action']} "
+            f"fields={form['fields']!r} "
+            f"hidden_names={form['hidden_names']!r}"
+        )
+
+    for table in result["tables"][:5]:
+        print(
+            f"[{name}] TABLE "
+            f"id={table['id']!r} "
+            f"headers={table['headers']!r} "
+            f"rows={table['rows'][:3]!r} "
+            f"html_rows={table['row_count_in_html']}"
+        )
+
+    for control in result["pagination"][:15]:
+        print(
+            f"[{name}] PAGE_CONTROL {control!r}"
+        )
+
+    for reference in result["job_references"][:15]:
+        print(
+            f"[{name}] JOB_REFERENCE {reference}"
+        )
+
+    for src in result["scripts"][:12]:
+        print(f"[{name}] SCRIPT {src}")
+
+    print(
+        f"[{name}] EMBEDDED_MARKERS="
+        f"{result['embedded_markers']!r}"
+    )
+
+    return result
+
+
 def _company_batch_page(name, url, session):
     """Inspect a public careers page with bounded output."""
     print(f"\n[{name}] PAGE={url}")
@@ -2293,6 +2511,15 @@ def _company_batch_page(name, url, session):
         result["content"],
         "html.parser",
     )
+
+    structure = None
+
+    if name in ("CRISIL", "TECHMAHINDRA"):
+        structure = inspect_company_page_structure(
+            name,
+            result["content"],
+            result["url"],
+        )
 
     links = {}
     pagination = []
@@ -2392,6 +2619,7 @@ def _company_batch_page(name, url, session):
             dict.fromkeys(pagination)
         ),
         "soup": soup,
+        "structure": structure,
     }
 
 
@@ -2406,6 +2634,14 @@ def run_company_batch():
     try:
         for name, urls in COMPANY_BATCH_TARGETS.items():
             print(f"\n[{name}] RESEARCH_START")
+
+            if name == "CLOVER":
+                print(
+                    "[CLOVER] SKIPPED "
+                    "reason=HTTP_403_ON_ALL_OFFICIAL_SOURCES "
+                    "status=UNRESOLVED"
+                )
+                continue
 
             discovered = {}
             pages = []
@@ -2426,7 +2662,7 @@ def run_company_batch():
             # Follow only observed same-host pagination links.
             # Never fabricate page query parameters.
             visited = {
-                page["url"]
+                urldefrag(page["url"])[0]
                 for page in pages
             }
 
@@ -2438,14 +2674,16 @@ def run_company_batch():
                 ).hostname
 
                 for next_url in page["pagination"]:
-                    if next_url in visited:
+                    normalized_url, _ = urldefrag(next_url)
+
+                    if normalized_url in visited:
                         continue
 
-                    if urlparse(next_url).hostname != source_host:
+                    if urlparse(normalized_url).hostname != source_host:
                         continue
 
-                    visited.add(next_url)
-                    extra_pages.append(next_url)
+                    visited.add(normalized_url)
+                    extra_pages.append(normalized_url)
 
                     if len(extra_pages) >= 3:
                         break
