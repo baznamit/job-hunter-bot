@@ -4,6 +4,11 @@
     "last_failure": "2026-11-05T04:44:03.867988+00:00",
     "retry_after": "2026-11-08T04:44:03.867988+00:00"
   },
+  "capgemini": {
+    "failures": 1,
+    "last_failure": "2026-11-13T22:44:24.431496+00:00",
+    "retry_after": "2026-11-14T04:44:24.431496+00:00"
+  },
   "coindcx": {
     "failures": 26,
     "last_failure": "2026-11-11T02:44:35.735845+00:00",
@@ -13,6 +18,11 @@
     "failures": 1,
     "last_failure": "2026-11-13T16:46:03.844050+00:00",
     "retry_after": "2026-11-13T22:46:03.844050+00:00"
+  },
+  "ltmindtree": {
+    "failures": 1,
+    "last_failure": "2026-11-13T22:44:26.550768+00:00",
+    "retry_after": "2026-11-14T04:44:26.550768+00:00"
   },
   "wissen_successfactors": {
     "failures": 1,
