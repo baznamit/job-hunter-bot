@@ -9,6 +9,16 @@
     "last_failure": "2026-11-11T02:44:35.735845+00:00",
     "retry_after": "2026-11-14T02:44:35.735845+00:00"
   },
+  "deloitte_india": {
+    "failures": 1,
+    "last_failure": "2026-11-13T16:46:03.844050+00:00",
+    "retry_after": "2026-11-13T22:46:03.844050+00:00"
+  },
+  "wissen_successfactors": {
+    "failures": 1,
+    "last_failure": "2026-11-13T16:46:05.881258+00:00",
+    "retry_after": "2026-11-13T22:46:05.881258+00:00"
+  },
   "zepto": {
     "failures": 26,
     "last_failure": "2026-11-11T02:44:35.720249+00:00",
