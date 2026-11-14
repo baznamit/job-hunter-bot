@@ -19,6 +19,7 @@ Run:
 
 import json
 import re
+import sys
 import time
 from collections import Counter
 from html import unescape
@@ -4913,6 +4914,326 @@ def run_enterprise_batch():
     print("[ENTERPRISE_BATCH] No Telegram notifications")
 
 
+# ============================================================
+# WORKDAY HEALTH
+# Small, read-only Workday diagnostics.  This deliberately does not use
+# WorkdayAdapter.fetch_jobs(): that method paginates the inventory and enriches
+# every ambiguous location.
+# ============================================================
+
+WORKDAY_HEALTH_TIMEOUT = (5, 15)
+WORKDAY_HEALTH_BUDGET_SECONDS = 90
+WORKDAY_HEALTH_DELAY_SECONDS = 0.2
+WORKDAY_HEALTH_MAX_BODY_BYTES = 2_000_000
+WORKDAY_HEALTH_PREVIEW_BYTES = 300
+WORKDAY_HEALTH_ACCESS_MARKERS = (
+    "captcha",
+    "access denied",
+    "verify you are human",
+    "cloudflare challenge",
+    "security challenge",
+)
+
+
+def _workday_health_boards(company):
+    config = company.provider.config
+    boards = list(config.boards)
+    if not boards and config.board:
+        boards = [config.board]
+    return boards
+
+
+def _workday_health_url(company, board):
+    config = company.provider.config
+    base = (
+        f"https://{config.tenant}.{config.cluster}.myworkdayjobs.com"
+    )
+    return f"{base}/wday/cxs/{config.tenant}/{board}/jobs"
+
+
+def _workday_health_headers(company, board):
+    config = company.provider.config
+    base = (
+        f"https://{config.tenant}.{config.cluster}.myworkdayjobs.com"
+    )
+    return {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": base,
+        "Referer": f"{base}/en-US/{board}",
+    }
+
+
+def _workday_health_preview(body):
+    return re.sub(r"\s+", " ", body)[:WORKDAY_HEALTH_PREVIEW_BYTES]
+
+
+def _workday_health_evidence(response, body, parsed, error=None, byte_length=None):
+    content_type = response.headers.get("Content-Type", "")
+    evidence = {
+        "status": response.status_code,
+        "final_url": response.url,
+        "redirects": [
+            {
+                "status": item.status_code,
+                "location": item.headers.get("Location", ""),
+            }
+            for item in response.history
+        ],
+        "content_type": content_type,
+        "bytes": len(body) if byte_length is None else byte_length,
+        "retry_after": response.headers.get("Retry-After"),
+        "json": "valid" if parsed is not None else "not-json",
+        "top_level_keys": (
+            sorted(parsed.keys()) if isinstance(parsed, dict) else []
+        ),
+    }
+    if parsed is None:
+        evidence["preview"] = _workday_health_preview(body)
+    if error is not None:
+        evidence["error"] = f"{type(error).__name__}: {error}"
+    return evidence
+
+
+def _workday_health_response(response):
+    content = response.content
+    raw = content[:WORKDAY_HEALTH_MAX_BODY_BYTES]
+    encoding = response.encoding or "utf-8"
+    body = raw.decode(encoding, errors="replace")
+    parsed = None
+    error = None
+    if body:
+        try:
+            parsed = json.loads(body)
+        except (TypeError, ValueError) as exc:
+            error = exc
+    else:
+        error = ValueError("empty response body")
+    return _workday_health_evidence(
+        response, body, parsed, error, byte_length=len(content)
+    ), parsed
+
+
+def _workday_health_print_evidence(prefix, evidence):
+    redirect_chain = ";".join(
+        f"{item['status']}->{item['location']}"
+        for item in evidence["redirects"]
+    ) or "none"
+    line = (
+        f"{prefix} status={evidence['status']} "
+        f"final_url={evidence['final_url']} "
+        f"redirects={redirect_chain} "
+        f"content_type={evidence['content_type']!r} "
+        f"bytes={evidence['bytes']} "
+        f"retry_after={evidence['retry_after']!r} "
+        f"json={evidence['json']} "
+        f"top_level_keys={evidence['top_level_keys']}"
+    )
+    if "preview" in evidence:
+        line += f" preview={evidence['preview']!r}"
+    if "error" in evidence:
+        line += f" error={evidence['error']}"
+    print(line)
+
+
+def _workday_health_request(session, method, url, **kwargs):
+    response = getattr(session, method)(url, **kwargs)
+    evidence, parsed = _workday_health_response(response)
+    return response, evidence, parsed
+
+
+def _workday_health_should_stop_host(response, evidence):
+    if response.status_code in (403, 429):
+        return True
+    preview = evidence.get("preview", "").casefold()
+    return any(marker in preview for marker in WORKDAY_HEALTH_ACCESS_MARKERS)
+
+
+def _workday_health_detail_candidates(postings):
+    from src.providers.workday import (
+        _AMBIGUOUS_LOCATION_RE,
+        _SINGLE_LOCATION_CODE_RE,
+    )
+
+    candidates = []
+    for posting in postings:
+        location = str(posting.get("locationsText") or "").strip()
+        if (
+            _AMBIGUOUS_LOCATION_RE.fullmatch(location)
+            or _SINGLE_LOCATION_CODE_RE.match(location)
+        ):
+            candidates.append(posting)
+        if len(candidates) == 3:
+            break
+    return candidates
+
+
+def _workday_health_detail_url(company, board, posting):
+    config = company.provider.config
+    base = (
+        f"https://{config.tenant}.{config.cluster}.myworkdayjobs.com"
+    )
+    return (
+        f"{base}/wday/cxs/{config.tenant}/{board}"
+        f"{posting['externalPath']}"
+    )
+
+
+def _workday_health_remaining(summary, reason):
+    summary.append({"status": "NOT_RUN", "reason": reason})
+
+
+def run_workday_health(*, session=None, budget_seconds=WORKDAY_HEALTH_BUDGET_SECONDS):
+    """Run bounded, sequential Workday listing/detail diagnostics."""
+    from research.loader import load_registry
+    from src.providers.workday import WorkdayAdapter
+    from models.company import ProviderType
+
+    started_at = time.time()
+    deadline = time.monotonic() + budget_seconds
+    registry = load_registry()
+    session = session or requests.Session()
+    blocked_hosts = set()
+    summaries = []
+    adapter = WorkdayAdapter()
+
+    print("WORKDAY_HEALTH READ_ONLY=YES")
+    print(f"commit_sha={_git_commit_sha()} python={sys.version.split()[0]}")
+    print(f"utc_start={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(started_at))}")
+
+    companies = [
+        company for company in registry.companies
+        if company.enabled and company.provider.type == ProviderType.WORKDAY
+    ]
+
+    for company in companies:
+        boards = _workday_health_boards(company)
+        for board in boards:
+            key = f"{company.id}/{board}"
+            summary = {"company": company.id, "board": board, "status": "OK"}
+            summaries.append(summary)
+            url = _workday_health_url(company, board)
+            host = urlparse(url).netloc
+            postings = []
+            first = None
+            for offset in (0, 20):
+                if time.monotonic() >= deadline:
+                    _workday_health_remaining(summary.setdefault("checks", []), "overall budget exhausted")
+                    break
+                if host in blocked_hosts:
+                    _workday_health_remaining(summary.setdefault("checks", []), "host stopped after access restriction/challenge")
+                    break
+                if offset == 20 and not (
+                    isinstance(first, dict)
+                    and isinstance(first.get("jobPostings"), list)
+                    and isinstance(first.get("total"), int)
+                    and first["total"] > 20
+                ):
+                    break
+                if offset:
+                    time.sleep(WORKDAY_HEALTH_DELAY_SECONDS)
+                try:
+                    response, evidence, data = _workday_health_request(
+                        session, "post",
+                        url,
+                        json={
+                            "appliedFacets": {}, "limit": 20,
+                            "offset": offset, "searchText": "",
+                        },
+                        headers=_workday_health_headers(company, board),
+                        timeout=WORKDAY_HEALTH_TIMEOUT,
+                        allow_redirects=True,
+                    )
+                    _workday_health_print_evidence(
+                        f"[{key}] listing method=POST requested_url={url} offset={offset}",
+                        evidence,
+                    )
+                except Exception as exc:
+                    print(
+                        f"[{key}] listing method=POST requested_url={url} "
+                        f"error={type(exc).__name__}: {exc}"
+                    )
+                    summary["status"] = "HTTP_FAILURE"
+                    break
+                if _workday_health_should_stop_host(response, evidence):
+                    blocked_hosts.add(host)
+                if response.status_code >= 400 or not isinstance(data, dict):
+                    summary["status"] = "HTTP_FAILURE" if response.status_code >= 400 else "MALFORMED_OR_EMPTY"
+                    break
+                if offset == 0:
+                    first = data
+                page = data.get("jobPostings")
+                if not isinstance(page, list):
+                    summary["status"] = "MALFORMED_OR_EMPTY"
+                    break
+                postings.extend(page)
+
+            if first is None:
+                continue
+            total = first.get("total")
+            paths = [p.get("externalPath") for p in postings if isinstance(p, dict) and p.get("externalPath")]
+            distinct = set(paths)
+            print(
+                f"[{key}] observed_listing_count={len(postings)} "
+                f"reported_total={total!r} pagination_evidence="
+                f"{'offset20_requested' if len(postings) > len(first.get('jobPostings', [])) else 'single_page'} "
+                f"overlapping_externalPath={len(paths)-len(distinct)} "
+                f"distinct_externalPath={len(distinct)} exhaustive_inventory=NO"
+            )
+
+            candidates = _workday_health_detail_candidates(postings)
+            if company.id != "salesforce":
+                continue
+            if not candidates:
+                print(f"[{key}] salesforce_detail=NOT_SAMPLED")
+                continue
+            for posting in candidates:
+                if time.monotonic() >= deadline or host in blocked_hosts:
+                    _workday_health_remaining(summary.setdefault("checks", []), "budget or host limit")
+                    break
+                detail_url = _workday_health_detail_url(company, board, posting)
+                base = f"https://{company.provider.config.tenant}.{company.provider.config.cluster}.myworkdayjobs.com"
+                try:
+                    response, evidence, data = _workday_health_request(
+                        session, "get", detail_url,
+                        headers={"Accept": "application/json", "Referer": f"{base}/en-US/{board}"},
+                        timeout=WORKDAY_HEALTH_TIMEOUT,
+                        allow_redirects=True,
+                    )
+                    _workday_health_print_evidence(
+                        f"[{key}] detail method=GET requested_url={detail_url}", evidence
+                    )
+                    resolved = (
+                        adapter._locations_from_detail(data)
+                        if isinstance(data, dict) else None
+                    )
+                    print(f"[{key}] detail externalPath={posting.get('externalPath')} locations_resolved={bool(resolved)}")
+                    if response.status_code >= 400:
+                        summary["status"] = "HTTP_FAILURE"
+                    elif not isinstance(data, dict):
+                        summary["status"] = "MALFORMED_OR_EMPTY"
+                    if _workday_health_should_stop_host(response, evidence):
+                        blocked_hosts.add(host)
+                except Exception as exc:
+                    summary["status"] = "HTTP_FAILURE"
+                    print(f"[{key}] detail method=GET requested_url={detail_url} error={type(exc).__name__}: {exc}")
+
+    print("WORKDAY_HEALTH SUMMARY")
+    for summary in summaries:
+        print(f"[{summary['company']}/{summary['board']}] summary_status={summary['status']} checks={summary.get('checks', [])}")
+    print("exhaustive_inventory=NO")
+
+
+def _git_commit_sha():
+    try:
+        import subprocess
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "UNKNOWN"
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -4950,10 +5271,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Research Mastek, LTIMindtree and KPMG",
     )
+    parser.add_argument(
+        "--workday-health",
+        action="store_true",
+        help="Run bounded, read-only diagnostics for enabled Workday companies",
+    )
 
     args = parser.parse_args()
 
-    if args.enterprise_batch:
+    if args.workday_health:
+        run_workday_health()
+    elif args.enterprise_batch:
         run_enterprise_batch()
     elif args.integration_batch:
         run_integration_batch()

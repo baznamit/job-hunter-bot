@@ -15,6 +15,7 @@ on:
           - company-batch
           - integration-batch
           - enterprise-batch
+          - workday-health
           - legacy
 
 permissions:
@@ -69,6 +70,9 @@ jobs:
               ;;
             enterprise-batch)
               python -u -m research.company_probe --enterprise-batch
+              ;;
+            workday-health)
+              python -u -m research.company_probe --workday-health
               ;;
             legacy)
               python -u -m research.company_probe
