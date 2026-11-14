@@ -3,7 +3,11 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     wait,
 )
+from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 import re
+from threading import Lock, local
+import time
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -22,6 +26,10 @@ _PAGE_SIZE = 20
 # simultaneous requests.
 _PAGE_WORKERS = 3
 _DETAIL_WORKERS = 4
+_REQUEST_PACING_SECONDS = 0.2
+_MAX_REQUEST_ATTEMPTS = 2
+_COMPANY_RECOVERY_BUDGET_SECONDS = 120.0
+_BACKOFF_SECONDS = (1.0, 3.0)
 _RESPONSE_PREVIEW_BYTES = 300
 _MAINTENANCE_HOST = "community.workday.com"
 _MAINTENANCE_PATH = "/maintenance-page"
@@ -41,9 +49,281 @@ _SINGLE_LOCATION_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+@dataclass
+class WorkdayCoverageReport:
+    listing_status: str = "complete"
+    enrichment_candidates: int = 0
+    enrichment_attempted: int = 0
+    enrichment_resolved: int = 0
+    enrichment_unresolved: int = 0
+    enrichment_unstarted: int = 0
+    http_attempts: int = 0
+    http_retries: int = 0
+    failure_reasons: dict[str, int] = field(default_factory=dict)
+    deferred: int = 0
+    stop_reason: str | None = None
+
+    @property
+    def coverage_status(self) -> str:
+        if self.listing_status != "complete":
+            return "failed"
+        if self.enrichment_candidates and (
+            self.enrichment_unresolved or self.enrichment_unstarted
+        ):
+            return "partial"
+        return "complete"
+
+
+@dataclass(frozen=True)
+class _PolicyDecision:
+    allowed: bool
+    reason: str | None = None
+
+
+class WorkdayRequestPolicy:
+    """Coordinate bounded Workday pacing and host cooldowns."""
+
+    def __init__(
+        self,
+        *,
+        pacing_seconds: float = _REQUEST_PACING_SECONDS,
+        max_attempts: int = _MAX_REQUEST_ATTEMPTS,
+        backoff_seconds: tuple[float, ...] = _BACKOFF_SECONDS,
+        clock=time.monotonic,
+        sleeper=time.sleep,
+    ) -> None:
+        if pacing_seconds < 0:
+            raise ValueError("Workday pacing must not be negative")
+        if max_attempts < 1:
+            raise ValueError("Workday max_attempts must be positive")
+        self.pacing_seconds = pacing_seconds
+        self.max_attempts = max_attempts
+        self.backoff_seconds = backoff_seconds or (0.0,)
+        self._clock = clock
+        self._sleep = sleeper
+        self._lock = Lock()
+        self._next_allowed: dict[str, float] = {}
+        self._blocked: dict[str, str] = {}
+
+    @staticmethod
+    def retry_after_seconds(value: str | None, now: float | None = None) -> float | None:
+        if not value:
+            return None
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            pass
+
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                return None
+            current = time.time() if now is None else now
+            return max(0.0, retry_at.timestamp() - current)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def before_request(self, host: str, deadline: float | None) -> _PolicyDecision:
+        with self._lock:
+            blocked = self._blocked.get(host)
+            if blocked:
+                return _PolicyDecision(False, blocked)
+
+            now = self._clock()
+            start_at = max(now, self._next_allowed.get(host, now))
+            if deadline is not None and start_at > deadline:
+                return _PolicyDecision(False, "time_budget")
+            self._next_allowed[host] = start_at + self.pacing_seconds
+
+        delay = start_at - now
+        if delay > 0:
+            self._sleep(delay)
+        return _PolicyDecision(True)
+
+    def after_failure(
+        self,
+        host: str,
+        error: ProviderTemporaryError,
+        attempt: int,
+    ) -> None:
+        if error.category in {"maintenance", "access_challenge"}:
+            with self._lock:
+                self._blocked[host] = error.category
+            return
+
+        delay = error.retry_after_seconds
+        if delay is None:
+            delay = self.backoff_seconds[
+                min(max(attempt - 1, 0), len(self.backoff_seconds) - 1)
+            ]
+
+        with self._lock:
+            self._next_allowed[host] = max(
+                self._next_allowed.get(host, self._clock()),
+                self._clock() + max(0.0, delay),
+            )
+
+
+class _RequestStats:
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.retries = 0
+
 class WorkdayAdapter(ProviderAdapter):
 
     provider_name = "Workday"
+
+    def __init__(self, request_policy: WorkdayRequestPolicy | None = None) -> None:
+        self._request_policy = request_policy or WorkdayRequestPolicy()
+        self._request_stats = local()
+
+    def _current_request_stats(self) -> _RequestStats | None:
+        return getattr(self._request_stats, "value", None)
+
+    def _run_detail_candidate(
+        self,
+        company: Company,
+        board: str,
+        posting: dict,
+        deadline: float | None,
+    ):
+        stats = _RequestStats()
+        self._request_stats.value = stats
+        self._request_stats.deadline = deadline
+        try:
+            return self._fetch_detail_location(
+                company,
+                board,
+                posting,
+            ), stats
+        except Exception as exc:
+            exc._workday_stats = stats
+            raise
+        finally:
+            self._request_stats.value = None
+            self._request_stats.deadline = None
+
+    def _request_json(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        payload: dict | None,
+        company: Company,
+        board: str,
+        operation: str,
+        offset: int | None = None,
+        detail_path: str | None = None,
+        deadline: float | None = None,
+    ) -> dict:
+        host = urlparse(url).netloc
+        stats = self._current_request_stats()
+        last_error = None
+
+        for attempt in range(1, self._request_policy.max_attempts + 1):
+            decision = self._request_policy.before_request(host, deadline)
+            if not decision.allowed:
+                raise ProviderTemporaryError(
+                    company=company.name,
+                    provider=self.provider_name,
+                    message=(
+                        f"deferred reason={decision.reason} company={company.id} "
+                        f"board={board} operation={operation} "
+                        f"endpoint={url}"
+                    ),
+                    category="deferred",
+                    endpoint=url,
+                    operation=operation,
+                )
+
+            if stats is not None:
+                stats.attempts += 1
+
+            try:
+                request = getattr(requests, method)
+                kwargs = {
+                    "headers": headers,
+                    "timeout": _TIMEOUT,
+                }
+                if payload is not None:
+                    kwargs["json"] = payload
+                response = request(url, **kwargs)
+            except requests.Timeout as exc:
+                last_error = ProviderTemporaryError(
+                    company=company.name,
+                    provider=self.provider_name,
+                    message=(
+                        f"timeout company={company.id} board={board} "
+                        f"operation={operation} endpoint={url}"
+                    ),
+                    category="timeout",
+                    endpoint=url,
+                    operation=operation,
+                )
+            except requests.ConnectionError as exc:
+                last_error = ProviderTemporaryError(
+                    company=company.name,
+                    provider=self.provider_name,
+                    message=(
+                        f"connection_error company={company.id} board={board} "
+                        f"operation={operation} endpoint={url}"
+                    ),
+                    category="connection_error",
+                    endpoint=url,
+                    operation=operation,
+                )
+            except requests.RequestException as exc:
+                last_error = ProviderTemporaryError(
+                    company=company.name,
+                    provider=self.provider_name,
+                    message=(
+                        f"request_error company={company.id} board={board} "
+                        f"operation={operation} endpoint={url}"
+                    ),
+                    category="connection_error",
+                    endpoint=url,
+                    operation=operation,
+                )
+            else:
+                try:
+                    return self._validate_json_response(
+                        response,
+                        company,
+                        operation=operation,
+                        board=board,
+                        endpoint=url,
+                        offset=offset,
+                        detail_path=detail_path,
+                    )
+                except ProviderTemporaryError as exc:
+                    if exc.endpoint is None:
+                        exc.endpoint = url
+                    if exc.operation is None:
+                        exc.operation = operation
+                    last_error = exc
+                except ValueError:
+                    raise
+
+            if last_error is None:
+                break
+            if last_error.retry_after_seconds is None:
+                last_error.retry_after_seconds = (
+                    self._request_policy.retry_after_seconds(
+                        last_error.retry_after
+                    )
+                )
+            if last_error.category in {"maintenance", "access_challenge"}:
+                self._request_policy.after_failure(host, last_error, attempt)
+                raise last_error
+            self._request_policy.after_failure(host, last_error, attempt)
+            if attempt >= self._request_policy.max_attempts:
+                break
+            if stats is not None:
+                stats.retries += 1
+
+        raise last_error
 
     @staticmethod
     def _is_maintenance_url(url: str | None) -> bool:
@@ -106,9 +386,25 @@ class WorkdayAdapter(ProviderAdapter):
                 company=company.name,
                 provider=self.provider_name,
                 message=f"TEMPORARY_MAINTENANCE {context}",
+                status=response.status_code,
+                category="maintenance",
+                retry_after=response.headers.get("Retry-After"),
+                endpoint=endpoint,
+                operation=operation,
             )
             error.maintenance = True
             raise error
+
+        if response.status_code == 403:
+            raise ProviderTemporaryError(
+                company=company.name,
+                provider=self.provider_name,
+                message=f"ACCESS_CHALLENGE {context}",
+                status=response.status_code,
+                category="access_challenge",
+                endpoint=endpoint,
+                operation=operation,
+            )
 
         # Retain ProviderNotFoundError for 404/422 and ProviderTemporaryError
         # for 429/5xx from the common provider classifier.
@@ -261,6 +557,8 @@ class WorkdayAdapter(ProviderAdapter):
         company: Company,
         board: str,
         posting: dict,
+        *,
+        deadline: float | None = None,
     ) -> str | None:
         """Resolve one ambiguous location using public CXS JSON."""
         config = company.provider.config
@@ -284,23 +582,23 @@ class WorkdayAdapter(ProviderAdapter):
             f"{external_path}"
         )
 
+        if deadline is None:
+            deadline = getattr(self._request_stats, "deadline", None)
+
         try:
-            response = requests.get(
-                url,
+            data = self._request_json(
+                method="get",
+                url=url,
                 headers={
                     "Accept": "application/json",
                     "Referer": f"{base}/en-US/{board}",
                 },
-                timeout=_TIMEOUT,
-            )
-
-            data = self._validate_json_response(
-                response,
-                company,
-                operation="detail_location",
+                payload=None,
+                company=company,
                 board=board,
-                endpoint=url,
+                operation="detail_location",
                 detail_path=external_path,
+                deadline=deadline,
             )
 
             resolved = self._locations_from_detail(data)
@@ -376,8 +674,11 @@ class WorkdayAdapter(ProviderAdapter):
         self,
         company: Company,
         postings: list[dict],
-    ) -> None:
+        *,
+        deadline: float | None = None,
+    ) -> WorkdayCoverageReport:
         """Enrich only ambiguous Workday locations in place."""
+        report = WorkdayCoverageReport()
         candidates = []
 
         for posting in postings:
@@ -406,8 +707,9 @@ class WorkdayAdapter(ProviderAdapter):
 
             candidates.append((posting, board))
 
+        report.enrichment_candidates = len(candidates)
         if not candidates:
-            return
+            return report
 
         resolved = 0
         unresolved = 0
@@ -427,10 +729,11 @@ class WorkdayAdapter(ProviderAdapter):
                 posting, board = candidates[next_candidate]
                 next_candidate += 1
                 pending[executor.submit(
-                    self._fetch_detail_location,
+                    self._run_detail_candidate,
                     company,
                     board,
                     posting,
+                    deadline,
                 )] = posting
 
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as executor:
@@ -443,32 +746,64 @@ class WorkdayAdapter(ProviderAdapter):
                 for future in done:
                     posting = pending.pop(future)
                     attempted += 1
+                    had_error = False
                     try:
-                        location = future.result()
+                        result = future.result()
+                        if isinstance(result, tuple):
+                            location, stats = result
+                        else:
+                            location, stats = result, None
                     except Exception as exc:
+                        had_error = True
                         location = None
+                        stats = getattr(exc, "_workday_stats", None)
                         reason = type(exc).__name__
                         if isinstance(exc, ProviderTemporaryError):
-                            status = re.search(r"\bstatus=(\d+)\b", str(exc))
-                            if status:
-                                reason += f"/{status.group(1)}"
-                            stop_submitting = True
+                            reason = exc.category or reason
+                            if exc.status is not None:
+                                reason += f"/{exc.status}"
+                            if (
+                                exc.category in {
+                                    "maintenance",
+                                    "access_challenge",
+                                    "deferred",
+                                }
+                                or getattr(exc, "maintenance", False)
+                            ):
+                                if getattr(exc, "maintenance", False):
+                                    reason = "maintenance"
+                                stop_submitting = True
+                                report.stop_reason = exc.category or "maintenance"
                         failures[reason] = failures.get(reason, 0) + 1
+
+                    if stats is not None:
+                        report.http_attempts += stats.attempts
+                        report.http_retries += stats.retries
 
                     if location:
                         posting["_resolved_location"] = location
                         resolved += 1
                     else:
                         unresolved += 1
+                        if not had_error:
+                            failures["no_usable_location"] = (
+                                failures.get("no_usable_location", 0) + 1
+                            )
 
                 if stop_submitting:
-                    for future in pending:
-                        future.cancel()
-                    pending.clear()
+                    for future in list(pending):
+                        if future.cancel():
+                            pending.pop(future, None)
+                            report.enrichment_unstarted += 1
                 else:
                     submit_available(executor)
 
-        unattempted = len(candidates) - attempted
+        report.enrichment_attempted = attempted
+        report.enrichment_resolved = resolved
+        report.enrichment_unresolved = unresolved
+        report.enrichment_unstarted += len(candidates) - next_candidate
+        report.failure_reasons = failures
+        report.deferred = failures.get("deferred", 0)
 
         print(
             "[WORKDAY] LOCATION_ENRICHMENT "
@@ -477,9 +812,13 @@ class WorkdayAdapter(ProviderAdapter):
             f"resolved={resolved} "
             f"unresolved={unresolved} "
             f"failed={sum(failures.values())} "
-            f"unattempted={unattempted} "
-            f"failure_reasons={failures}"
+            f"unstarted={report.enrichment_unstarted} "
+            f"http_attempts={report.http_attempts} "
+            f"http_retries={report.http_retries} "
+            f"failure_reasons={failures} "
+            f"stop_reason={report.stop_reason}"
         )
+        return report
 
     def _request_page(
         self,
@@ -488,28 +827,24 @@ class WorkdayAdapter(ProviderAdapter):
         headers: dict[str, str],
         offset: int,
         company: Company,
+        deadline: float | None = None,
     ) -> dict:
-        response = requests.post(
-            url,
-            json={
+        data = self._request_json(
+            method="post",
+            url=url,
+            payload={
                 "appliedFacets": {},
                 "limit": _PAGE_SIZE,
                 "offset": offset,
                 "searchText": "",
             },
             headers=headers,
-            timeout=_TIMEOUT,
-        )
-
-        data = self._validate_json_response(
-            response,
-            company,
-            operation="listing",
+            company=company,
             board=headers["Referer"].rsplit("/", 1)[-1],
-            endpoint=url,
+            operation="listing",
             offset=offset,
+            deadline=deadline,
         )
-
         postings = data.get("jobPostings")
         if postings is not None and not isinstance(postings, list):
             raise ValueError(
@@ -519,13 +854,81 @@ class WorkdayAdapter(ProviderAdapter):
                 f"actual={type(postings).__name__} "
                 f"original_endpoint={url}"
             )
-
         return data
+
+    def _run_page_request(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        offset: int,
+        company: Company,
+        deadline: float | None,
+    ):
+        stats = _RequestStats()
+        self._request_stats.value = stats
+        try:
+            return self._request_page(
+                url=url,
+                headers=headers,
+                offset=offset,
+                company=company,
+                deadline=deadline,
+            ), stats
+        except Exception as exc:
+            exc._workday_stats = stats
+            raise
+        finally:
+            self._request_stats.value = None
+
+    @staticmethod
+    def _merge_enrichment_report(
+        target: WorkdayCoverageReport,
+        source: WorkdayCoverageReport,
+    ) -> None:
+        target.enrichment_candidates += source.enrichment_candidates
+        target.enrichment_attempted += source.enrichment_attempted
+        target.enrichment_resolved += source.enrichment_resolved
+        target.enrichment_unresolved += source.enrichment_unresolved
+        target.enrichment_unstarted += source.enrichment_unstarted
+        target.http_attempts += source.http_attempts
+        target.http_retries += source.http_retries
+        target.deferred += source.deferred
+        if source.stop_reason:
+            target.stop_reason = source.stop_reason
+        for reason, count in source.failure_reasons.items():
+            target.failure_reasons[reason] = (
+                target.failure_reasons.get(reason, 0) + count
+            )
+
+    def fetch_jobs_with_report(
+        self,
+        company: Company,
+    ) -> tuple[list[Job], WorkdayCoverageReport]:
+        report = WorkdayCoverageReport()
+        deadline = time.monotonic() + _COMPANY_RECOVERY_BUDGET_SECONDS
+        try:
+            raw = self._fetch_raw(
+                company,
+                report=report,
+                deadline=deadline,
+            )
+        except Exception as exc:
+            report.listing_status = "failed"
+            exc.workday_report = report
+            raise
+        return self.parse(raw, company), report
 
     def _fetch_raw(
         self,
         company: Company,
+        *,
+        report: WorkdayCoverageReport | None = None,
+        deadline: float | None = None,
     ) -> dict:
+        report = report or WorkdayCoverageReport()
+        if deadline is None:
+            deadline = time.monotonic() + _COMPANY_RECOVERY_BUDGET_SECONDS
         config = company.provider.config
 
         boards = list(
@@ -549,6 +952,8 @@ class WorkdayAdapter(ProviderAdapter):
             raw = self._fetch_board(
                 company,
                 board,
+                report=report,
+                deadline=deadline,
             )
 
             for posting in raw.get(
@@ -593,10 +998,12 @@ class WorkdayAdapter(ProviderAdapter):
                 posting
             )
 
-        self._enrich_ambiguous_locations(
+        enrichment = self._enrich_ambiguous_locations(
             company,
             deduplicated,
+            deadline=deadline,
         )
+        self._merge_enrichment_report(report, enrichment)
 
         return {
             "jobPostings":
@@ -607,7 +1014,11 @@ class WorkdayAdapter(ProviderAdapter):
         self,
         company: Company,
         board: str,
+        *,
+        report: WorkdayCoverageReport | None = None,
+        deadline: float | None = None,
     ) -> dict:
+        report = report or WorkdayCoverageReport()
         config = company.provider.config
 
         tenant = config.tenant
@@ -632,12 +1043,15 @@ class WorkdayAdapter(ProviderAdapter):
 
         # Fetch page 1 synchronously. This gives us the
         # authoritative total before scheduling any work.
-        first_page = self._request_page(
+        first_page, first_stats = self._run_page_request(
             url=url,
             headers=headers,
             offset=0,
             company=company,
+            deadline=deadline,
         )
+        report.http_attempts += first_stats.attempts
+        report.http_retries += first_stats.retries
 
         first_postings = (
             first_page.get(
@@ -670,6 +1084,8 @@ class WorkdayAdapter(ProviderAdapter):
                 url=url,
                 headers=headers,
                 first_postings=first_postings,
+                report=report,
+                deadline=deadline,
             )
 
         total = reported_total
@@ -706,11 +1122,12 @@ class WorkdayAdapter(ProviderAdapter):
                 except StopIteration:
                     break
                 pending[executor.submit(
-                    self._request_page,
+                    self._run_page_request,
                     url=url,
                     headers=headers,
                     offset=offset,
                     company=company,
+                    deadline=deadline,
                 )] = offset
 
             while pending and failure is None:
@@ -721,10 +1138,17 @@ class WorkdayAdapter(ProviderAdapter):
                 for future in done:
                     offset = pending.pop(future)
                     try:
-                        data = future.result()
+                        data, stats = future.result()
                     except Exception as exc:
+                        stats = getattr(exc, "_workday_stats", None)
+                        if stats is not None:
+                            report.http_attempts += stats.attempts
+                            report.http_retries += stats.retries
                         failure = exc
                         break
+
+                    report.http_attempts += stats.attempts
+                    report.http_retries += stats.retries
 
                     postings = data.get("jobPostings") or []
                     pages[offset] = postings
@@ -741,11 +1165,12 @@ class WorkdayAdapter(ProviderAdapter):
                     except StopIteration:
                         break
                     pending[executor.submit(
-                        self._request_page,
+                        self._run_page_request,
                         url=url,
                         headers=headers,
                         offset=offset,
                         company=company,
+                        deadline=deadline,
                     )] = offset
 
         if failure is not None:
@@ -797,6 +1222,8 @@ class WorkdayAdapter(ProviderAdapter):
         url: str,
         headers: dict[str, str],
         first_postings: list[dict],
+        report: WorkdayCoverageReport | None = None,
+        deadline: float | None = None,
     ) -> dict:
         """
         Safe fallback for Workday boards that do not expose
@@ -806,6 +1233,7 @@ class WorkdayAdapter(ProviderAdapter):
         behavior rather than guessing how many pages exist.
         """
 
+        report = report or WorkdayCoverageReport()
         all_postings = list(
             first_postings
         )
@@ -815,12 +1243,15 @@ class WorkdayAdapter(ProviderAdapter):
         )
 
         while True:
-            data = self._request_page(
+            data, stats = self._run_page_request(
                 url=url,
                 headers=headers,
                 offset=offset,
                 company=company,
+                deadline=deadline,
             )
+            report.http_attempts += stats.attempts
+            report.http_retries += stats.retries
 
             postings = (
                 data.get(

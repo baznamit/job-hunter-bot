@@ -21,6 +21,7 @@ from datetime import (
     datetime,
     timezone,
 )
+from types import SimpleNamespace
 from pathlib import Path
 
 from models import Job
@@ -545,7 +546,9 @@ def _fetch_jobs_with_recovery(
     adapter,
     recovery_store: RecoveryStore,
     recovery_settings: dict,
-) -> list[Job] | None:
+    *,
+    include_report: bool = False,
+):
     """
     Fetch jobs and recover stale ATS mappings.
 
@@ -556,6 +559,11 @@ def _fetch_jobs_with_recovery(
     Once the cooldown expires, retry the configured provider first.
     If it is still stale, attempt rediscovery.
     """
+
+    def result(jobs, report=None):
+        if include_report:
+            return jobs, report
+        return jobs
 
     should_attempt, retry_at = (
         recovery_store.should_attempt(
@@ -572,19 +580,34 @@ def _fetch_jobs_with_recovery(
             file=sys.stderr,
         )
 
-        return None
+        return result(
+            None,
+            SimpleNamespace(
+                coverage_status="skipped",
+                listing_status="skipped",
+                error="expected cooldown skip",
+            ),
+        )
 
     try:
-        jobs = adapter.fetch_jobs(
-            company
-        )
+        if (
+            company.provider.type == ProviderType.WORKDAY
+            and callable(getattr(adapter, "fetch_jobs_with_report", None))
+        ):
+            jobs, report = adapter.fetch_jobs_with_report(company)
+        else:
+            jobs = adapter.fetch_jobs(company)
+            report = SimpleNamespace(
+                coverage_status="complete",
+                listing_status="complete",
+            )
 
         # The configured provider works again.
         recovery_store.clear(
             company.id
         )
 
-        return jobs
+        return result(jobs, report)
 
     except ProviderNotFoundError as exc:
         print(
@@ -614,13 +637,26 @@ def _fetch_jobs_with_recovery(
                 ),
             )
 
-            return None
+            return result(
+                None,
+                SimpleNamespace(
+                    coverage_status="failed",
+                    listing_status="failed",
+                    error="stale provider recovery failed",
+                ),
+            )
 
         recovery_store.clear(
             company.id
         )
 
-        return jobs
+        return result(
+            jobs,
+            SimpleNamespace(
+                coverage_status="complete",
+                listing_status="complete",
+            ),
+        )
 
     except ProviderTemporaryError as exc:
         print(
@@ -629,7 +665,14 @@ def _fetch_jobs_with_recovery(
             file=sys.stderr,
         )
 
-        return None
+        report = getattr(exc, "workday_report", None)
+        if report is None:
+            report = SimpleNamespace(
+                coverage_status="failed",
+                listing_status="failed",
+            )
+        report.error = str(exc)
+        return result(None, report)
 
     except Exception as exc:
         print(
@@ -638,7 +681,14 @@ def _fetch_jobs_with_recovery(
             file=sys.stderr,
         )
 
-        return None
+        return result(
+            None,
+            SimpleNamespace(
+                coverage_status="failed",
+                listing_status="failed",
+                error=str(exc),
+            ),
+        )
 
 
 def _recover_and_retry_fetch(company) -> list[Job] | None:
@@ -744,6 +794,32 @@ def _print_company_stats(company, jobs_fetched, direct_count, promoted_count, to
         )
 
 
+def _apply_coverage_report(result: CompanyRunResult, report) -> None:
+    if report is None:
+        return
+
+    for name in (
+        "coverage_status",
+        "listing_status",
+        "enrichment_candidates",
+        "enrichment_attempted",
+        "enrichment_resolved",
+        "enrichment_unresolved",
+        "enrichment_unstarted",
+        "http_attempts",
+        "http_retries",
+        "failure_reasons",
+        "coverage_note",
+    ):
+        if hasattr(report, name):
+            setattr(result, name, getattr(report, name))
+
+    if hasattr(report, "deferred") and report.deferred:
+        result.coverage_note = (
+            f"deferred={report.deferred} stop_reason={report.stop_reason}"
+        )
+
+
 def _send_notifications(
     store,
     notifier,
@@ -827,15 +903,19 @@ def _run_company(
     )
 
     try:
-        jobs = _fetch_jobs_with_recovery(
+        jobs, report = _fetch_jobs_with_recovery(
             company,
             adapter,
             recovery_store,
             recovery_settings,
+            include_report=True,
         )
+        _apply_coverage_report(result, report)
 
         if jobs is None:
             result.success = False
+            result.skipped = result.coverage_status == "skipped"
+            result.error = getattr(report, "error", None)
             return result
 
         result.jobs_fetched = len(
@@ -936,6 +1016,24 @@ def _print_performance_summary(
         f"{len(failed)}"
     )
 
+    partial = [
+        result for result in completed
+        if result.coverage_status == "partial"
+    ]
+    failed_coverage = [
+        result for result in results
+        if result.coverage_status == "failed"
+    ]
+    skipped = [
+        result for result in results
+        if result.coverage_status == "skipped"
+    ]
+
+    print(f"Complete            : {len(completed) - len(partial)}")
+    print(f"Partial enrichment  : {len(partial)}")
+    print(f"Failed              : {len(failed_coverage)}")
+    print(f"Skipped cooldown    : {len(skipped)}")
+
     print(
         f"Jobs fetched        : "
         f"{jobs_fetched}"
@@ -958,11 +1056,7 @@ def _print_performance_summary(
         slowest,
         1,
     ):
-        status = (
-            "ok"
-            if result.success
-            else "failed"
-        )
+        status = result.coverage_status
 
         print(
             f"{index:>2}. "
@@ -971,6 +1065,8 @@ def _print_performance_summary(
             f"{result.jobs_fetched:>6} jobs "
             f"[{result.provider}, {status}]"
         )
+        if result.coverage_note:
+            print(f"    [COVERAGE] {result.coverage_note}")
 
 
 def main() -> None:
@@ -1069,8 +1165,15 @@ def main() -> None:
                     f"failure — {exc}",
                     file=sys.stderr,
                 )
-
-                continue
+                result = CompanyRunResult(
+                    company_id=company.id,
+                    company_name=company.name,
+                    provider=company.provider.type.value,
+                    success=False,
+                    coverage_status="failed",
+                    listing_status="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
 
             results.append(
                 result
@@ -1092,6 +1195,15 @@ def main() -> None:
                 f"{result.elapsed_seconds:.1f}s "
                 f"via {result.provider}"
             )
+
+            if result.coverage_status == "partial":
+                print(
+                    f"    [COVERAGE] partial enrichment: "
+                    f"resolved={result.enrichment_resolved}/"
+                    f"{result.enrichment_candidates} "
+                    f"unresolved={result.enrichment_unresolved} "
+                    f"unstarted={result.enrichment_unstarted}"
+                )
 
     order = {
         company.id: index

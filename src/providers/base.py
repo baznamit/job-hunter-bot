@@ -5,7 +5,11 @@ import requests
 from models import Job
 from models.company import Company
 
-from .exceptions import ProviderNotFoundError, ProviderTemporaryError
+from .exceptions import (
+    ProviderNotFoundError,
+    ProviderTemporaryError,
+    parse_retry_after,
+)
 
 
 class ProviderAdapter(ABC):
@@ -65,6 +69,12 @@ class ProviderAdapter(ABC):
             )
 
         if response.status_code == 429 or response.status_code >= 500:
+            category = (
+                "rate_limit"
+                if response.status_code == 429
+                else "server_error"
+            )
+            retry_after = response.headers.get("Retry-After")
             raise ProviderTemporaryError(
                 company=company.name,
                 provider=self.provider_name,
@@ -72,6 +82,11 @@ class ProviderAdapter(ABC):
                     f"HTTP {response.status_code} "
                     f"from {response.url}"
                 ),
+                status=response.status_code,
+                category=category,
+                retry_after=retry_after,
+                retry_after_seconds=parse_retry_after(retry_after),
+                endpoint=response.url,
             )
 
         response.raise_for_status()
