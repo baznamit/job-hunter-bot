@@ -4992,6 +4992,9 @@ def _workday_health_evidence(response, body, parsed, error=None, byte_length=Non
         evidence["preview"] = _workday_health_preview(body)
     if error is not None:
         evidence["error"] = f"{type(error).__name__}: {error}"
+    from src.providers.workday import WorkdayAdapter
+    if WorkdayAdapter._is_maintenance_response(response):
+        evidence["classification"] = "TEMPORARY_MAINTENANCE"
     return evidence
 
 
@@ -5029,6 +5032,8 @@ def _workday_health_print_evidence(prefix, evidence):
         f"json={evidence['json']} "
         f"top_level_keys={evidence['top_level_keys']}"
     )
+    if "classification" in evidence:
+        line += f" classification={evidence['classification']}"
     if "preview" in evidence:
         line += f" preview={evidence['preview']!r}"
     if "error" in evidence:
@@ -5116,6 +5121,7 @@ def run_workday_health(*, session=None, budget_seconds=WORKDAY_HEALTH_BUDGET_SEC
             host = urlparse(url).netloc
             postings = []
             first = None
+            pagination_state = "single_page"
             for offset in (0, 20):
                 if time.monotonic() >= deadline:
                     _workday_health_remaining(summary.setdefault("checks", []), "overall budget exhausted")
@@ -5153,20 +5159,37 @@ def run_workday_health(*, session=None, budget_seconds=WORKDAY_HEALTH_BUDGET_SEC
                         f"[{key}] listing method=POST requested_url={url} "
                         f"error={type(exc).__name__}: {exc}"
                     )
-                    summary["status"] = "HTTP_FAILURE"
+                    summary["status"] = (
+                        "TEMPORARY_MAINTENANCE"
+                        if "TEMPORARY_MAINTENANCE" in str(exc)
+                        else "HTTP_FAILURE"
+                    )
+                    if offset:
+                        pagination_state = "INCOMPLETE"
+                    break
+                if evidence.get("classification") == "TEMPORARY_MAINTENANCE":
+                    summary["status"] = "TEMPORARY_MAINTENANCE"
+                    if offset:
+                        pagination_state = "INCOMPLETE"
                     break
                 if _workday_health_should_stop_host(response, evidence):
                     blocked_hosts.add(host)
                 if response.status_code >= 400 or not isinstance(data, dict):
                     summary["status"] = "HTTP_FAILURE" if response.status_code >= 400 else "MALFORMED_OR_EMPTY"
+                    if offset:
+                        pagination_state = "INCOMPLETE"
                     break
                 if offset == 0:
                     first = data
                 page = data.get("jobPostings")
                 if not isinstance(page, list):
                     summary["status"] = "MALFORMED_OR_EMPTY"
+                    if offset:
+                        pagination_state = "INCOMPLETE"
                     break
                 postings.extend(page)
+                if offset:
+                    pagination_state = "offset20_requested"
 
             if first is None:
                 continue
@@ -5175,8 +5198,7 @@ def run_workday_health(*, session=None, budget_seconds=WORKDAY_HEALTH_BUDGET_SEC
             distinct = set(paths)
             print(
                 f"[{key}] observed_listing_count={len(postings)} "
-                f"reported_total={total!r} pagination_evidence="
-                f"{'offset20_requested' if len(postings) > len(first.get('jobPostings', [])) else 'single_page'} "
+                f"reported_total={total!r} pagination_evidence={pagination_state} "
                 f"overlapping_externalPath={len(paths)-len(distinct)} "
                 f"distinct_externalPath={len(distinct)} exhaustive_inventory=NO"
             )

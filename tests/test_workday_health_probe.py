@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -150,3 +151,40 @@ def test_no_persistent_writes_or_telegram_calls(monkeypatch):
     session = FakeSession([listing(total=1)])
     probe.run_workday_health(session=session, budget_seconds=10)
     assert not hasattr(session, "telegram")
+
+
+def test_health_labels_maintenance_and_does_not_rediscover(monkeypatch, capsys):
+    patch_registry(monkeypatch, [company("maintenance")])
+    redirect = FakeResponse(
+        status=303,
+        url="https://maintenance.wd1.myworkdayjobs.com/wday/cxs/maintenance/careers/jobs",
+        headers={"Location": "https://community.workday.com/maintenance-page"},
+    )
+    final = FakeResponse(
+        status=200,
+        body=b"<html>maintenance</html>",
+        url="https://community.workday.com/maintenance-page",
+        headers={"Content-Type": "text/html"},
+        history=[redirect],
+    )
+    session = FakeSession([final])
+
+    with patch("src.providers.workday.WorkdayAdapter.fetch_jobs", side_effect=AssertionError("rediscovery")):
+        probe.run_workday_health(session=session, budget_seconds=10)
+
+    output = capsys.readouterr().out
+    assert "classification=TEMPORARY_MAINTENANCE" in output
+    assert "summary_status=TEMPORARY_MAINTENANCE" in output
+
+
+def test_health_labels_later_page_failure_incomplete(monkeypatch, capsys):
+    patch_registry(monkeypatch, [company("later")])
+    session = FakeSession([
+        listing(total=21),
+        FakeResponse(status=200, body=b"{bad", headers={"Content-Type": "application/json"}),
+    ])
+
+    probe.run_workday_health(session=session, budget_seconds=10)
+
+    output = capsys.readouterr().out
+    assert "pagination_evidence=INCOMPLETE" in output

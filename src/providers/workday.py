@@ -1,8 +1,10 @@
 from concurrent.futures import (
+    FIRST_COMPLETED,
     ThreadPoolExecutor,
-    as_completed,
+    wait,
 )
 import re
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -10,6 +12,7 @@ from models import Job
 from models.company import Company
 
 from .base import ProviderAdapter
+from .exceptions import ProviderTemporaryError
 
 _TIMEOUT = 20
 _PAGE_SIZE = 20
@@ -19,6 +22,9 @@ _PAGE_SIZE = 20
 # simultaneous requests.
 _PAGE_WORKERS = 3
 _DETAIL_WORKERS = 4
+_RESPONSE_PREVIEW_BYTES = 300
+_MAINTENANCE_HOST = "community.workday.com"
+_MAINTENANCE_PATH = "/maintenance-page"
 
 _AMBIGUOUS_LOCATION_RE = re.compile(
     r"^\s*\d+\s+Locations?\s*$",
@@ -38,6 +44,91 @@ _SINGLE_LOCATION_CODE_RE = re.compile(
 class WorkdayAdapter(ProviderAdapter):
 
     provider_name = "Workday"
+
+    @staticmethod
+    def _is_maintenance_url(url: str | None) -> bool:
+        if not isinstance(url, str) or not url:
+            return False
+
+        parsed = urlparse(url)
+        return (
+            parsed.hostname == _MAINTENANCE_HOST
+            and parsed.path.rstrip("/") == _MAINTENANCE_PATH
+        )
+
+    @classmethod
+    def _is_maintenance_response(cls, response: requests.Response) -> bool:
+        urls = [getattr(response, "url", "")]
+
+        history = getattr(response, "history", [])
+        if not isinstance(history, (list, tuple)):
+            history = []
+        for previous in history:
+            urls.append(getattr(previous, "url", ""))
+            location = getattr(previous, "headers", {}).get("Location")
+            if location:
+                urls.append(urljoin(previous.url, location))
+
+        return any(cls._is_maintenance_url(url) for url in urls)
+
+    @staticmethod
+    def _response_preview(response: requests.Response) -> str:
+        content = getattr(response, "content", b"") or b""
+        if isinstance(content, bytes):
+            content = content[:_RESPONSE_PREVIEW_BYTES].decode(
+                getattr(response, "encoding", None) or "utf-8",
+                errors="replace",
+            )
+        return re.sub(r"\s+", " ", str(content))[:_RESPONSE_PREVIEW_BYTES]
+
+    def _validate_json_response(
+        self,
+        response: requests.Response,
+        company: Company,
+        *,
+        operation: str,
+        board: str,
+        endpoint: str,
+        offset: int | None = None,
+        detail_path: str | None = None,
+    ) -> dict:
+        """Validate a Workday CXS response before decoding or classification."""
+        context = (
+            f"company={company.id} board={board} operation={operation} "
+            f"offset={offset!r} detail_path={detail_path!r} "
+            f"original_endpoint={endpoint} status={response.status_code} "
+            f"final_url={getattr(response, 'url', '')} "
+            f"content_type={getattr(response, 'headers', {}).get('Content-Type', '')!r}"
+        )
+
+        if self._is_maintenance_response(response):
+            error = ProviderTemporaryError(
+                company=company.name,
+                provider=self.provider_name,
+                message=f"TEMPORARY_MAINTENANCE {context}",
+            )
+            error.maintenance = True
+            raise error
+
+        # Retain ProviderNotFoundError for 404/422 and ProviderTemporaryError
+        # for 429/5xx from the common provider classifier.
+        self._check_response(response, company)
+
+        try:
+            data = response.json()
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Workday invalid JSON ({context}) "
+                f"preview={self._response_preview(response)!r}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Workday unexpected JSON shape ({context}) "
+                f"expected=object actual={type(data).__name__}"
+            )
+
+        return data
 
     @staticmethod
     def _normalize_detail_location(
@@ -203,12 +294,14 @@ class WorkdayAdapter(ProviderAdapter):
                 timeout=_TIMEOUT,
             )
 
-            self._check_response(response, company)
-
-            data = response.json()
-
-            if not isinstance(data, dict):
-                return None
+            data = self._validate_json_response(
+                response,
+                company,
+                operation="detail_location",
+                board=board,
+                endpoint=url,
+                detail_path=external_path,
+            )
 
             resolved = self._locations_from_detail(data)
 
@@ -268,18 +361,16 @@ class WorkdayAdapter(ProviderAdapter):
 
             return resolved
 
-        except (
-            requests.RequestException,
-            ValueError,
-        ) as exc:
-            print(
-                "[WORKDAY] LOCATION_DETAIL_FAILED "
-                f"company={company.id} "
-                f"board={board} "
-                f"path={external_path} "
-                f"error={type(exc).__name__}"
-            )
-            return None
+        except requests.RequestException as exc:
+            raise ProviderTemporaryError(
+                company=company.name,
+                provider=self.provider_name,
+                message=(
+                    f"company={company.id} board={board} "
+                    f"operation=detail_location detail_path={external_path!r} "
+                    f"original_endpoint={url} error={type(exc).__name__}: {exc}"
+                ),
+            ) from exc
 
     def _enrich_ambiguous_locations(
         self,
@@ -320,45 +411,74 @@ class WorkdayAdapter(ProviderAdapter):
 
         resolved = 0
         unresolved = 0
+        attempted = 0
+        failures: dict[str, int] = {}
+        next_candidate = 0
+        pending = {}
+        stop_submitting = False
 
-        with ThreadPoolExecutor(
-            max_workers=_DETAIL_WORKERS
-        ) as executor:
-            futures = {
-                executor.submit(
+        def submit_available(executor):
+            nonlocal next_candidate
+            while (
+                not stop_submitting
+                and next_candidate < len(candidates)
+                and len(pending) < _DETAIL_WORKERS
+            ):
+                posting, board = candidates[next_candidate]
+                next_candidate += 1
+                pending[executor.submit(
                     self._fetch_detail_location,
                     company,
                     board,
                     posting,
-                ): posting
-                for posting, board in candidates
-            }
+                )] = posting
 
-            for future in as_completed(futures):
-                posting = futures[future]
+        with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as executor:
+            submit_available(executor)
+            while pending:
+                done, _ = wait(
+                    pending,
+                    return_when=FIRST_COMPLETED,
+                )
+                for future in done:
+                    posting = pending.pop(future)
+                    attempted += 1
+                    try:
+                        location = future.result()
+                    except Exception as exc:
+                        location = None
+                        reason = type(exc).__name__
+                        if isinstance(exc, ProviderTemporaryError):
+                            status = re.search(r"\bstatus=(\d+)\b", str(exc))
+                            if status:
+                                reason += f"/{status.group(1)}"
+                            stop_submitting = True
+                        failures[reason] = failures.get(reason, 0) + 1
 
-                try:
-                    location = future.result()
-                except Exception as exc:
-                    print(
-                        "[WORKDAY] LOCATION_ENRICHMENT_ERROR "
-                        f"company={company.id} "
-                        f"error={type(exc).__name__}"
-                    )
-                    location = None
+                    if location:
+                        posting["_resolved_location"] = location
+                        resolved += 1
+                    else:
+                        unresolved += 1
 
-                if location:
-                    posting["_resolved_location"] = location
-                    resolved += 1
+                if stop_submitting:
+                    for future in pending:
+                        future.cancel()
+                    pending.clear()
                 else:
-                    unresolved += 1
+                    submit_available(executor)
+
+        unattempted = len(candidates) - attempted
 
         print(
             "[WORKDAY] LOCATION_ENRICHMENT "
             f"company={company.id} "
-            f"attempted={len(candidates)} "
+            f"attempted={attempted} "
             f"resolved={resolved} "
-            f"unresolved={unresolved}"
+            f"unresolved={unresolved} "
+            f"failed={sum(failures.values())} "
+            f"unattempted={unattempted} "
+            f"failure_reasons={failures}"
         )
 
     def _request_page(
@@ -381,17 +501,23 @@ class WorkdayAdapter(ProviderAdapter):
             timeout=_TIMEOUT,
         )
 
-        self._check_response(
+        data = self._validate_json_response(
             response,
             company,
+            operation="listing",
+            board=headers["Referer"].rsplit("/", 1)[-1],
+            endpoint=url,
+            offset=offset,
         )
 
-        data = response.json()
-
-        if not isinstance(data, dict):
+        postings = data.get("jobPostings")
+        if postings is not None and not isinstance(postings, list):
             raise ValueError(
-                f"{company.name}: Workday returned "
-                "a non-object JSON response"
+                f"Workday unexpected listing shape company={company.id} "
+                f"board={headers['Referer'].rsplit('/', 1)[-1]} "
+                f"offset={offset} expected=jobPostings-list "
+                f"actual={type(postings).__name__} "
+                f"original_endpoint={url}"
             )
 
         return data
@@ -569,40 +695,62 @@ class WorkdayAdapter(ProviderAdapter):
             0: first_postings,
         }
 
-        with ThreadPoolExecutor(
-            max_workers=_PAGE_WORKERS
-        ) as executor:
+        next_offset = iter(offsets)
+        pending = {}
+        failure = None
 
-            future_to_offset = {
-                executor.submit(
+        with ThreadPoolExecutor(max_workers=_PAGE_WORKERS) as executor:
+            for _ in range(_PAGE_WORKERS):
+                try:
+                    offset = next(next_offset)
+                except StopIteration:
+                    break
+                pending[executor.submit(
                     self._request_page,
                     url=url,
                     headers=headers,
                     offset=offset,
                     company=company,
-                ): offset
-                for offset in offsets
-            }
+                )] = offset
 
-            for future in as_completed(
-                future_to_offset
-            ):
-                offset = (
-                    future_to_offset[
-                        future
-                    ]
+            while pending and failure is None:
+                done, _ = wait(
+                    pending,
+                    return_when=FIRST_COMPLETED,
                 )
+                for future in done:
+                    offset = pending.pop(future)
+                    try:
+                        data = future.result()
+                    except Exception as exc:
+                        failure = exc
+                        break
 
-                data = future.result()
+                    postings = data.get("jobPostings") or []
+                    pages[offset] = postings
 
-                postings = (
-                    data.get(
-                        "jobPostings"
-                    )
-                    or []
-                )
+                if failure is not None:
+                    for future in pending:
+                        future.cancel()
+                    pending.clear()
+                    break
 
-                pages[offset] = postings
+                while len(pending) < _PAGE_WORKERS:
+                    try:
+                        offset = next(next_offset)
+                    except StopIteration:
+                        break
+                    pending[executor.submit(
+                        self._request_page,
+                        url=url,
+                        headers=headers,
+                        offset=offset,
+                        company=company,
+                    )] = offset
+
+        if failure is not None:
+            # Do not return a partial inventory when a later page fails.
+            raise failure
 
         # Thread completion order is nondeterministic.
         # Restore Workday's original page ordering.
@@ -829,13 +977,19 @@ class WorkdayAdapter(ProviderAdapter):
                 timeout=_TIMEOUT,
             )
 
-            self._check_response(response, company)
+            data = self._validate_json_response(
+                response,
+                company,
+                operation="validation",
+                board=board,
+                endpoint=url,
+                offset=0,
+            )
 
-            data = response.json()
-
-            if isinstance(data, dict) and (
-                "jobPostings" in data or "total" in data
-            ):
+            if (
+                "jobPostings" not in data
+                or isinstance(data.get("jobPostings"), list)
+            ) and ("jobPostings" in data or "total" in data):
                 return True
 
         return False
