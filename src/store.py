@@ -12,7 +12,9 @@ workflow) so state survives across stateless GitHub Actions runs.
 """
 
 import json
+import os
 from pathlib import Path
+import tempfile
 
 from models import Job
 
@@ -26,14 +28,26 @@ class SeenStore:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def filter_new(self, jobs: list[Job]) -> list[Job]:
-        """Return only jobs that have not been seen before."""
-        return [job for job in jobs if self._is_new(job)]
+        """Return unseen jobs once each, preserving input order."""
+        result = []
+        candidates = set(self._seen)
+
+        for job in jobs:
+            key = self._key(job)
+            if key in candidates:
+                continue
+            candidates.add(key)
+            result.append(job)
+
+        return result
 
     def mark_seen(self, jobs: list[Job]) -> None:
         """Record jobs as seen and persist to disk immediately."""
+        updated = set(self._seen)
         for job in jobs:
-            self._seen.add(self._key(job))
-        self._persist()
+            updated.add(self._key(job))
+        self._persist(updated)
+        self._seen = updated
 
     @property
     def count(self) -> int:
@@ -55,7 +69,33 @@ class SeenStore:
         data = json.loads(self._path.read_text(encoding="utf-8"))
         return set(data.get("seen", []))
 
-    def _persist(self) -> None:
+    def _persist(self, seen: set[str] | None = None) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps({"seen": sorted(self._seen)}, indent=2) + "\n"
-        self._path.write_text(payload, encoding="utf-8")
+        payload = json.dumps(
+            {"seen": sorted(self._seen if seen is None else seen)},
+            indent=2,
+        ) + "\n"
+        temporary_path = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._path.parent,
+                prefix=f".{self._path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                temporary.write(payload)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+
+            os.replace(temporary_path, self._path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass

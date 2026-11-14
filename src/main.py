@@ -16,6 +16,7 @@ from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )
+from dataclasses import dataclass
 from datetime import (
     datetime,
     timezone,
@@ -32,7 +33,11 @@ from src.description_diagnostics import (
     promotable_jobs,
 )
 from src.filters import JobFilter
-from src.notifier import TelegramNotifier
+from src.notifier import (
+    MAX_MESSAGE_LEN,
+    TelegramNotifier,
+    message_length,
+)
 from src.providers import (
     AlgoliaAdapter,
     AtlassianAdapter,
@@ -179,11 +184,16 @@ def _settings() -> dict:
 def _max_jobs(
     settings: dict,
 ) -> int:
-    return settings[
+    value = settings[
         "telegram"
     ][
         "max_jobs_per_message"
     ]
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(
+            "telegram.max_jobs_per_message must be a positive integer"
+        )
+    return value
 
 
 def _max_workers(
@@ -354,26 +364,56 @@ def _notification_location_group(
     return "Other India"
 
 
-def _build_message(
+@dataclass(frozen=True)
+class NotificationBatch:
+    jobs: list[Job]
+    message: str
+
+
+def _compact_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: max(1, limit - 1)] + "…"
+
+
+def _job_lines(job: Job, *, compact: bool = False) -> list[str]:
+    company = str(job.company)
+    title = str(job.title)
+    location = str(job.location)
+
+    if compact:
+        company = _compact_text(company, 120)
+        title = _compact_text(title, 180)
+        location = _compact_text(location, 120)
+
+    return [
+        f"{company}",
+        f"💼 {title}",
+        f"📍 {location}",
+        str(job.url),
+        "",
+    ]
+
+
+def _render_message(
     jobs: list[Job],
-    limit: int,
+    batch_number: int,
+    start_number: int,
     settings: dict,
+    *,
+    compact: bool = False,
 ) -> str:
     lines = [
         "🤖 Job Hunter",
+        f"📦 Batch {batch_number}",
         "",
         f"🆕 {len(jobs)} new job(s)",
         "",
     ]
 
-    shown_jobs = jobs[:limit]
-
     current_group = None
 
-    for i, job in enumerate(
-        shown_jobs,
-        1,
-    ):
+    for index, job in enumerate(jobs, start_number):
         group = (
             _notification_location_group(
                 job,
@@ -392,18 +432,112 @@ def _build_message(
 
             current_group = group
 
-        lines += [
-            f"{i}. {job.company}",
-            f"💼 {job.title}",
-            f"📍 {job.location}",
-            str(job.url),
-            "",
-        ]
+        job_record = _job_lines(job, compact=compact)
+        job_record[0] = f"{index}. {job_record[0]}"
+        lines += job_record
 
-    remaining = len(jobs) - limit
-    if remaining > 0:
-        lines.append(f"...and {remaining} more job(s) not shown.")
     return "\n".join(lines)
+
+
+def _build_message_batches(
+    jobs: list[Job],
+    limit: int,
+    settings: dict,
+) -> list[NotificationBatch]:
+    """Build a complete, length-safe plan before any delivery starts."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError(
+            "telegram.max_jobs_per_message must be a positive integer"
+        )
+
+    if not jobs:
+        return []
+
+    batches: list[NotificationBatch] = []
+    current: list[Job] = []
+
+    def append_current() -> None:
+        if not current:
+            return
+        batch_number = len(batches) + 1
+        start_number = sum(len(batch.jobs) for batch in batches) + 1
+        message = _render_message(
+            current,
+            batch_number,
+            start_number,
+            settings,
+        )
+        if message_length(message) > MAX_MESSAGE_LEN:
+            raise ValueError(
+                f"Notification batch {batch_number} exceeds "
+                f"{MAX_MESSAGE_LEN} measured characters"
+            )
+        batches.append(NotificationBatch(list(current), message))
+        current.clear()
+
+    for job in jobs:
+        if len(current) >= limit:
+            append_current()
+
+        candidate = current + [job]
+        batch_number = len(batches) + 1
+        start_number = sum(len(batch.jobs) for batch in batches) + 1
+        candidate_message = _render_message(
+            candidate,
+            batch_number,
+            start_number,
+            settings,
+        )
+
+        if current and message_length(candidate_message) > MAX_MESSAGE_LEN:
+            append_current()
+            candidate = [job]
+            batch_number = len(batches) + 1
+            start_number = sum(len(batch.jobs) for batch in batches) + 1
+            candidate_message = _render_message(
+                candidate,
+                batch_number,
+                start_number,
+                settings,
+            )
+
+        if message_length(candidate_message) > MAX_MESSAGE_LEN:
+            candidate_message = _render_message(
+                [job],
+                batch_number,
+                start_number,
+                settings,
+                compact=True,
+            )
+            if message_length(candidate_message) > MAX_MESSAGE_LEN:
+                raise ValueError(
+                    "A single job notification cannot fit within "
+                    f"{MAX_MESSAGE_LEN} measured characters while preserving "
+                    "its complete URL"
+                )
+            append_current()
+            batches.append(NotificationBatch([job], candidate_message))
+            continue
+
+        current.append(job)
+
+    append_current()
+    return batches
+
+
+def _build_message(
+    jobs: list[Job],
+    limit: int,
+    settings: dict,
+) -> str:
+    """Compatibility wrapper for callers that require one message."""
+    batches = _build_message_batches(jobs, limit, settings)
+    if len(batches) != 1:
+        raise ValueError(
+            "Jobs require multiple notification batches; use "
+            "_build_message_batches()"
+        )
+    return batches[0].message
 
 
 def _fetch_jobs_with_recovery(
@@ -617,7 +751,7 @@ def _send_notifications(
     max_jobs: int,
     settings: dict,
 ) -> None:
-    """Send notification with new jobs and mark them as seen."""
+    """Send and persist one complete notification batch at a time."""
     try:
         ordered_jobs = (
             _sort_notification_jobs(
@@ -625,17 +759,53 @@ def _send_notifications(
                 settings,
             )
         )
-        message = _build_message(
+        batches = _build_message_batches(
             ordered_jobs,
             max_jobs,
             settings,
         )
-        notifier.send_message(message)
-        store.mark_seen(new_jobs)
-        print(f"Telegram notification sent ({len(new_jobs)} job(s)).")
+        print(
+            f"Notification plan: {len(ordered_jobs)} unique new job(s), "
+            f"{len(batches)} batch(es)."
+        )
+
+        for index, batch in enumerate(batches, 1):
+            pending = len(ordered_jobs) - sum(
+                len(previous.jobs)
+                for previous in batches[:index - 1]
+            )
+            try:
+                notifier.send_message(batch.message)
+            except Exception as exc:
+                print(
+                    f"[ERROR] Delivery failed at batch {index}/{len(batches)} "
+                    f"({len(batch.jobs)} job(s)); {pending} job(s) remain "
+                    f"pending: {exc}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            try:
+                store.mark_seen(batch.jobs)
+            except Exception as exc:
+                print(
+                    f"[ERROR] State persistence failed after acknowledged "
+                    f"batch {index}/{len(batches)}; {pending} job(s) remain "
+                    "pending. Telegram may have accepted this batch; a "
+                    f"retry can duplicate it: {exc}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            print(
+                f"Telegram batch {index}/{len(batches)} acknowledged and "
+                f"recorded ({len(batch.jobs)} job(s))."
+            )
     except Exception as exc:
-        # Don't mark as seen — will retry on the next run.
-        print(f"[ERROR] Notification failed: {exc}", file=sys.stderr)
+        print(
+            f"[ERROR] Notification plan failed before delivery: {exc}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 
@@ -807,6 +977,7 @@ def main() -> None:
     run_started = time.perf_counter()
 
     settings = _settings()
+    max_jobs = _max_jobs(settings)
 
     registry = load_registry()
 
@@ -983,7 +1154,7 @@ def main() -> None:
         store,
         notifier,
         new_jobs,
-        _max_jobs(settings),
+        max_jobs,
         settings,
     )
 
