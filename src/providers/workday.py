@@ -868,7 +868,10 @@ class WorkdayAdapter(ProviderAdapter):
                             reason = exc.category or reason
                             if exc.status is not None:
                                 reason += f"/{exc.status}"
-                            if exc.category == "deferred":
+                            if exc.category == "rate_limit" and exc.status == 429:
+                                report.stop_reason = report.stop_reason or "rate_limit"
+                                stop_submitting = True
+                            elif exc.category == "deferred":
                                 cause = exc.deferral_reason or "unknown"
                                 after_attempt = bool(
                                     stats is not None and stats.attempts

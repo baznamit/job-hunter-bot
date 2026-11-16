@@ -69,6 +69,10 @@ Provider configuration is company-specific and stored in
 and probing for diagnostics and stale-provider recovery. Not every provider
 type is automatically discoverable.
 
+If a Workday location-detail request exhausts its retries with HTTP 429, the
+company stops submitting new detail requests while in-flight requests finish.
+Unresolved and unstarted locations are reported as partial enrichment.
+
 ## Configuration and state
 
 | File | Purpose |

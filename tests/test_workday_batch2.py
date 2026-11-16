@@ -1,5 +1,5 @@
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
 import time
@@ -233,6 +233,186 @@ def test_isolated_timeout_allows_remaining_candidates_to_continue():
     assert report.enrichment_attempted == 3
     assert report.enrichment_resolved == 2
     assert report.failure_reasons == {"timeout": 1}
+
+
+def test_exhausted_detail_rate_limit_stops_unstarted_candidates():
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=2)
+    )
+    postings = [_posting(i) for i in range(6)]
+
+    def rate_limited(url, **_kwargs):
+        return _response(429, url, {}, {"Retry-After": "0"})
+
+    with patch("src.providers.workday._DETAIL_WORKERS", 1):
+        with patch(
+            "src.providers.workday.requests.get", side_effect=rate_limited
+        ) as request:
+            report = adapter._enrich_ambiguous_locations(_company(), postings)
+
+    assert request.call_count == 2
+    assert report.enrichment_candidates == 6
+    assert report.enrichment_attempted == 1
+    assert report.enrichment_unresolved == 1
+    assert report.enrichment_unstarted == 5
+    assert report.http_attempts == 2
+    assert report.http_retries == 1
+    assert report.failure_reasons == {"rate_limit/429": 1}
+    assert report.stop_reason == "rate_limit"
+    assert report.coverage_status == "partial"
+    assert all(
+        posting["locationsText"] == "IN-MH-MUMBAI-SITE"
+        and "_resolved_location" not in posting
+        for posting in postings
+    )
+
+
+def test_detail_rate_limit_followed_by_success_continues_candidates():
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=2)
+    )
+    postings = [_posting(i) for i in range(2)]
+    calls = []
+
+    def detail_request(url, **_kwargs):
+        calls.append(url)
+        if len(calls) == 1:
+            return _response(429, url, {}, {"Retry-After": "0"})
+        return _response(
+            200,
+            url,
+            {"jobPostingInfo": {
+                "location": "Mumbai, India",
+                "country": {"descriptor": "India"},
+            }},
+        )
+
+    with patch("src.providers.workday._DETAIL_WORKERS", 1):
+        with patch("src.providers.workday.requests.get", side_effect=detail_request):
+            report = adapter._enrich_ambiguous_locations(_company(), postings)
+
+    assert len(calls) == 3
+    assert report.enrichment_resolved == 2
+    assert report.enrichment_unstarted == 0
+    assert (report.http_attempts, report.http_retries) == (3, 1)
+    assert report.stop_reason is None
+    assert report.coverage_status == "complete"
+
+
+def test_rate_limit_retains_completed_and_inflight_detail_results():
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=2)
+    )
+    postings = [_posting(i) for i in range(4)]
+    for posting in postings:
+        posting["title"] = "Engineer"
+
+    inflight_started = Event()
+    release_inflight = Event()
+    failure_observed = Event()
+
+    def detail_request(url, **_kwargs):
+        number = int(url.rsplit("/", 1)[-1])
+        if number == 1:
+            assert inflight_started.wait(5)
+            return _response(429, url, {}, {"Retry-After": "0"})
+        if number == 2:
+            inflight_started.set()
+            assert release_inflight.wait(5)
+        return _response(
+            200,
+            url,
+            {"jobPostingInfo": {
+                "location": "Mumbai, India",
+                "country": {"descriptor": "India"},
+            }},
+        )
+
+    def observe_failure(futures, **kwargs):
+        done, pending = wait(futures, **kwargs)
+        if any(
+            isinstance(future.exception(), ProviderTemporaryError)
+            and future.exception().category == "rate_limit"
+            for future in done
+        ):
+            failure_observed.set()
+        return done, pending
+
+    with patch("src.providers.workday._DETAIL_WORKERS", 2):
+        with patch("src.providers.workday.wait", side_effect=observe_failure):
+            with patch(
+                "src.providers.workday.requests.get", side_effect=detail_request
+            ) as request:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(
+                        adapter._enrich_ambiguous_locations, _company(), postings
+                    )
+                    try:
+                        assert failure_observed.wait(5)
+                    finally:
+                        release_inflight.set()
+                    report = future.result(timeout=5)
+
+    assert request.call_count == 4
+    assert report.enrichment_candidates == 4
+    assert report.enrichment_attempted == 3
+    assert report.enrichment_resolved == 2
+    assert report.enrichment_unresolved == 1
+    assert report.enrichment_unstarted == 1
+    assert (report.http_attempts, report.http_retries) == (4, 1)
+    assert report.stop_reason == "rate_limit"
+    assert report.coverage_status == "partial"
+    assert postings[0]["_resolved_location"] == "Mumbai, India"
+    assert postings[2]["_resolved_location"] == "Mumbai, India"
+    assert "_resolved_location" not in postings[1]
+    assert "_resolved_location" not in postings[3]
+    assert postings[3]["locationsText"] == "IN-MH-MUMBAI-SITE"
+    jobs = adapter.parse({"jobPostings": postings}, _company())
+    assert [job.id for job in jobs] == [posting["externalPath"] for posting in postings]
+    assert all(
+        str(job.url) == f"https://test.wd1.myworkdayjobs.com/en-US/Careers{posting['externalPath']}"
+        for job, posting in zip(jobs, postings)
+    )
+
+
+@pytest.mark.parametrize("failure", ["server_error", "connection_error"])
+def test_other_exhausted_detail_errors_continue_candidates(failure):
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=2, backoff_seconds=(0,))
+    )
+    postings = [_posting(i) for i in range(3)]
+
+    def detail_request(url, **_kwargs):
+        if url.endswith("/0"):
+            if failure == "connection_error":
+                raise requests.ConnectionError("offline test")
+            return _response(503, url, {}, {"Retry-After": "0"})
+        return _response(
+            200,
+            url,
+            {"jobPostingInfo": {
+                "location": "Mumbai, India",
+                "country": {"descriptor": "India"},
+            }},
+        )
+
+    with patch("src.providers.workday._DETAIL_WORKERS", 1):
+        with patch(
+            "src.providers.workday.requests.get", side_effect=detail_request
+        ) as request:
+            report = adapter._enrich_ambiguous_locations(_company(), postings)
+
+    assert request.call_count == 4
+    assert report.enrichment_attempted == 3
+    assert report.enrichment_resolved == 2
+    assert report.enrichment_unresolved == 1
+    assert report.enrichment_unstarted == 0
+    assert (report.http_attempts, report.http_retries) == (4, 1)
+    assert report.failure_reasons == {
+        "server_error/503" if failure == "server_error" else "connection_error": 1
+    }
+    assert report.stop_reason is None
+    assert report.coverage_status == "partial"
 
 
 def test_partial_workday_report_reaches_company_result_without_shared_state():
