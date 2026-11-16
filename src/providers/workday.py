@@ -1303,8 +1303,9 @@ class WorkdayAdapter(ProviderAdapter):
             )
 
         total = reported_total
-        # Later Workday pages can report total=0; page 0 remains the
-        # authoritative inventory boundary for this board.
+        # Use page 0 as the inventory boundary. Later totals are not
+        # authoritative; returned page lengths are checked against this
+        # boundary. Additions after page 0 may not be included.
         expected_first_count = min(total, _PAGE_SIZE)
         if len(first_postings) < expected_first_count:
             raise ValueError(

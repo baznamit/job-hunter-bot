@@ -372,7 +372,7 @@ def test_eightfold_count_increase_extends_inventory_boundary():
     assert len(raw["positions"]) == 20
 
 
-def test_eightfold_count_decrease_ends_at_confirmed_current_boundary():
+def test_eightfold_count_decrease_followed_by_empty_page_fails():
     adapter = EightfoldAdapter()
     calls = []
 
@@ -388,10 +388,13 @@ def test_eightfold_count_decrease_ends_at_confirmed_current_boundary():
         patch.object(adapter, "_request_page", side_effect=request_page),
         patch("src.providers.eightfold.time.sleep"),
     ):
-        raw = adapter._fetch_raw(_company())
+        with pytest.raises(
+            RuntimeError,
+            match="category=empty_page_after_total_decrease",
+        ):
+            adapter._fetch_raw(_company())
 
     assert calls == [0, 10, 15]
-    assert len(raw["positions"]) == 15
 
 
 def test_eightfold_maximum_page_protection_remains_enforced():

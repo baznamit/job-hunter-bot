@@ -331,16 +331,16 @@ class EightfoldAdapter(ProviderAdapter):
             )
 
             if not page:
-                if reported_total <= offset:
-                    # The count can shrink during a crawl. An empty page is
-                    # terminal only when its current count is at or before
-                    # this offset; otherwise the response is incomplete.
-                    break
+                category = (
+                    "empty_page_after_total_decrease"
+                    if reported_total < total
+                    else "unexpected_empty_page"
+                )
                 raise RuntimeError(
                     "Eightfold listing incomplete "
-                    "category=unexpected_empty_page "
+                    f"category={category} "
                     f"company={company.id} start={offset} "
-                    f"count={reported_total}"
+                    f"prior_total={total} count={reported_total}"
                 )
 
             added = add_page(page, offset)
@@ -364,9 +364,8 @@ class EightfoldAdapter(ProviderAdapter):
 
             pages_since_cooldown += 1
 
-            # Keep the largest observed boundary so additions are not
-            # silently skipped; a confirmed empty page can terminate a
-            # smaller current inventory above.
+            # Keep the largest observed boundary so later decreases do not
+            # silently shorten the inventory expected from the first page.
             total = max(total, reported_total)
 
             next_offset = offset + len(page)
