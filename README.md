@@ -32,8 +32,7 @@ The main entry point is `python -m src.main`.
 
 ## Technologies and project layout
 
-- Python; CI checks Python 3.12 and 3.15. GitHub Actions runtime workflows
-  currently use Python 3.15.
+- Python 3.15 is the project's only tested and supported runtime.
 - Pydantic for validating and normalizing models.
 - Requests for ATS, job-description, and Telegram HTTP requests.
 - Beautiful Soup for HTML-based research and probing.
