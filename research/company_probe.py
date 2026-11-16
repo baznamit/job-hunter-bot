@@ -5103,6 +5103,26 @@ WORKDAY_RATE_LIMIT_HEADERS = (
     "x-ratelimit-remaining",
     "x-ratelimit-reset",
 )
+# Identification headers are descriptive evidence only; no single header
+# establishes who generated a response. Cookies and credentials are never listed.
+WORKDAY_IDENTIFICATION_HEADERS = (
+    "server",
+    "via",
+    "date",
+    "x-request-id",
+    "x-correlation-id",
+    "x-amzn-requestid",
+    "x-amz-cf-id",
+    "x-amz-cf-pop",
+    "cf-ray",
+    "cf-cache-status",
+    "x-cache",
+    "x-served-by",
+)
+WORKDAY_IDENTIFICATION_VALUE_LIMIT = 128
+_IDENTIFICATION_VALUE = re.compile(r"[A-Za-z0-9 ._:/;,=+()@-]+")
+_MEDIA_TYPE = re.compile(r"[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*")
+WORKDAY_SAMPLE_OFFSET = 0
 _HTTP_DATE = re.compile(
     r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} "
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
@@ -5123,6 +5143,69 @@ def _workday_rate_limit_headers(headers):
         else:
             safe[name] = "<omitted>"
     return safe
+
+
+def _workday_identification_headers(headers):
+    """Return bounded, allowlisted header values; unsafe values are omitted."""
+    evidence = {}
+    for name in WORKDAY_IDENTIFICATION_HEADERS:
+        value = headers.get(name)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if (
+            0 < len(value) <= WORKDAY_IDENTIFICATION_VALUE_LIMIT
+            and _IDENTIFICATION_VALUE.fullmatch(value)
+        ):
+            evidence[name] = value
+        else:
+            evidence[name] = "<omitted>"
+    return evidence
+
+
+def _workday_media_type(headers):
+    """Return the bare media type, 'missing' or '<omitted>'; parameters are dropped."""
+    value = headers.get("content-type")
+    if value is None:
+        return "missing"
+    media_type = str(value).split(";", 1)[0].strip().lower()
+    return media_type if _MEDIA_TYPE.fullmatch(media_type) else "<omitted>"
+
+
+def _workday_content_length(headers):
+    value = headers.get("content-length")
+    if value is None:
+        return "missing"
+    return value if re.fullmatch(r"[0-9]{1,12}", str(value)) else "<omitted>"
+
+
+def _workday_response_class(status, media_type):
+    """Classify from status and media type only; the body is never read."""
+    if status == 429:
+        category = "rate_limited"
+    elif status in (403, 401):
+        category = "access_denied"
+    elif 300 <= status < 400:
+        category = "redirect"
+    elif status >= 500:
+        category = "server_error"
+    elif status >= 400:
+        category = "client_error"
+    elif 200 <= status < 300:
+        category = "success"
+    else:
+        category = "other"
+    if media_type == "application/json" or media_type.endswith("+json"):
+        body = "json"
+    elif media_type == "text/html":
+        body = "html"
+    elif media_type.startswith("text/"):
+        body = "text"
+    elif media_type == "missing":
+        body = "no_content_type"
+    else:
+        body = "other"
+    return f"{category}/{body}"
 
 
 def run_workday_rate_limit_sample():
@@ -5165,7 +5248,7 @@ def run_workday_rate_limit_sample():
                     json={
                         "appliedFacets": {},
                         "limit": 20,
-                        "offset": 0,
+                        "offset": WORKDAY_SAMPLE_OFFSET,
                         "searchText": "",
                     },
                     headers=_workday_health_headers(company, board),
@@ -5174,10 +5257,16 @@ def run_workday_rate_limit_sample():
                     stream=True,
                 ) as response:
                     elapsed = time.monotonic() - started
+                    media_type = _workday_media_type(response.headers)
                     print(
                         f"[{company.id}] start_utc={start_utc} "
+                        f"offset={WORKDAY_SAMPLE_OFFSET} "
                         f"elapsed_seconds={elapsed:.3f} status={response.status_code} "
-                        f"headers={json.dumps(_workday_rate_limit_headers(response.headers), sort_keys=True)}"
+                        f"response_class={_workday_response_class(response.status_code, media_type)} "
+                        f"content_type={media_type} "
+                        f"content_length={_workday_content_length(response.headers)} "
+                        f"headers={json.dumps(_workday_rate_limit_headers(response.headers), sort_keys=True)} "
+                        f"identification={json.dumps(_workday_identification_headers(response.headers), sort_keys=True)}"
                     )
                     if response.status_code == 429:
                         print("stopped=rate_limit")

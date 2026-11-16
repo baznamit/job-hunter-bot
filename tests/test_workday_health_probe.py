@@ -382,3 +382,160 @@ def test_rate_limit_sample_real_session_disables_redirects_retries_and_environme
     assert all("Cookie" not in request.headers and "Authorization" not in request.headers for request in sent)
     assert sent[0].url.startswith("https://postman.wd108.myworkdayjobs.com/")
     assert sent[1].url.startswith("https://browserstack.wd3.myworkdayjobs.com/")
+
+
+def _sample_line(capsys, company="postman"):
+    lines = [
+        line for line in capsys.readouterr().out.splitlines()
+        if line.startswith(f"[{company}]")
+    ]
+    assert len(lines) == 1
+    return lines[0]
+
+
+def test_sample_reports_allowlisted_identification_metadata(monkeypatch, capsys):
+    session = SampleSession(SampleResponse(429, {
+        "Server": "example-edge",
+        "Via": "1.1 edge-proxy",
+        "X-Request-Id": "abc-123",
+        "CF-Ray": "8f1c-IAD",
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Length": "162",
+        "Retry-After": "7",
+        "X-Unlisted": "must-not-appear",
+    }))
+    monkeypatch.setattr(probe.requests, "Session", lambda: session)
+
+    probe.run_workday_rate_limit_sample()
+
+    line = _sample_line(capsys)
+    assert "offset=0" in line
+    assert "status=429" in line
+    assert "response_class=rate_limited/html" in line
+    assert "content_type=text/html " in line
+    assert "charset" not in line
+    assert "content_length=162" in line
+    assert '"retry-after": "7"' in line
+    identification = json.loads(line.split("identification=", 1)[1])
+    assert identification == {
+        "cf-ray": "8f1c-IAD",
+        "server": "example-edge",
+        "via": "1.1 edge-proxy",
+        "x-request-id": "abc-123",
+    }
+    assert "must-not-appear" not in line
+
+
+def test_sample_missing_headers_are_reported_as_missing(monkeypatch, capsys):
+    monkeypatch.setattr(
+        probe.requests, "Session", lambda: SampleSession(SampleResponse(429))
+    )
+
+    probe.run_workday_rate_limit_sample()
+
+    line = _sample_line(capsys)
+    assert "response_class=rate_limited/no_content_type" in line
+    assert "content_type=missing" in line
+    assert "content_length=missing" in line
+    assert "headers={}" in line
+    assert line.endswith("identification={}")
+
+
+def test_sample_redacts_sensitive_and_unsafe_header_values(monkeypatch, capsys):
+    session = SampleSession(SampleResponse(429, {
+        "Set-Cookie": "session=cookie-secret",
+        "Authorization": "Bearer token-secret",
+        "Proxy-Authorization": "proxy-secret",
+        "X-Api-Key": "key-secret",
+        "Server": "edge?token=query-secret",
+        "Via": "x" * 129,
+        "X-Request-Id": "line\x00break",
+        "Content-Type": "text/html; boundary=type-secret",
+        "Content-Length": "12abc",
+        "Retry-After": "later-secret",
+    }))
+    monkeypatch.setattr(probe.requests, "Session", lambda: session)
+
+    probe.run_workday_rate_limit_sample()
+
+    line = _sample_line(capsys)
+    assert "secret" not in line
+    identification = json.loads(line.split("identification=", 1)[1])
+    assert identification == {
+        "server": "<omitted>",
+        "via": "<omitted>",
+        "x-request-id": "<omitted>",
+    }
+    assert "content_length=<omitted>" in line
+    assert '"retry-after": "<omitted>"' in line
+
+
+@pytest.mark.parametrize(
+    "status, content_type, expected",
+    [
+        (200, "application/json; charset=utf-8", "success/json"),
+        (429, "application/json", "rate_limited/json"),
+        (429, "text/plain", "rate_limited/text"),
+        (403, "text/html", "access_denied/html"),
+        (302, None, "redirect/no_content_type"),
+        (503, "application/problem+json", "server_error/json"),
+        (418, "image/png", "client_error/other"),
+    ],
+)
+def test_sample_response_classification_uses_status_and_media_type_only(
+    monkeypatch, capsys, status, content_type, expected,
+):
+    headers = {} if content_type is None else {"Content-Type": content_type}
+    monkeypatch.setattr(probe.time, "sleep", lambda delay: None)
+    monkeypatch.setattr(
+        probe.requests,
+        "Session",
+        lambda: SampleSession(SampleResponse(status, headers)),
+    )
+
+    probe.run_workday_rate_limit_sample()
+
+    # SampleResponse.content raises, so reaching here also proves the body
+    # was never read.
+    assert f"response_class={expected}" in capsys.readouterr().out
+
+
+def test_sample_429_with_metadata_stops_after_one_request_without_pagination(
+    monkeypatch, capsys,
+):
+    sessions = [SampleSession(SampleResponse(429, {"Server": "edge"}))]
+    created = []
+
+    def factory():
+        session = sessions[0] if not created else SampleSession(SampleResponse())
+        created.append(session)
+        return session
+
+    sleeps = []
+    monkeypatch.setattr(probe.requests, "Session", factory)
+    monkeypatch.setattr(probe.time, "sleep", sleeps.append)
+
+    probe.run_workday_rate_limit_sample()
+
+    assert len(created) == 1
+    assert len(sessions[0].calls) == 1
+    assert sessions[0].calls[0][1]["json"]["offset"] == 0
+    assert sleeps == []
+    assert "stopped=rate_limit" in capsys.readouterr().out
+
+
+def test_sample_request_count_never_exceeds_four_and_makes_no_retries(monkeypatch):
+    sessions = [SampleSession(SampleResponse()) for _ in range(8)]
+    factory = iter(sessions)
+    monkeypatch.setattr(probe.requests, "Session", lambda: next(factory))
+    monkeypatch.setattr(probe.time, "sleep", lambda delay: None)
+
+    probe.run_workday_rate_limit_sample()
+
+    assert sum(len(session.calls) for session in sessions) == 4
+    assert all(len(session.calls) <= 1 for session in sessions)
+    assert all(
+        session.calls[0][1]["json"]["offset"] == 0
+        for session in sessions[:4]
+    )
+    assert all(not session.calls for session in sessions[4:])

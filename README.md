@@ -159,6 +159,15 @@ read or write bot state or send notifications. Connect/read timeouts are 5/10
 seconds per request; DNS and transport behavior can exceed these timeouts.
 This mode makes real public requests only when explicitly invoked.
 
+Each sample line also reports the listing `offset` (always 0), a coarse
+`response_class` derived only from the status and media type (for example
+`rate_limited/html`), the bare `content_type` and `content_length`, and an
+`identification` object holding allowlisted `Server`, `Via`, `Date` and
+request/CDN identifier headers. Values that are missing are omitted; values
+that are too long or contain unexpected characters print as `<omitted>`.
+Response bodies, cookies and credentials are never printed. These fields are
+evidence only: no single header identifies who generated a response.
+
 Unlike the production Workday client, the sample ignores environment proxies,
 netrc credentials, and environment CA-bundle overrides; it does not follow
 redirects and uses shorter timeouts. Its network path and outcomes can
