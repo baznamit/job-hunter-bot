@@ -19,6 +19,13 @@ def _company():
     )
 
 
+def _fake_detail_result(adapter, result):
+    stats = adapter._current_request_stats()
+    if stats is not None:
+        stats.attempts += 1
+    return result
+
+
 def test_duckcreek_multiple_locations():
     data = {
         "jobPostingInfo": {
@@ -100,7 +107,10 @@ def test_only_ambiguous_locations_trigger_detail_fetch():
     with patch.object(
         adapter,
         "_fetch_detail_location",
-        return_value="Mumbai, India | Bengaluru, India",
+        side_effect=lambda *_: _fake_detail_result(
+            adapter,
+            "Mumbai, India | Bengaluru, India",
+        ),
     ) as mock_fetch:
         adapter._enrich_ambiguous_locations(
             _company(),
@@ -130,7 +140,7 @@ def test_failed_enrichment_preserves_original_location():
     with patch.object(
         adapter,
         "_fetch_detail_location",
-        return_value=None,
+        side_effect=lambda *_: _fake_detail_result(adapter, None),
     ):
         adapter._enrich_ambiguous_locations(
             _company(),
@@ -184,7 +194,10 @@ def test_single_location_site_code_triggers_enrichment():
     with patch.object(
         adapter,
         "_fetch_detail_location",
-        return_value="Mumbai, India",
+        side_effect=lambda *_: _fake_detail_result(
+            adapter,
+            "Mumbai, India",
+        ),
     ) as mock_fetch:
         adapter._enrich_ambiguous_locations(
             _company(),
@@ -212,7 +225,7 @@ def test_single_location_detail_failure_preserves_original():
     with patch.object(
         adapter,
         "_fetch_detail_location",
-        return_value=None,
+        side_effect=lambda *_: _fake_detail_result(adapter, None),
     ):
         adapter._enrich_ambiguous_locations(
             _company(),

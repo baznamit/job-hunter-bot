@@ -63,6 +63,7 @@ from src.providers import (
     WorkdayAdapter,
     ZohoRecruitAdapter,
 )
+from src.providers.workday import WorkdayRequestPolicy
 from src.providers.exceptions import (
     ProviderNotFoundError,
     ProviderTemporaryError,
@@ -548,6 +549,7 @@ def _fetch_jobs_with_recovery(
     recovery_settings: dict,
     *,
     include_report: bool = False,
+    workday_policy: WorkdayRequestPolicy | None = None,
 ):
     """
     Fetch jobs and recover stale ATS mappings.
@@ -617,7 +619,8 @@ def _fetch_jobs_with_recovery(
         )
 
         jobs = _recover_and_retry_fetch(
-            company
+            company,
+            workday_policy,
         )
 
         if jobs is None:
@@ -681,6 +684,15 @@ def _fetch_jobs_with_recovery(
             file=sys.stderr,
         )
 
+        report = getattr(exc, "workday_report", None)
+        if report is not None:
+            report = SimpleNamespace(
+                **vars(report),
+                coverage_status="failed",
+                error=str(exc),
+            )
+            return result(None, report)
+
         return result(
             None,
             SimpleNamespace(
@@ -691,7 +703,10 @@ def _fetch_jobs_with_recovery(
         )
 
 
-def _recover_and_retry_fetch(company) -> list[Job] | None:
+def _recover_and_retry_fetch(
+    company,
+    workday_policy: WorkdayRequestPolicy | None = None,
+) -> list[Job] | None:
     """Attempt to recover from stale provider and retry fetching jobs."""
     recovered_company = _recover_stale_provider(company)
 
@@ -703,6 +718,11 @@ def _recover_and_retry_fetch(company) -> list[Job] | None:
         return None
 
     recovered_adapter = _ADAPTERS.get(recovered_company.provider.type)
+    if (
+        recovered_company.provider.type == ProviderType.WORKDAY
+        and workday_policy is not None
+    ):
+        recovered_adapter = WorkdayAdapter(workday_policy)
 
     if recovered_adapter is None:
         print(
@@ -808,6 +828,10 @@ def _apply_coverage_report(result: CompanyRunResult, report) -> None:
         "enrichment_unstarted",
         "http_attempts",
         "http_retries",
+        "deferred",
+        "deferred_before_attempt",
+        "deferred_after_attempt",
+        "deferral_reasons",
         "failure_reasons",
         "coverage_note",
     ):
@@ -816,7 +840,11 @@ def _apply_coverage_report(result: CompanyRunResult, report) -> None:
 
     if hasattr(report, "deferred") and report.deferred:
         result.coverage_note = (
-            f"deferred={report.deferred} stop_reason={report.stop_reason}"
+            f"deferrals={report.deferred} "
+            f"before_attempt={report.deferred_before_attempt} "
+            f"after_attempt={report.deferred_after_attempt} "
+            f"causes={report.deferral_reasons} "
+            f"stop_reason={report.stop_reason}"
         )
 
 
@@ -891,8 +919,10 @@ def _run_company(
     job_filter: JobFilter,
     recovery_store: RecoveryStore,
     recovery_settings: dict,
+    workday_policy: WorkdayRequestPolicy | None = None,
 ) -> CompanyRunResult:
     started = time.perf_counter()
+    listing_completed = False
 
     result = CompanyRunResult(
         company_id=company.id,
@@ -909,6 +939,7 @@ def _run_company(
             recovery_store,
             recovery_settings,
             include_report=True,
+            workday_policy=workday_policy,
         )
         _apply_coverage_report(result, report)
 
@@ -921,6 +952,11 @@ def _run_company(
         result.jobs_fetched = len(
             jobs
         )
+        listing_completed = result.listing_status == "complete"
+        if result.coverage_status == "failed":
+            result.success = False
+            result.error = getattr(report, "error", None)
+            return result
 
         (
             matching,
@@ -943,6 +979,10 @@ def _run_company(
 
     except Exception as exc:
         result.success = False
+        result.skipped = False
+        result.coverage_status = "failed"
+        if not listing_completed:
+            result.listing_status = "failed"
         result.error = (
             f"{type(exc).__name__}: {exc}"
         )
@@ -967,26 +1007,35 @@ def _print_performance_summary(
     total_seconds: float,
     top_n: int,
 ) -> None:
-    completed = [
-        result
-        for result in results
-        if result.success
+    complete = [
+        result for result in results
+        if result.success and result.coverage_status == "complete"
     ]
-
-    failed = [
-        result
-        for result in results
-        if not result.success
+    partial = [
+        result for result in results
+        if result.success and result.coverage_status == "partial"
     ]
+    skipped = [
+        result for result in results
+        if result.skipped or result.coverage_status == "skipped"
+    ]
+    classified_ids = {
+        id(result) for result in complete + partial + skipped
+    }
+    failed_coverage = [
+        result for result in results
+        if id(result) not in classified_ids
+    ]
+    successful = complete + partial
 
     jobs_fetched = sum(
         result.jobs_fetched
-        for result in completed
+        for result in successful
     )
 
     matching = sum(
         len(result.matching)
-        for result in completed
+        for result in successful
     )
 
     slowest = sorted(
@@ -1008,31 +1057,18 @@ def _print_performance_summary(
 
     print(
         f"Successful          : "
-        f"{len(completed)}"
+        f"{len(successful)}"
     )
 
-    print(
-        f"Failed/skipped      : "
-        f"{len(failed)}"
-    )
-
-    partial = [
-        result for result in completed
-        if result.coverage_status == "partial"
-    ]
-    failed_coverage = [
-        result for result in results
-        if result.coverage_status == "failed"
-    ]
-    skipped = [
-        result for result in results
-        if result.coverage_status == "skipped"
-    ]
-
-    print(f"Complete            : {len(completed) - len(partial)}")
+    print(f"Complete            : {len(complete)}")
     print(f"Partial enrichment  : {len(partial)}")
     print(f"Failed              : {len(failed_coverage)}")
     print(f"Skipped cooldown    : {len(skipped)}")
+    print(
+        "HTTP attempts/retries: "
+        f"{sum(result.http_attempts for result in results)}/"
+        f"{sum(result.http_retries for result in results)}"
+    )
 
     print(
         f"Jobs fetched        : "
@@ -1069,11 +1105,49 @@ def _print_performance_summary(
             print(f"    [COVERAGE] {result.coverage_note}")
 
 
+def _record_selection_diagnostics(
+    results: list[CompanyRunResult],
+    store: SeenStore,
+    new_jobs: list[Job],
+) -> None:
+    planned_urls = {str(job.url) for job in new_jobs}
+    attributed_urls: set[str] = set()
+    attributed_new_urls: set[str] = set()
+
+    for result in results:
+        if not result.success:
+            continue
+
+        urls = list(dict.fromkeys(str(job.url) for job in result.matching))
+        result.unique_matching_urls = len(urls)
+        result.duplicate_matching_records = (
+            len(result.matching) - result.unique_matching_urls
+        )
+        result.seen_urls = sum(store.contains_url(url) for url in urls)
+
+        for url in urls:
+            if url in attributed_urls:
+                result.cross_company_duplicate_urls += 1
+            else:
+                attributed_urls.add(url)
+
+            if store.contains_url(url) or url not in planned_urls:
+                continue
+            if url in attributed_new_urls:
+                result.duplicate_suppressed_urls += 1
+                continue
+            attributed_new_urls.add(url)
+            result.new_unique_urls += 1
+
+
 def main() -> None:
     run_started = time.perf_counter()
 
     settings = _settings()
     max_jobs = _max_jobs(settings)
+    workday_policy = WorkdayRequestPolicy.from_settings(
+        settings.get("workday")
+    )
 
     registry = load_registry()
 
@@ -1110,6 +1184,8 @@ def main() -> None:
 
         if adapter is None:
             continue
+        if company.provider.type == ProviderType.WORKDAY:
+            adapter = WorkdayAdapter(workday_policy)
 
         companies.append(
             (
@@ -1142,6 +1218,7 @@ def main() -> None:
                 job_filter,
                 recovery_store,
                 recovery_settings,
+                workday_policy,
             ): company
             for company, adapter
             in companies
@@ -1230,6 +1307,27 @@ def main() -> None:
     new_jobs = store.filter_new(
         all_matching
     )
+    _record_selection_diagnostics(
+        results,
+        store,
+        new_jobs,
+    )
+
+    for result in results:
+        if not result.success:
+            continue
+        print(
+            f"  [SELECTION] company={result.company_id} "
+            f"matching_records={len(result.matching)} "
+            f"unique_matching_urls={result.unique_matching_urls} "
+            f"seen_urls={result.seen_urls} "
+            f"new_unique_urls={result.new_unique_urls} "
+            f"within_company_duplicates={result.duplicate_matching_records} "
+            f"cross_company_duplicate_urls="
+            f"{result.cross_company_duplicate_urls} "
+            f"cross_company_duplicates_suppressed="
+            f"{result.duplicate_suppressed_urls}"
+        )
 
     total_seconds = (
         time.perf_counter()
@@ -1258,8 +1356,35 @@ def main() -> None:
 
     if not new_jobs:
         print(
-            "No new jobs to notify."
+            "No unseen matching URLs remained among successfully processed "
+            "companies; no notification was planned."
         )
+        partial = [
+            result for result in results
+            if result.success and result.coverage_status == "partial"
+        ]
+        failed = [
+            result for result in results
+            if not result.skipped
+            and result.coverage_status != "skipped"
+            and result not in partial
+            and not (
+                result.success
+                and result.coverage_status == "complete"
+            )
+        ]
+        if partial or failed:
+            print(
+                "Coverage warning: "
+                f"failed={len(failed)} partial={len(partial)}."
+            )
+            for result in failed + partial:
+                detail = result.error or result.coverage_note
+                if detail:
+                    print(
+                        f"  {result.company_name}: "
+                        f"{result.coverage_status} — {detail}"
+                    )
         return
 
     _send_notifications(

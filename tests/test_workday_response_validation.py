@@ -178,6 +178,9 @@ def test_detail_maintenance_stops_new_work_and_preserves_locations():
     calls = []
 
     def fake_detail(_company, _board, posting):
+        stats = adapter._current_request_stats()
+        if stats is not None:
+            stats.attempts += 1
         calls.append(posting["externalPath"])
         if len(calls) == 1:
             return "Mumbai, India"

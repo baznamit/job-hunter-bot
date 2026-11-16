@@ -75,7 +75,7 @@ type is automatically discoverable.
 |---|---|
 | `config/companies.json` | Company details, enabled flag, ATS type/configuration, career page, and job metadata |
 | `config/keywords.json` | Job-title phrases to include and exclude |
-| `config/settings.json` | Allowed locations, excluded seniority, worker count, recovery cooldowns, notification priority, and batch size |
+| `config/settings.json` | Allowed locations, excluded seniority, worker count, recovery cooldowns, Workday pacing/retries/time budget/backoff, notification priority, and batch size |
 | `data/seen.json` | URLs of jobs already notified |
 | `data/recovery.json` | Provider recovery failures and retry times |
 

@@ -41,6 +41,10 @@ class SeenStore:
 
         return result
 
+    def contains_url(self, url: str) -> bool:
+        """Return whether the canonical URL is already in seen history."""
+        return str(url) in self._seen
+
     def mark_seen(self, jobs: list[Job]) -> None:
         """Record jobs as seen and persist to disk immediately."""
         updated = set(self._seen)

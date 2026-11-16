@@ -49,6 +49,16 @@
         "max_cooldown_hours": 72
     },
 
+    "workday": {
+        "request_pacing_seconds": 0.2,
+        "max_attempts": 2,
+        "company_budget_seconds": 120,
+        "backoff_seconds": [
+            1.0,
+            3.0
+        ]
+    },
+
     "telegram": {
         "max_jobs_per_message": 25
     }

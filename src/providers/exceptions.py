@@ -68,6 +68,8 @@ class ProviderTemporaryError(ProviderError):
         retry_after_seconds: float | None = None,
         endpoint: str | None = None,
         operation: str | None = None,
+        deferral_reason: str | None = None,
+        deferred_after_attempt: bool | None = None,
     ) -> None:
         self.company = company
         self.provider = provider
@@ -83,6 +85,8 @@ class ProviderTemporaryError(ProviderError):
         )
         self.endpoint = endpoint
         self.operation = operation
+        self.deferral_reason = deferral_reason
+        self.deferred_after_attempt = deferred_after_attempt
 
         super().__init__(
             f"{provider} temporary failure for {company}: {message}"

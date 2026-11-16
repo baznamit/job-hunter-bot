@@ -34,5 +34,15 @@ class CompanyRunResult:
     enrichment_unstarted: int = 0
     http_attempts: int = 0
     http_retries: int = 0
+    deferred: int = 0
+    deferred_before_attempt: int = 0
+    deferred_after_attempt: int = 0
+    deferral_reasons: dict[str, int] = field(default_factory=dict)
     failure_reasons: dict[str, int] = field(default_factory=dict)
     coverage_note: str | None = None
+    unique_matching_urls: int = 0
+    seen_urls: int = 0
+    new_unique_urls: int = 0
+    duplicate_suppressed_urls: int = 0
+    duplicate_matching_records: int = 0
+    cross_company_duplicate_urls: int = 0
