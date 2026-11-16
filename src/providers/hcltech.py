@@ -105,147 +105,148 @@ class HCLTechAdapter(ProviderAdapter):
                 page_signatures: set[frozenset[str]] = set()
                 total = None
                 received_hits = 0
+                pages_fetched = 0
+                raw_records = 0
+                completed = False
 
-                for page in range(max_pages):
-                    response = session.post(
-                        endpoint,
-                        json=self._payload(page, term),
-                        timeout=TIMEOUT,
-                    )
-                    self._check_response(response, company)
-
-                    if "json" not in response.headers.get(
-                        "Content-Type", ""
-                    ).lower():
-                        raise RuntimeError(
-                            "HCLTech returned non-JSON"
+                try:
+                    for page in range(max_pages):
+                        response = session.post(
+                            endpoint,
+                            json=self._payload(page, term),
+                            timeout=TIMEOUT,
                         )
+                        pages_fetched += 1
+                        self._check_response(response, company)
 
-                    data = response.json()
-
-                    if not isinstance(data, dict):
-                        raise RuntimeError(
-                            "Invalid HCLTech response"
-                        )
-
-                    reported = data.get("totalJobs")
-                    records = data.get("jobSearchResult")
-
-                    if (
-                        isinstance(reported, bool)
-                        or not isinstance(reported, int)
-                        or reported < 0
-                    ):
-                        raise RuntimeError(
-                            f"HCLTech invalid totalJobs: "
-                            f"term={term!r} page={page} "
-                            f"value={reported!r} "
-                            f"keys={list(data.keys())}"
-                        )
-
-                    if records is None and reported == 0:
-                        records = []
-
-                    if not isinstance(records, list):
-                        raise RuntimeError(
-                            f"HCLTech invalid jobSearchResult: "
-                            f"term={term!r} page={page} "
-                            f"totalJobs={reported} "
-                            f"records_type={type(records).__name__} "
-                            f"keys={list(data.keys())} "
-                            f"preview={str(data)[:500]}"
-                        )
-
-                    if total is None:
-                        total = reported
-
-                    if total != reported:
-                        raise RuntimeError(
-                            "HCLTech inventory changed "
-                            "during pagination"
-                        )
-
-                    if total == 0:
-                        break
-
-                    if not records:
-                        raise RuntimeError(
-                            "HCLTech returned an empty "
-                            "page before inventory completion"
-                        )
-
-                    page_jobs = []
-
-                    for record in records:
-                        if not isinstance(record, dict):
+                        if "json" not in response.headers.get(
+                            "Content-Type", ""
+                        ).lower():
                             raise RuntimeError(
-                                "Invalid HCLTech record"
+                                "HCLTech returned non-JSON"
                             )
 
-                        item = record.get("response")
+                        data = response.json()
 
-                        if not isinstance(item, dict):
+                        if not isinstance(data, dict):
                             raise RuntimeError(
-                                "Missing HCLTech job object"
+                                "Invalid HCLTech response"
                             )
 
-                        job_id = str(
-                            item.get("id") or ""
-                        ).strip()
+                        reported = data.get("totalJobs")
+                        records = data.get("jobSearchResult")
 
-                        if not job_id:
+                        if (
+                            isinstance(reported, bool)
+                            or not isinstance(reported, int)
+                            or reported < 0
+                        ):
                             raise RuntimeError(
-                                "Missing HCLTech job ID"
+                                f"HCLTech invalid totalJobs: "
+                                f"term={term!r} page={page} "
+                                f"value_type={type(reported).__name__} "
+                                f"keys={list(data.keys())}"
                             )
 
-                        page_jobs.append((job_id, item))
+                        if records is None and reported == 0:
+                            records = []
 
-                    page_signature = frozenset(
-                        job_id for job_id, _ in page_jobs
-                    )
+                        if not isinstance(records, list):
+                            raise RuntimeError(
+                                f"HCLTech invalid jobSearchResult: "
+                                f"term={term!r} page={page} "
+                                f"totalJobs={reported} "
+                                f"records_type={type(records).__name__} "
+                                f"keys={list(data.keys())}"
+                            )
 
-                    if page_signature in page_signatures:
-                        raise RuntimeError(
-                            "HCLTech pagination stalled: "
-                            f"term={term!r} page={page} "
-                            "repeated job-ID page"
+                        raw_records += len(records)
+
+                        if total is None:
+                            total = reported
+
+                        if total != reported:
+                            raise RuntimeError(
+                                "HCLTech inventory changed "
+                                "during pagination"
+                            )
+
+                        if total == 0:
+                            break
+
+                        if not records:
+                            raise RuntimeError(
+                                "HCLTech returned an empty "
+                                "page before inventory completion"
+                            )
+
+                        page_jobs = []
+
+                        for record in records:
+                            if not isinstance(record, dict):
+                                raise RuntimeError(
+                                    "Invalid HCLTech record"
+                                )
+
+                            item = record.get("response")
+
+                            if not isinstance(item, dict):
+                                raise RuntimeError(
+                                    "Missing HCLTech job object"
+                                )
+
+                            job_id = str(
+                                item.get("id") or ""
+                            ).strip()
+
+                            if not job_id:
+                                raise RuntimeError(
+                                    "Missing HCLTech job ID"
+                                )
+
+                            page_jobs.append((job_id, item))
+
+                        page_signature = frozenset(
+                            job_id for job_id, _ in page_jobs
                         )
 
-                    page_signatures.add(page_signature)
+                        if page_signature in page_signatures:
+                            raise RuntimeError(
+                                "HCLTech pagination stalled: "
+                                f"term={term!r} page={page} "
+                                "repeated job-ID page"
+                            )
 
-                    for job_id, item in page_jobs:
-                        term_jobs[job_id] = item
+                        page_signatures.add(page_signature)
 
-                    received_hits += len(records)
+                        for job_id, item in page_jobs:
+                            term_jobs[job_id] = item
 
+                        received_hits += len(records)
+
+                        if received_hits >= total:
+                            break
+
+                    if received_hits < total:
+                        raise RuntimeError(
+                            f"HCLTech query {term!r} "
+                            f"incomplete: received "
+                            f"{received_hits}/{total} records "
+                            f"within {max_pages} pages; "
+                            f"unique={len(term_jobs)}"
+                        )
+
+                    collected.update(term_jobs)
+                    completed = True
+                finally:
                     print(
-                        f"[HCL-PAGE] term={term!r} "
-                        f"page={page + 1}/{max_pages} "
-                        f"received={received_hits}/{total} "
+                        f"  [HCLTECH] {company.name}: term={term!r} "
+                        f"status={'complete' if completed else 'failed'} "
+                        f"pages={pages_fetched} raw_records={raw_records} "
+                        f"processed_records={received_hits} total={total} "
                         f"unique={len(term_jobs)} "
-                        f"duplicates="
-                        f"{received_hits - len(term_jobs)}"
+                        f"duplicates={received_hits - len(term_jobs)}"
                     )
-
-                    if received_hits >= total:
-                        break
-
-                if received_hits < total:
-                    raise RuntimeError(
-                        f"HCLTech query {term!r} "
-                        f"incomplete: received "
-                        f"{received_hits}/{total} records "
-                        f"within {max_pages} pages; "
-                        f"unique={len(term_jobs)}"
-                    )
-
-                collected.update(term_jobs)
-
-                print(
-                    f"  [HCLTECH] {company.name}: "
-                    f"term={term!r} total={total} "
-                    f"unique={len(term_jobs)}"
-                )
 
         return list(collected.values())
 

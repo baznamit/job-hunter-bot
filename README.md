@@ -76,6 +76,14 @@ Workday's time budget is checked before dispatch, but a thread can be delayed
 after the check and in-flight requests are not cancelled at the deadline.
 Per-host pacing spaces admissions, not necessarily actual HTTP start times.
 
+IBM and HCLTech print one pagination summary per attempted search term, including
+failed terms. `pages` counts responses received, `raw_records` counts records
+in validated lists, and `processed_records` counts records accepted for
+deduplication; these can differ on a failed page. Duplicate counts cover
+processed records. The run-level `[SELECTION]` summary reports globally unique
+matching and seen URLs alongside the sums of per-company unique and seen URL
+counts; cross-company overlaps can make those sums larger.
+
 ## Configuration and state
 
 | File | Purpose |

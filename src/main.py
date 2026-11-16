@@ -1180,6 +1180,30 @@ def _record_selection_diagnostics(
             result.new_unique_urls += 1
 
 
+def _print_selection_summary(
+    results: list[CompanyRunResult],
+    all_matching: list[Job],
+    store: SeenStore,
+) -> None:
+    successful = [result for result in results if result.success]
+    unique_urls = {str(job.url) for job in all_matching}
+    print(
+        f"  [SELECTION] matching_records={len(all_matching)} "
+        f"unique_matching_urls={len(unique_urls)} "
+        f"company_unique_matching_urls="
+        f"{sum(result.unique_matching_urls for result in successful)} "
+        f"seen_urls={sum(store.contains_url(url) for url in unique_urls)} "
+        f"company_seen_urls={sum(result.seen_urls for result in successful)} "
+        f"new_unique_urls={sum(result.new_unique_urls for result in successful)} "
+        f"within_company_duplicates="
+        f"{sum(result.duplicate_matching_records for result in successful)} "
+        f"cross_company_duplicate_urls="
+        f"{sum(result.cross_company_duplicate_urls for result in successful)} "
+        f"cross_company_duplicates_suppressed="
+        f"{sum(result.duplicate_suppressed_urls for result in successful)}"
+    )
+
+
 def main() -> None:
     run_started = time.perf_counter()
 
@@ -1354,21 +1378,7 @@ def main() -> None:
         new_jobs,
     )
 
-    for result in results:
-        if not result.success:
-            continue
-        print(
-            f"  [SELECTION] company={result.company_id} "
-            f"matching_records={len(result.matching)} "
-            f"unique_matching_urls={result.unique_matching_urls} "
-            f"seen_urls={result.seen_urls} "
-            f"new_unique_urls={result.new_unique_urls} "
-            f"within_company_duplicates={result.duplicate_matching_records} "
-            f"cross_company_duplicate_urls="
-            f"{result.cross_company_duplicate_urls} "
-            f"cross_company_duplicates_suppressed="
-            f"{result.duplicate_suppressed_urls}"
-        )
+    _print_selection_summary(results, all_matching, store)
 
     total_seconds = (
         time.perf_counter()

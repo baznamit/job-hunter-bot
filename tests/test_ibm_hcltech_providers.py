@@ -1,7 +1,9 @@
 import pytest
+import requests
 from unittest.mock import Mock, patch
 
 from models.company import Company
+from src.providers.exceptions import ProviderTemporaryError
 from src.providers.hcltech import HCLTechAdapter
 from src.providers.ibm import IBMAdapter
 
@@ -41,6 +43,151 @@ def _hcl_response(records, total):
     }
     response.raise_for_status = Mock()
     return response
+
+
+def _ibm_response(records, total):
+    response = Mock()
+    response.status_code = 200
+    response.url = "https://www-api.ibm.com/search/api/v2"
+    response.headers = {"Content-Type": "application/json"}
+    response.json.return_value = {
+        "hits": {
+            "total": {"value": total, "relation": "eq"},
+            "hits": records,
+        }
+    }
+    response.raise_for_status = Mock()
+    return response
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter", "tag"),
+    [
+        ("ibm", IBMAdapter, "[IBM]"),
+        ("hcltech", HCLTechAdapter, "[HCLTECH]"),
+    ],
+)
+def test_pagination_summary_counts_overlapping_records(
+    provider, adapter, tag, capsys,
+):
+    def record(number):
+        if provider == "ibm":
+            return {"_source": {
+                "url": f"https://careers.ibm.com/careers/JobDetail?jobId={number}",
+                "title": "Engineer",
+            }}
+        return {"response": {"id": str(number), "unifiedStandardTitle": "Engineer"}}
+
+    response = _ibm_response if provider == "ibm" else _hcl_response
+    session = Mock()
+    session.post.side_effect = [
+        response([record(1), record(2)], 4),
+        response([record(2), record(3)], 4),
+    ]
+    test_company = company(provider)
+    test_company.provider.config.search_terms = ["Java"]
+    test_company.provider.config.page_size = 2
+    test_company.provider.config.max_pages = 2
+
+    with patch("requests.Session") as factory:
+        factory.return_value.__enter__.return_value = session
+        jobs = adapter().fetch_jobs(test_company)
+
+    assert [job.id for job in jobs] == ["1", "2", "3"]
+    assert session.post.call_count == 2
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert tag in lines[0]
+    assert "term='Java' status=complete pages=2" in lines[0]
+    assert "raw_records=4 processed_records=4" in lines[0]
+    assert "total=4 unique=3 duplicates=1" in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter"),
+    [("ibm", IBMAdapter), ("hcltech", HCLTechAdapter)],
+)
+def test_pagination_failure_keeps_progress_and_propagates(
+    provider, adapter, capsys,
+):
+    if provider == "ibm":
+        record = {"_source": {
+            "url": "https://careers.ibm.com/careers/JobDetail?jobId=1",
+            "title": "Engineer",
+        }}
+        first_response = _ibm_response([record], 2)
+    else:
+        record = {"response": {"id": "1", "unifiedStandardTitle": "Engineer"}}
+        first_response = _hcl_response([record], 2)
+
+    session = Mock()
+    session.post.side_effect = [first_response, requests.ConnectionError("offline")]
+    test_company = company(provider)
+    test_company.provider.config.search_terms = ["Java"]
+    test_company.provider.config.max_pages = 2
+
+    with patch("requests.Session") as factory:
+        factory.return_value.__enter__.return_value = session
+        with pytest.raises(requests.ConnectionError, match="offline"):
+            adapter().fetch_jobs(test_company)
+
+    assert session.post.call_count == 2
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert "term='Java' status=failed pages=1" in lines[0]
+    assert "raw_records=1 processed_records=1" in lines[0]
+    assert "total=2 unique=1 duplicates=0" in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter"),
+    [("ibm", IBMAdapter), ("hcltech", HCLTechAdapter)],
+)
+def test_incomplete_pagination_keeps_failure_summary(provider, adapter, capsys):
+    if provider == "ibm":
+        record = {"_source": {
+            "url": "https://careers.ibm.com/careers/JobDetail?jobId=1",
+            "title": "Engineer",
+        }}
+        response = _ibm_response([record], 2)
+    else:
+        record = {"response": {"id": "1", "unifiedStandardTitle": "Engineer"}}
+        response = _hcl_response([record], 2)
+    test_company = company(provider)
+    test_company.provider.config.search_terms = ["Java"]
+    test_company.provider.config.max_pages = 1
+
+    with patch("requests.Session") as factory:
+        factory.return_value.__enter__.return_value.post.return_value = response
+        with pytest.raises(RuntimeError, match="incomplete"):
+            adapter().fetch_jobs(test_company)
+
+    output = capsys.readouterr().out
+    assert "status=failed pages=1 raw_records=1 processed_records=1" in output
+    assert "total=2 unique=1 duplicates=0" in output
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter"),
+    [("ibm", IBMAdapter), ("hcltech", HCLTechAdapter)],
+)
+def test_rate_limit_failure_keeps_classification_and_summary(provider, adapter, capsys):
+    response = Mock(status_code=429, url="https://example.com/search")
+    response.headers = {"Retry-After": "3"}
+    test_company = company(provider)
+    test_company.provider.config.search_terms = ["Java"]
+
+    with patch("requests.Session") as factory:
+        factory.return_value.__enter__.return_value.post.return_value = response
+        with pytest.raises(ProviderTemporaryError) as error:
+            adapter().fetch_jobs(test_company)
+
+    assert error.value.status == 429
+    assert error.value.category == "rate_limit"
+    assert error.value.retry_after_seconds == 3
+    output = capsys.readouterr().out
+    assert "status=failed pages=1 raw_records=0 processed_records=0" in output
+    assert "total=None unique=0 duplicates=0" in output
 
 
 def test_hcl_payload():
@@ -93,7 +240,7 @@ def test_hcl_deduplication():
 
 
 @patch("src.providers.hcltech.requests.Session")
-def test_hcltech_deduplicates_across_search_terms(mock_session):
+def test_hcltech_deduplicates_across_search_terms(mock_session, capsys):
     item = {
         "response": {
             "id": "178931",
@@ -128,10 +275,13 @@ def test_hcltech_deduplicates_across_search_terms(mock_session):
         call.kwargs["json"]["keywords"]
         for call in session.post.call_args_list
     ] == ["Mumbai", "Bangalore"]
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 2
+    assert all("status=complete pages=1" in line for line in lines)
 
 
 @patch("src.providers.hcltech.requests.Session")
-def test_hcltech_zero_results_without_job_list(mock_session):
+def test_hcltech_zero_results_without_job_list(mock_session, capsys):
     response = Mock()
     response.status_code = 200
     response.url = (
@@ -157,10 +307,14 @@ def test_hcltech_zero_results_without_job_list(mock_session):
     jobs = HCLTechAdapter().fetch_jobs(test_company)
 
     assert jobs == []
+    assert (
+        "status=complete pages=1 raw_records=0 processed_records=0 "
+        "total=0 unique=0 duplicates=0"
+    ) in capsys.readouterr().out
 
 
 @patch("src.providers.hcltech.requests.Session")
-def test_hcltech_rejects_missing_positive_job_list(mock_session):
+def test_hcltech_rejects_missing_positive_job_list(mock_session, capsys):
     response = Mock()
     response.status_code = 200
     response.url = (
@@ -171,7 +325,8 @@ def test_hcltech_rejects_missing_positive_job_list(mock_session):
         "Content-Type": "application/json"
     }
     response.json.return_value = {
-        "totalJobs": 13
+        "totalJobs": 13,
+        "description": "sensitive job description",
     }
     response.raise_for_status = Mock()
 
@@ -186,8 +341,26 @@ def test_hcltech_rejects_missing_positive_job_list(mock_session):
     with pytest.raises(
         RuntimeError,
         match="invalid jobSearchResult",
-    ):
+    ) as error:
         HCLTechAdapter().fetch_jobs(test_company)
+
+    assert "sensitive job description" not in str(error.value)
+    assert "sensitive job description" not in capsys.readouterr().out
+
+
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_invalid_total_does_not_log_response_value(mock_session, capsys):
+    response = _hcl_response([], "sensitive job description")
+    mock_session.return_value.__enter__.return_value.post.return_value = response
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Mumbai"]
+
+    with pytest.raises(RuntimeError, match="invalid totalJobs") as error:
+        HCLTechAdapter().fetch_jobs(test_company)
+
+    assert "value_type=str" in str(error.value)
+    assert "sensitive job description" not in str(error.value)
+    assert "sensitive job description" not in capsys.readouterr().out
 
 
 @patch("src.providers.hcltech.requests.Session")
@@ -233,7 +406,7 @@ def test_hcltech_fetches_more_than_300_jobs(mock_session):
 
 @patch("src.providers.hcltech.requests.Session")
 def test_hcltech_rejects_repeated_page_within_search_term(
-    mock_session,
+    mock_session, capsys,
 ):
     records = [
         {
@@ -262,6 +435,9 @@ def test_hcltech_rejects_repeated_page_within_search_term(
         HCLTechAdapter().fetch_jobs(test_company)
 
     assert session.post.call_count == 2
+    output = capsys.readouterr().out
+    assert "status=failed pages=2 raw_records=20 processed_records=10" in output
+    assert "total=20 unique=10 duplicates=0" in output
 
 
 @patch("src.providers.hcltech.requests.Session")

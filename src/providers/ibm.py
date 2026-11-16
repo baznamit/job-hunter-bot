@@ -175,131 +175,135 @@ class IBMAdapter(ProviderAdapter):
                 offset = 0
                 received_hits = 0
                 duplicate_ids = 0
+                pages_fetched = 0
+                raw_records = 0
+                processed_records = 0
+                completed = False
 
-                for page in range(1, max_pages + 1):
-                    response = session.post(
-                        endpoint,
-                        json=self._payload(
-                            term,
-                            page,
-                            page_size,
-                            offset,
-                        ),
-                        timeout=TIMEOUT,
-                    )
-                    self._check_response(
-                        response, company
-                    )
-
-                    if "json" not in response.headers.get(
-                        "Content-Type", ""
-                    ).lower():
-                        raise RuntimeError(
-                            "IBM returned non-JSON"
+                try:
+                    for page in range(1, max_pages + 1):
+                        response = session.post(
+                            endpoint,
+                            json=self._payload(
+                                term,
+                                page,
+                                page_size,
+                                offset,
+                            ),
+                            timeout=TIMEOUT,
+                        )
+                        pages_fetched += 1
+                        self._check_response(
+                            response, company
                         )
 
-                    data = response.json()
-
-                    if not isinstance(data, dict):
-                        raise RuntimeError(
-                            "Invalid IBM response"
-                        )
-
-                    hits = data.get("hits")
-
-                    if not isinstance(hits, dict):
-                        raise RuntimeError(
-                            "IBM response missing hits"
-                        )
-
-                    total_obj = hits.get("total")
-                    records = hits.get("hits")
-
-                    if (
-                        not isinstance(total_obj, dict)
-                        or not isinstance(
-                            total_obj.get("value"), int
-                        )
-                        or not isinstance(records, list)
-                    ):
-                        raise RuntimeError(
-                            "Invalid IBM search schema"
-                        )
-
-                    if total_obj.get("relation") != "eq":
-                        raise RuntimeError(
-                            "IBM total is not exact"
-                        )
-
-                    reported = total_obj["value"]
-
-                    if total is None:
-                        total = reported
-
-                    if total != reported:
-                        raise RuntimeError(
-                            "IBM inventory changed "
-                            "during pagination"
-                        )
-
-                    if total == 0:
-                        break
-
-                    if not records:
-                        break
-
-                    for record in records:
-                        if not isinstance(record, dict):
+                        if "json" not in response.headers.get(
+                            "Content-Type", ""
+                        ).lower():
                             raise RuntimeError(
-                                "Invalid IBM hit"
+                                "IBM returned non-JSON"
                             )
 
-                        item = record.get("_source")
+                        data = response.json()
 
-                        if not isinstance(item, dict):
+                        if not isinstance(data, dict):
                             raise RuntimeError(
-                                "IBM hit missing _source"
+                                "Invalid IBM response"
                             )
 
-                        url = str(
-                            item.get("url") or ""
+                        hits = data.get("hits")
+
+                        if not isinstance(hits, dict):
+                            raise RuntimeError(
+                                "IBM response missing hits"
+                            )
+
+                        total_obj = hits.get("total")
+                        records = hits.get("hits")
+
+                        if (
+                            not isinstance(total_obj, dict)
+                            or not isinstance(
+                                total_obj.get("value"), int
+                            )
+                            or not isinstance(records, list)
+                        ):
+                            raise RuntimeError(
+                                "Invalid IBM search schema"
+                            )
+
+                        raw_records += len(records)
+
+                        if total_obj.get("relation") != "eq":
+                            raise RuntimeError(
+                                "IBM total is not exact"
+                            )
+
+                        reported = total_obj["value"]
+
+                        if total is None:
+                            total = reported
+
+                        if total != reported:
+                            raise RuntimeError(
+                                "IBM inventory changed "
+                                "during pagination"
+                            )
+
+                        if total == 0:
+                            break
+
+                        if not records:
+                            break
+
+                        for record in records:
+                            if not isinstance(record, dict):
+                                raise RuntimeError(
+                                    "Invalid IBM hit"
+                                )
+
+                            item = record.get("_source")
+
+                            if not isinstance(item, dict):
+                                raise RuntimeError(
+                                    "IBM hit missing _source"
+                                )
+
+                            url = str(
+                                item.get("url") or ""
+                            )
+
+                            job_id = self._job_id(url)
+
+                            if job_id in term_jobs:
+                                duplicate_ids += 1
+
+                            term_jobs[job_id] = item
+                            processed_records += 1
+
+                        offset += len(records)
+
+                        received_hits += len(records)
+
+                        if received_hits >= total:
+                            break
+
+                    if received_hits < total:
+                        raise RuntimeError(
+                            f"IBM query {term!r} incomplete: "
+                            f"{received_hits}/{total} hits"
                         )
 
-                        job_id = self._job_id(url)
-
-                        if job_id in term_jobs:
-                            duplicate_ids += 1
-
-                        term_jobs[job_id] = item
-
-                    offset += len(records)
-
-                    received_hits += len(records)
-
+                    collected.update(term_jobs)
+                    completed = True
+                finally:
                     print(
-                        f"[IBM-PAGE] term={term!r} "
-                        f"page={page} "
-                        f"hits={received_hits}/{total} "
-                        f"unique={len(term_jobs)} "
-                        f"duplicates={duplicate_ids}"
+                        f"  [IBM] {company.name}: term={term!r} "
+                        f"status={'complete' if completed else 'failed'} "
+                        f"pages={pages_fetched} raw_records={raw_records} "
+                        f"processed_records={processed_records} total={total} "
+                        f"unique={len(term_jobs)} duplicates={duplicate_ids}"
                     )
-
-                    if received_hits >= total:
-                        break
-
-                if received_hits < total:
-                    raise RuntimeError(
-                        f"IBM query {term!r} incomplete: "
-                        f"{received_hits}/{total} hits"
-                    )
-
-                collected.update(term_jobs)
-
-                print(
-                    f"  [IBM] {company.name}: "
-                    f"term={term!r} total={total} "
-                    f"unique={len(term_jobs)}"
-                )
 
         return list(collected.values())
 

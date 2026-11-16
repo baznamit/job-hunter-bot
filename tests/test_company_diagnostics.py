@@ -6,8 +6,11 @@ from models.company import ProviderType
 from src.filters import JobFilter
 from src.main import (
     _print_company_stats,
+    _record_selection_diagnostics,
     _run_company,
 )
+from src.run_result import CompanyRunResult
+from src.store import SeenStore
 
 
 def _job(title: str, location: str) -> Job:
@@ -98,3 +101,40 @@ def test_run_company_attaches_diagnostics_only_after_successful_fetch():
 
     assert not failed_result.success
     assert failed_result.filter_diagnostics is None
+
+
+def test_run_selection_summary_distinguishes_global_and_company_counts(tmp_path, capsys):
+    from src.main import _print_selection_summary
+
+    seen = _job("Seen Engineer", "Mumbai")
+    first = _job("First Engineer", "Mumbai")
+    second = _job("Second Engineer", "Mumbai")
+    ignored = _job("Failed Engineer", "Mumbai")
+    store = SeenStore(tmp_path / "seen.json")
+    store.mark_seen([seen])
+    state_before = (tmp_path / "seen.json").read_bytes()
+    results = [
+        CompanyRunResult("a", "A", "IBM", matching=[seen, first, first]),
+        CompanyRunResult("b", "B", "HCLTech", matching=[seen, first, second]),
+        CompanyRunResult("failed", "Failed", "Other", success=False, matching=[ignored]),
+    ]
+    all_matching = [job for result in results if result.success for job in result.matching]
+    new_jobs = store.filter_new(all_matching)
+    _record_selection_diagnostics(results, store, new_jobs)
+
+    _print_selection_summary(results, all_matching, store)
+
+    assert new_jobs == [first, second]
+    assert (tmp_path / "seen.json").read_bytes() == state_before
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert "[SELECTION]" in lines[0]
+    assert "matching_records=6 " in lines[0]
+    assert "unique_matching_urls=3 " in lines[0]
+    assert "company_unique_matching_urls=5 " in lines[0]
+    assert "seen_urls=1 " in lines[0]
+    assert "company_seen_urls=2 " in lines[0]
+    assert "new_unique_urls=2 " in lines[0]
+    assert "within_company_duplicates=1 " in lines[0]
+    assert "cross_company_duplicate_urls=2 " in lines[0]
+    assert "cross_company_duplicates_suppressed=1" in lines[0]
