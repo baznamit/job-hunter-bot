@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from models import Job
 from models.company import (
     Company,
@@ -14,7 +16,10 @@ from models.company import (
 from src.providers.greenhouse import GreenhouseAdapter
 from src.providers.lever import LeverAdapter
 from src.providers.ashby import AshbyAdapter
-from src.providers.workday import WorkdayAdapter
+from src.providers.workday import (
+    WorkdayAdapter,
+    WorkdayRequestPolicy,
+)
 from src.providers.smartrecruiters import SmartRecruitersAdapter
 from src.providers.oracle import OracleAdapter
 from src.providers.higher import HigherAdapter
@@ -438,6 +443,282 @@ def test_workday_missing_total_uses_sequential_fallback():
         20,
         21,
     ]
+
+
+def test_workday_empty_first_page_with_zero_total_is_valid():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value={"jobPostings": [], "total": 0},
+    ):
+        raw = adapter._fetch_raw(company)
+
+    assert raw["jobPostings"] == []
+
+
+@pytest.mark.parametrize(
+    "total",
+    [None, True, False, -1, "1", 1.0],
+)
+def test_workday_rejects_invalid_authoritative_totals(total):
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value={"jobPostings": [], "total": total},
+    ):
+        with pytest.raises(ValueError, match="category=invalid_total"):
+            adapter._fetch_raw(company)
+
+
+def test_workday_empty_page_without_total_is_not_assumed_empty_inventory():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value={"jobPostings": []},
+    ):
+        with pytest.raises(
+            ValueError,
+            match="category=missing_total_for_empty_inventory",
+        ):
+            adapter._fetch_raw(company)
+
+
+def test_workday_positive_total_with_empty_first_page_is_contradictory():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value={"jobPostings": [], "total": 2},
+    ):
+        with pytest.raises(
+            ValueError,
+            match="category=empty_page_with_positive_total",
+        ):
+            adapter._fetch_raw(company)
+
+
+def test_workday_does_not_truncate_first_page_when_total_is_smaller():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value={
+            "jobPostings": [
+                _workday_posting(1),
+                _workday_posting(2),
+            ],
+            "total": 1,
+        },
+    ):
+        with pytest.raises(
+            ValueError,
+            match="category=total_smaller_than_first_page",
+        ):
+            adapter._fetch_raw(company)
+
+
+def test_workday_rejects_underfilled_first_page_with_remaining_total():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value={
+            "jobPostings": [_workday_posting(1)],
+            "total": 21,
+        },
+    ):
+        with pytest.raises(
+            ValueError,
+            match="category=short_first_page",
+        ):
+            adapter._fetch_raw(company)
+
+
+def test_workday_rejects_empty_later_page_before_authoritative_total():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    def fake_page(*, offset, **_kwargs):
+        if offset == 0:
+            return {
+                "jobPostings": [
+                    _workday_posting(index)
+                    for index in range(20)
+                ],
+                "total": 45,
+            }
+        return {"jobPostings": [], "total": 45}
+
+    with patch.object(adapter, "_request_page", side_effect=fake_page):
+        with pytest.raises(
+            ValueError,
+            match=r"category=unexpected_empty_page.*offset=",
+        ):
+            adapter._fetch_raw(company)
+
+
+def test_workday_rejects_short_later_page_before_authoritative_total():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+
+    def fake_page(*, offset, **_kwargs):
+        if offset == 0:
+            return {
+                "jobPostings": [
+                    _workday_posting(index)
+                    for index in range(20)
+                ],
+                "total": 45,
+            }
+        if offset == 20:
+            return {"jobPostings": [_workday_posting(20)]}
+        return {
+            "jobPostings": [
+                _workday_posting(index)
+                for index in range(40, 45)
+            ]
+        }
+
+    with patch.object(adapter, "_request_page", side_effect=fake_page):
+        with pytest.raises(ValueError, match="category=short_page"):
+            adapter._fetch_raw(company)
+
+
+def test_workday_sequential_fallback_rejects_repeated_pages():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+    first_page = [
+        _workday_posting(index)
+        for index in range(20)
+    ]
+
+    def fake_page(*, offset, **_kwargs):
+        if offset == 0:
+            return {"jobPostings": first_page}
+        return {"jobPostings": first_page}
+
+    with patch.object(adapter, "_request_page", side_effect=fake_page):
+        with pytest.raises(
+            ValueError,
+            match="category=repeated_page",
+        ):
+            adapter._fetch_raw(company)
+
+
+def test_workday_sequential_fallback_keeps_progress_with_duplicates():
+    company = _company(
+        ProviderType.WORKDAY,
+        tenant="test",
+        board="Careers",
+        cluster="wd1",
+    )
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+    first_page = [
+        _workday_posting(index)
+        for index in range(20)
+    ]
+
+    def fake_page(*, offset, **_kwargs):
+        if offset == 0:
+            return {"jobPostings": first_page}
+        if offset == 20:
+            return {
+                "jobPostings": [
+                    first_page[-1],
+                    _workday_posting(20),
+                ]
+            }
+        return {"jobPostings": []}
+
+    with patch.object(adapter, "_request_page", side_effect=fake_page) as request:
+        raw = adapter._fetch_raw(company)
+
+    assert len(raw["jobPostings"]) == 21
+    assert [
+        call.kwargs["offset"]
+        for call in request.call_args_list
+    ] == [0, 20, 22]
+
 
 def test_smartrecruiters_parses_job():
     company = _company(

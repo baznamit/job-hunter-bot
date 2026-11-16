@@ -10,7 +10,6 @@ from models.company import Company
 from .base import ProviderAdapter
 
 _TIMEOUT = 20
-_PAGE_SIZE = 10
 _MAX_PAGES = 500
 
 _MAX_RETRIES = 3
@@ -166,28 +165,36 @@ class EightfoldAdapter(ProviderAdapter):
                 "is missing data"
             )
 
-        positions = (
-            data.get("positions")
-            or []
-        )
-
-        count = data.get("count")
-
-        if not isinstance(
-            positions,
-            list,
-        ):
+        if "positions" not in data:
             raise RuntimeError(
-                f"{company.name}: Eightfold positions "
-                "is not a list"
+                "Eightfold listing invalid "
+                f"category=missing_positions company={company.id} "
+                f"start={start}"
+            )
+        positions = data["positions"]
+        if not isinstance(positions, list):
+            raise RuntimeError(
+                "Eightfold listing invalid "
+                f"category=invalid_positions company={company.id} "
+                f"start={start} actual={type(positions).__name__}"
             )
 
-        if not isinstance(
-            count,
-            int,
+        if "count" not in data:
+            raise RuntimeError(
+                "Eightfold listing invalid "
+                f"category=missing_count company={company.id} "
+                f"start={start}"
+            )
+        count = data["count"]
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
         ):
-            count = len(
-                positions
+            raise RuntimeError(
+                "Eightfold listing invalid "
+                f"category=invalid_count company={company.id} "
+                f"start={start} actual={type(count).__name__}"
             )
 
         return positions, count
@@ -202,38 +209,57 @@ class EightfoldAdapter(ProviderAdapter):
         )
 
         if not first_page:
-            return {
-                "positions": [],
-            }
+            if total == 0:
+                return {"positions": []}
+            raise RuntimeError(
+                "Eightfold listing contradictory "
+                "category=empty_page_with_positive_total "
+                f"company={company.id} start=0 count={total}"
+            )
+
+        if total < len(first_page):
+            raise RuntimeError(
+                "Eightfold listing contradictory "
+                "category=total_smaller_than_first_page "
+                f"company={company.id} start=0 "
+                f"count={total} positions={len(first_page)}"
+            )
 
         page_size = len(
             first_page
         )
 
-        if page_size <= 0:
-            page_size = _PAGE_SIZE
-
         all_positions: list[dict] = []
         seen_ids: set[str] = set()
+        seen_page_signatures: set[tuple[str, ...]] = set()
 
         def add_page(
             page: list[dict],
+            start: int,
         ) -> int:
             added = 0
 
-            for position in page:
-                if not isinstance(
-                    position,
-                    dict,
-                ):
-                    continue
+            for index, position in enumerate(page):
+                if not isinstance(position, dict):
+                    raise RuntimeError(
+                        "Eightfold listing invalid "
+                        f"category=invalid_position company={company.id} "
+                        f"start={start} index={index}"
+                    )
 
                 position_id = (
                     position.get("id")
                 )
 
-                if position_id is None:
-                    continue
+                if position_id is None or (
+                    isinstance(position_id, str)
+                    and not position_id.strip()
+                ):
+                    raise RuntimeError(
+                        "Eightfold listing invalid "
+                        f"category=missing_position_id "
+                        f"company={company.id} start={start} index={index}"
+                    )
 
                 key = str(
                     position_id
@@ -250,9 +276,12 @@ class EightfoldAdapter(ProviderAdapter):
 
             return added
 
-        add_page(
-            first_page
+        add_page(first_page, 0)
+        first_signature = tuple(
+            str(position["id"])
+            for position in first_page
         )
+        seen_page_signatures.add(first_signature)
 
         if total <= page_size:
             return {
@@ -267,9 +296,9 @@ class EightfoldAdapter(ProviderAdapter):
         while offset < total:
             if page_number >= _MAX_PAGES:
                 raise RuntimeError(
-                    f"{company.name}: Eightfold "
-                    "pagination exceeded "
-                    f"{_MAX_PAGES} pages"
+                    "Eightfold listing incomplete "
+                    f"category=maximum_pages company={company.id} "
+                    f"start={offset} max_pages={_MAX_PAGES}"
                 )
 
             if (
@@ -302,28 +331,52 @@ class EightfoldAdapter(ProviderAdapter):
             )
 
             if not page:
-                break
+                if reported_total <= offset:
+                    # The count can shrink during a crawl. An empty page is
+                    # terminal only when its current count is at or before
+                    # this offset; otherwise the response is incomplete.
+                    break
+                raise RuntimeError(
+                    "Eightfold listing incomplete "
+                    "category=unexpected_empty_page "
+                    f"company={company.id} start={offset} "
+                    f"count={reported_total}"
+                )
 
-            added = add_page(
-                page
+            added = add_page(page, offset)
+            page_signature = tuple(
+                str(position["id"])
+                for position in page
             )
 
             if added == 0:
+                category = (
+                    "repeated_page"
+                    if page_signature in seen_page_signatures
+                    else "no_new_positions"
+                )
                 raise RuntimeError(
-                    f"{company.name}: Eightfold "
-                    "pagination stalled at "
+                    "Eightfold listing incomplete "
+                    f"category={category} company={company.id} "
                     f"start={offset}"
                 )
+            seen_page_signatures.add(page_signature)
 
             pages_since_cooldown += 1
 
-            # Inventory can change while crawling.
-            if reported_total > 0:
-                total = reported_total
+            # Keep the largest observed boundary so additions are not
+            # silently skipped; a confirmed empty page can terminate a
+            # smaller current inventory above.
+            total = max(total, reported_total)
 
-            offset += len(
-                page
-            )
+            next_offset = offset + len(page)
+            if next_offset <= offset:
+                raise RuntimeError(
+                    "Eightfold listing incomplete "
+                    "category=no_forward_progress "
+                    f"company={company.id} start={offset}"
+                )
+            offset = next_offset
 
             page_number += 1
 

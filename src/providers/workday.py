@@ -980,14 +980,20 @@ class WorkdayAdapter(ProviderAdapter):
             offset=offset,
             deadline=deadline,
         )
-        postings = data.get("jobPostings")
-        if postings is not None and not isinstance(postings, list):
+        board = headers["Referer"].rsplit("/", 1)[-1]
+        if "jobPostings" not in data:
             raise ValueError(
-                f"Workday unexpected listing shape company={company.id} "
-                f"board={headers['Referer'].rsplit('/', 1)[-1]} "
-                f"offset={offset} expected=jobPostings-list "
-                f"actual={type(postings).__name__} "
-                f"original_endpoint={url}"
+                "Workday listing invalid "
+                f"category=missing_job_postings company={company.id} "
+                f"board={board} offset={offset}"
+            )
+        postings = data["jobPostings"]
+        if not isinstance(postings, list):
+            raise ValueError(
+                "Workday listing invalid "
+                f"category=invalid_job_postings company={company.id} "
+                f"board={board} offset={offset} "
+                f"actual={type(postings).__name__}"
             )
         return data
 
@@ -1230,31 +1236,25 @@ class WorkdayAdapter(ProviderAdapter):
         report.http_retries += first_stats.retries
 
         first_postings = (
-            first_page.get(
-                "jobPostings"
-            )
-            or []
+            first_page["jobPostings"]
         )
 
-        if not first_postings:
-            return {
-                "jobPostings": [],
-            }
-
-        reported_total = first_page.get(
-            "total"
-        )
-
-        # Workday normally exposes total on page 1.
-        # If it does not, preserve the old sequential
-        # behavior rather than making assumptions.
-        if (
-            not isinstance(
-                reported_total,
-                int,
-            )
-            or reported_total <= 0
-        ):
+        if "total" not in first_page:
+            if not first_postings:
+                raise ValueError(
+                    "Workday listing incomplete "
+                    "category=missing_total_for_empty_inventory "
+                    f"company={company.id} board={board} offset=0"
+                )
+            if len(first_postings) > _PAGE_SIZE:
+                raise ValueError(
+                    "Workday listing invalid "
+                    "category=first_page_exceeds_limit "
+                    f"company={company.id} board={board} offset=0 "
+                    f"limit={_PAGE_SIZE} actual={len(first_postings)}"
+                )
+            # Only an absent total opts into the supported sequential
+            # fallback; explicit null or malformed totals are errors.
             return self._fetch_raw_sequential(
                 company=company,
                 url=url,
@@ -1264,12 +1264,60 @@ class WorkdayAdapter(ProviderAdapter):
                 deadline=deadline,
             )
 
-        total = reported_total
+        reported_total = first_page["total"]
+        if (
+            isinstance(reported_total, bool)
+            or not isinstance(reported_total, int)
+            or reported_total < 0
+        ):
+            raise ValueError(
+                "Workday listing invalid category=invalid_total "
+                f"company={company.id} board={board} offset=0 "
+                f"actual={type(reported_total).__name__}"
+            )
 
-        if len(first_postings) >= total:
+        if not first_postings:
+            if reported_total == 0:
+                return {"jobPostings": []}
+            raise ValueError(
+                "Workday listing contradictory "
+                "category=empty_page_with_positive_total "
+                f"company={company.id} board={board} offset=0 "
+                f"total={reported_total}"
+            )
+
+        if reported_total < len(first_postings):
+            raise ValueError(
+                "Workday listing contradictory "
+                "category=total_smaller_than_first_page "
+                f"company={company.id} board={board} offset=0 "
+                f"total={reported_total} postings={len(first_postings)}"
+            )
+
+        if len(first_postings) > _PAGE_SIZE:
+            raise ValueError(
+                "Workday listing invalid "
+                "category=first_page_exceeds_limit "
+                f"company={company.id} board={board} offset=0 "
+                f"limit={_PAGE_SIZE} actual={len(first_postings)}"
+            )
+
+        total = reported_total
+        # Later Workday pages can report total=0; page 0 remains the
+        # authoritative inventory boundary for this board.
+        expected_first_count = min(total, _PAGE_SIZE)
+        if len(first_postings) < expected_first_count:
+            raise ValueError(
+                "Workday listing incomplete category=short_first_page "
+                f"company={company.id} board={board} offset=0 "
+                f"expected_at_least={expected_first_count} "
+                f"actual={len(first_postings)} total={total}"
+            )
+
+        if len(first_postings) == total:
             return {
                 "jobPostings":
-                    first_postings[:total],
+                    first_postings,
             }
 
         offsets = list(
@@ -1328,8 +1376,29 @@ class WorkdayAdapter(ProviderAdapter):
                     report.http_retries += stats.retries
 
                     if failure is None:
-                        postings = data.get("jobPostings") or []
-                        pages[offset] = postings
+                        postings = data["jobPostings"]
+                        expected_count = min(
+                            _PAGE_SIZE,
+                            total - offset,
+                        )
+                        if not postings:
+                            failure = ValueError(
+                                "Workday listing incomplete "
+                                "category=unexpected_empty_page "
+                                f"company={company.id} board={board} "
+                                f"offset={offset} total={total}"
+                            )
+                        elif len(postings) < expected_count:
+                            failure = ValueError(
+                                "Workday listing incomplete "
+                                "category=short_page "
+                                f"company={company.id} board={board} "
+                                f"offset={offset} "
+                                f"expected_at_least={expected_count} "
+                                f"actual={len(postings)} total={total}"
+                            )
+                        else:
+                            pages[offset] = postings
 
                 if failure is not None:
                     for future in list(pending):
@@ -1407,15 +1476,35 @@ class WorkdayAdapter(ProviderAdapter):
         Safe fallback for Workday boards that do not expose
         a usable total on page 1.
 
-        This intentionally retains the previous pagination
-        behavior rather than guessing how many pages exist.
+        The existing company request deadline bounds this crawl. Empty
+        terminal pages remain valid, while repeated pages and pages with
+        no new posting identities fail instead of looping indefinitely.
         """
 
         report = report or WorkdayCoverageReport()
+        if deadline is None:
+            deadline = (
+                self._request_policy.monotonic()
+                + self._request_policy.company_budget_seconds
+            )
         all_postings = list(
             first_postings
         )
 
+        def posting_identity(posting: dict) -> str:
+            return str(
+                posting.get("externalPath")
+                or posting.get("title")
+                or repr(posting)
+            )
+
+        seen_posting_ids = {
+            posting_identity(posting)
+            for posting in first_postings
+        }
+        seen_page_signatures = {
+            tuple(posting_identity(posting) for posting in first_postings)
+        }
         offset = len(
             first_postings
         )
@@ -1448,13 +1537,44 @@ class WorkdayAdapter(ProviderAdapter):
             if not postings:
                 break
 
+            page_ids = tuple(
+                posting_identity(posting)
+                for posting in postings
+            )
+            has_new_postings = any(
+                posting_id not in seen_posting_ids
+                for posting_id in page_ids
+            )
+            if not has_new_postings:
+                category = (
+                    "repeated_page"
+                    if page_ids in seen_page_signatures
+                    else "no_new_postings"
+                )
+                raise ValueError(
+                    "Workday listing incomplete "
+                    f"category={category} "
+                    f"company={company.id} "
+                    f"board={headers['Referer'].rsplit('/', 1)[-1]} "
+                    f"offset={offset}"
+                )
+
+            next_offset = offset + len(postings)
+            if next_offset <= offset:
+                raise ValueError(
+                    "Workday listing incomplete category=no_forward_progress "
+                    f"company={company.id} "
+                    f"board={headers['Referer'].rsplit('/', 1)[-1]} "
+                    f"offset={offset}"
+                )
+
             all_postings.extend(
                 postings
             )
 
-            offset += len(
-                postings
-            )
+            seen_posting_ids.update(page_ids)
+            seen_page_signatures.add(page_ids)
+            offset = next_offset
 
         return {
             "jobPostings":
@@ -1602,10 +1722,7 @@ class WorkdayAdapter(ProviderAdapter):
                 offset=0,
             )
 
-            if (
-                "jobPostings" not in data
-                or isinstance(data.get("jobPostings"), list)
-            ) and ("jobPostings" in data or "total" in data):
+            if isinstance(data.get("jobPostings"), list):
                 return True
 
         return False

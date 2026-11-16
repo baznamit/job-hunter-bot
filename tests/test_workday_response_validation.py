@@ -140,6 +140,44 @@ def test_valid_json_does_not_require_json_content_type():
     assert data["total"] == 1
 
 
+@pytest.mark.parametrize(
+    "payload, category",
+    [
+        ({}, "missing_job_postings"),
+        ({"jobPostings": None}, "invalid_job_postings"),
+        ({"jobPostings": {}}, "invalid_job_postings"),
+    ],
+)
+def test_listing_page_requires_job_postings_list(payload, category):
+    adapter = WorkdayAdapter()
+
+    with patch.object(adapter, "_request_json", return_value=payload):
+        with pytest.raises(ValueError, match=category) as raised:
+            adapter._request_page(
+                url="https://test.example/jobs",
+                headers={
+                    "Referer": "https://test.example/en-US/Careers",
+                },
+                offset=0,
+                company=_company(),
+            )
+
+    message = str(raised.value)
+    assert "company=test-company" in message
+    assert "board=Careers" in message
+    assert "offset=0" in message
+
+
+def test_workday_validation_rejects_missing_job_postings():
+    adapter = WorkdayAdapter()
+
+    with patch(
+        "src.providers.workday.requests.post",
+        return_value=_response(payload={"total": 0}),
+    ):
+        assert adapter.validate(_company()) is False
+
+
 def test_maintenance_on_later_page_never_returns_partial_inventory():
     company = _company()
     adapter = WorkdayAdapter()

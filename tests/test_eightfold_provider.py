@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from models.company import Company
 from src.providers.eightfold import (
     EightfoldAdapter,
@@ -239,6 +241,226 @@ def test_eightfold_fetches_all_pages():
         10,
         20,
     ]
+
+
+def _positions(ids):
+    return [
+        {
+            "id": position_id,
+            "name": f"Software Engineer {position_id}",
+            "positionUrl": f"/careers/job/{position_id}",
+        }
+        for position_id in ids
+    ]
+
+
+def test_eightfold_accepts_empty_inventory_with_zero_total():
+    adapter = EightfoldAdapter()
+
+    with patch.object(adapter, "_request_page", return_value=([], 0)):
+        raw = adapter._fetch_raw(_company())
+
+    assert raw["positions"] == []
+
+
+def test_eightfold_rejects_empty_first_page_with_positive_total():
+    adapter = EightfoldAdapter()
+
+    with patch.object(adapter, "_request_page", return_value=([], 1)):
+        with pytest.raises(
+            RuntimeError,
+            match="category=empty_page_with_positive_total",
+        ):
+            adapter._fetch_raw(_company())
+
+
+def test_eightfold_rejects_total_smaller_than_first_page():
+    adapter = EightfoldAdapter()
+
+    with patch.object(
+        adapter,
+        "_request_page",
+        return_value=(_positions(range(2)), 1),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="category=total_smaller_than_first_page",
+        ):
+            adapter._fetch_raw(_company())
+
+
+def test_eightfold_rejects_empty_later_page_before_expected_boundary():
+    adapter = EightfoldAdapter()
+    responses = [
+        (_positions(range(10)), 25),
+        ([], 25),
+    ]
+
+    with (
+        patch.object(adapter, "_request_page", side_effect=responses),
+        patch("src.providers.eightfold.time.sleep"),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="category=unexpected_empty_page",
+        ):
+            adapter._fetch_raw(_company())
+
+
+def test_eightfold_rejects_repeated_page_with_no_new_ids():
+    adapter = EightfoldAdapter()
+    repeated_page = _positions(range(10))
+
+    with (
+        patch.object(
+            adapter,
+            "_request_page",
+            side_effect=[
+                (repeated_page, 20),
+                (repeated_page, 20),
+            ],
+        ),
+        patch("src.providers.eightfold.time.sleep"),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="category=repeated_page",
+        ):
+            adapter._fetch_raw(_company())
+
+
+def test_eightfold_allows_duplicate_ids_when_page_still_progresses():
+    adapter = EightfoldAdapter()
+    first_page = _positions(range(10))
+    second_page = _positions([9, *range(10, 19)])
+
+    with (
+        patch.object(
+            adapter,
+            "_request_page",
+            side_effect=[
+                (first_page, 20),
+                (second_page, 20),
+            ],
+        ),
+        patch("src.providers.eightfold.time.sleep"),
+    ):
+        raw = adapter._fetch_raw(_company())
+
+    ids = [position["id"] for position in raw["positions"]]
+    assert len(ids) == 19
+    assert len(set(ids)) == 19
+
+
+def test_eightfold_count_increase_extends_inventory_boundary():
+    adapter = EightfoldAdapter()
+    calls = []
+
+    def request_page(_company, *, start, **_kwargs):
+        calls.append(start)
+        if start == 0:
+            return _positions(range(10)), 15
+        return _positions(range(10, 20)), 20
+
+    with (
+        patch.object(adapter, "_request_page", side_effect=request_page),
+        patch("src.providers.eightfold.time.sleep"),
+    ):
+        raw = adapter._fetch_raw(_company())
+
+    assert calls == [0, 10]
+    assert len(raw["positions"]) == 20
+
+
+def test_eightfold_count_decrease_ends_at_confirmed_current_boundary():
+    adapter = EightfoldAdapter()
+    calls = []
+
+    def request_page(_company, *, start, **_kwargs):
+        calls.append(start)
+        if start == 0:
+            return _positions(range(10)), 20
+        if start == 10:
+            return _positions(range(10, 15)), 15
+        return [], 15
+
+    with (
+        patch.object(adapter, "_request_page", side_effect=request_page),
+        patch("src.providers.eightfold.time.sleep"),
+    ):
+        raw = adapter._fetch_raw(_company())
+
+    assert calls == [0, 10, 15]
+    assert len(raw["positions"]) == 15
+
+
+def test_eightfold_maximum_page_protection_remains_enforced():
+    adapter = EightfoldAdapter()
+    calls = []
+
+    def request_page(_company, *, start, **_kwargs):
+        calls.append(start)
+        return _positions(range(start, start + 10)), 30
+
+    with (
+        patch.object(adapter, "_request_page", side_effect=request_page),
+        patch("src.providers.eightfold.time.sleep"),
+        patch("src.providers.eightfold._MAX_PAGES", 2),
+    ):
+        with pytest.raises(RuntimeError, match="category=maximum_pages"):
+            adapter._fetch_raw(_company())
+
+    assert calls == [0, 10]
+
+
+@pytest.mark.parametrize(
+    "positions, count, category",
+    [
+        (None, 0, "invalid_positions"),
+        ({}, 0, "invalid_positions"),
+        ([], True, "invalid_count"),
+        ([], -1, "invalid_count"),
+    ],
+)
+def test_eightfold_rejects_malformed_listing_fields(
+    positions,
+    count,
+    category,
+):
+    adapter = EightfoldAdapter()
+
+    with patch(
+        "src.providers.eightfold.requests.get",
+        return_value=_Response(
+            {
+                "data": {
+                    "positions": positions,
+                    "count": count,
+                }
+            }
+        ),
+    ):
+        with pytest.raises(RuntimeError, match=f"category={category}"):
+            adapter._request_page(_company(), start=0)
+
+
+@pytest.mark.parametrize(
+    "data, category",
+    [
+        ({"count": 0}, "missing_positions"),
+        ({"positions": []}, "missing_count"),
+    ],
+)
+def test_eightfold_requires_positions_and_count(data, category):
+    adapter = EightfoldAdapter()
+
+    with patch(
+        "src.providers.eightfold.requests.get",
+        return_value=_Response({"data": data}),
+    ):
+        with pytest.raises(RuntimeError, match=f"category={category}"):
+            adapter._request_page(_company(), start=0)
+
 
 def test_eightfold_retries_429():
     company = _company()

@@ -647,7 +647,17 @@ def test_concurrent_listing_failure_collects_all_started_request_counts():
         assert all_pages_started.wait(2)
         if offset == 20:
             return _response(429, url, {}, {})
-        return _response(200, url, {"jobPostings": []})
+        return _response(
+            200,
+            url,
+            {
+                "jobPostings": [
+                    {"externalPath": f"/job/{offset + index}"}
+                    for index in range(20)
+                ],
+                "total": 0,
+            },
+        )
 
     report = WorkdayCoverageReport()
     with patch("src.providers.workday.requests.post", side_effect=post):
@@ -826,6 +836,39 @@ def test_processing_failure_after_fetch_is_failed_but_listing_remains_complete()
     assert result.listing_status == "complete"
     assert result.jobs_fetched == 1
     assert "boom" in result.error
+
+
+def test_invalid_workday_inventory_flows_to_failed_company_result():
+    company = _company()
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+    recovery = MagicMock()
+    recovery.should_attempt.return_value = (True, None)
+    url = (
+        "https://test.wd1.myworkdayjobs.com/"
+        "wday/cxs/test/Careers/jobs"
+    )
+
+    with patch(
+        "src.providers.workday.requests.post",
+        return_value=_response(200, url, {"total": 0}),
+    ):
+        result = _run_company(
+            company,
+            adapter,
+            MagicMock(),
+            recovery,
+            {},
+        )
+
+    assert result.success is False
+    assert result.listing_status == "failed"
+    assert result.coverage_status == "failed"
+    assert result.jobs_fetched == 0
+    assert result.matching == []
+    assert result.http_attempts == 1
+    recovery.clear.assert_not_called()
 
 
 def test_summary_categories_reconcile_and_keep_expected_skips_separate(capsys):
