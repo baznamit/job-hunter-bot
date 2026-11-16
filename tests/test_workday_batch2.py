@@ -609,6 +609,164 @@ def test_pacing_is_serialized_after_wakeup_and_hosts_are_independent():
     assert policy.before_request("other-host", deadline=clock() + 1).allowed
 
 
+def test_deadline_expires_after_admission_while_other_host_proceeds():
+    now = [0.0]
+    admitted = Event()
+    release = Event()
+    policy = WorkdayRequestPolicy(pacing_seconds=0.2, clock=lambda: now[0])
+    adapter = WorkdayAdapter(policy)
+    original_before_request = policy.before_request
+    delayed_url = "https://test.wd1.myworkdayjobs.com/jobs"
+    other_url = "https://other.wd1.myworkdayjobs.com/jobs"
+
+    def pause_after_admission(host, deadline):
+        decision = original_before_request(host, deadline)
+        if host == "test.wd1.myworkdayjobs.com":
+            admitted.set()
+            assert release.wait(5)
+        return decision
+
+    def post(url, **_kwargs):
+        return _response(200, url, {"jobPostings": [], "total": 0})
+
+    def page(url):
+        return adapter._run_page_request(
+            url=url,
+            headers={"Referer": "https://test/en-US/Careers"},
+            offset=0,
+            company=_company(),
+            deadline=10,
+        )
+
+    with patch.object(policy, "before_request", side_effect=pause_after_admission):
+        with patch("src.providers.workday.requests.post", side_effect=post) as request:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                delayed = executor.submit(page, delayed_url)
+                try:
+                    assert admitted.wait(5)
+                    _, other_stats = page(other_url)
+                    now[0] = 10
+                finally:
+                    release.set()
+                with pytest.raises(ProviderTemporaryError) as raised:
+                    delayed.result(timeout=5)
+
+    assert request.call_count == 1
+    assert request.call_args.args[0] == other_url
+    assert (other_stats.attempts, other_stats.retries) == (1, 0)
+    assert raised.value.category == "deferred"
+    assert raised.value.deferral_reason == "time_budget"
+    assert raised.value.deferred_after_attempt is False
+    assert (
+        raised.value._workday_stats.attempts,
+        raised.value._workday_stats.retries,
+    ) == (0, 0)
+
+
+def test_deadline_expires_after_retry_admission_without_counting_retry():
+    now = [0.0]
+    policy = WorkdayRequestPolicy(
+        pacing_seconds=0, max_attempts=2, clock=lambda: now[0]
+    )
+    adapter = WorkdayAdapter(policy)
+    original_before_request = policy.before_request
+    admissions = []
+    url = "https://test.wd1.myworkdayjobs.com/jobs"
+
+    def pause_after_retry_admission(host, deadline):
+        decision = original_before_request(host, deadline)
+        admissions.append(decision)
+        if len(admissions) == 2:
+            now[0] = 10
+        return decision
+
+    with patch.object(
+        policy, "before_request", side_effect=pause_after_retry_admission
+    ):
+        with patch(
+            "src.providers.workday.requests.post",
+            return_value=_response(429, url, {}, {"Retry-After": "0"}),
+        ) as request:
+            with pytest.raises(ProviderTemporaryError) as raised:
+                adapter._run_page_request(
+                    url=url,
+                    headers={"Referer": "https://test/en-US/Careers"},
+                    offset=0,
+                    company=_company(),
+                    deadline=10,
+                )
+
+    assert len(admissions) == 2
+    assert request.call_count == 1
+    assert raised.value.category == "deferred"
+    assert raised.value.deferral_reason == "time_budget"
+    assert raised.value.deferred_after_attempt is True
+    assert (
+        raised.value._workday_stats.attempts,
+        raised.value._workday_stats.retries,
+    ) == (1, 0)
+
+
+def test_inflight_request_can_complete_after_deadline():
+    now = [0.0]
+    started = Event()
+    release = Event()
+    policy = WorkdayRequestPolicy(pacing_seconds=0, clock=lambda: now[0])
+    adapter = WorkdayAdapter(policy)
+    url = "https://test.wd1.myworkdayjobs.com/jobs"
+
+    def post(_url, **_kwargs):
+        started.set()
+        assert release.wait(5)
+        return _response(200, url, {"jobPostings": [], "total": 0})
+
+    with patch("src.providers.workday.requests.post", side_effect=post):
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                adapter._run_page_request,
+                url=url,
+                headers={"Referer": "https://test/en-US/Careers"},
+                offset=0,
+                company=_company(),
+                deadline=10,
+            )
+            try:
+                assert started.wait(5)
+                now[0] = 10
+            finally:
+                release.set()
+            data, stats = future.result(timeout=5)
+
+    assert data["total"] == 0
+    assert (stats.attempts, stats.retries) == (1, 0)
+
+
+def test_detail_expiry_after_admission_reports_partial_coverage():
+    now = [0.0]
+    policy = WorkdayRequestPolicy(pacing_seconds=0, clock=lambda: now[0])
+    adapter = WorkdayAdapter(policy)
+    original_before_request = policy.before_request
+
+    def pause_after_admission(host, deadline):
+        decision = original_before_request(host, deadline)
+        now[0] = 10
+        return decision
+
+    with patch.object(policy, "before_request", side_effect=pause_after_admission):
+        with patch("src.providers.workday.requests.get") as request:
+            report = adapter._enrich_ambiguous_locations(
+                _company(), [_posting(1)], deadline=10
+            )
+
+    assert request.call_count == 0
+    assert report.coverage_status == "partial"
+    assert report.enrichment_attempted == 0
+    assert report.enrichment_unstarted == 1
+    assert report.deferred_before_attempt == 1
+    assert report.deferral_reasons == {"before_attempt:time_budget": 1}
+    assert (report.http_attempts, report.http_retries) == (0, 0)
+
+
 def test_request_stats_count_dispatches_only():
     company = _company()
     url = "https://test.wd1.myworkdayjobs.com/jobs"

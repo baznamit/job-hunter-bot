@@ -72,6 +72,9 @@ type is automatically discoverable.
 If a Workday location-detail request exhausts its retries with HTTP 429, the
 company stops submitting new detail requests while in-flight requests finish.
 Unresolved and unstarted locations are reported as partial enrichment.
+Workday's time budget is checked before dispatch, but a thread can be delayed
+after the check and in-flight requests are not cancelled at the deadline.
+Per-host pacing spaces admissions, not necessarily actual HTTP start times.
 
 ## Configuration and state
 

@@ -317,7 +317,21 @@ class WorkdayAdapter(ProviderAdapter):
         last_error = None
 
         for attempt in range(1, self._request_policy.max_attempts + 1):
+            request = getattr(requests, method)
+            kwargs = {
+                "headers": headers,
+                "timeout": _TIMEOUT,
+            }
+            if payload is not None:
+                kwargs["json"] = payload
+
             decision = self._request_policy.before_request(host, deadline)
+            if (
+                decision.allowed
+                and deadline is not None
+                and self._request_policy.monotonic() >= deadline
+            ):
+                decision = _PolicyDecision(False, "time_budget")
             if not decision.allowed:
                 raise ProviderTemporaryError(
                     company=company.name,
@@ -337,13 +351,6 @@ class WorkdayAdapter(ProviderAdapter):
                 )
 
             try:
-                request = getattr(requests, method)
-                kwargs = {
-                    "headers": headers,
-                    "timeout": _TIMEOUT,
-                }
-                if payload is not None:
-                    kwargs["json"] = payload
                 if stats is not None:
                     stats.attempts += 1
                     if stats.attempts > 1:
