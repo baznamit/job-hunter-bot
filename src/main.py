@@ -33,7 +33,11 @@ from src.description_diagnostics import (
     enrich_near_misses,
     promotable_jobs,
 )
-from src.filters import JobFilter
+from src.filters import (
+    FilterDiagnostics,
+    JobFilter,
+    RejectionReason,
+)
 from src.notifier import (
     MAX_MESSAGE_LEN,
     TelegramNotifier,
@@ -796,7 +800,14 @@ def _process_jobs_for_company(jobs, job_filter) -> tuple[list[Job], int, int]:
     return matching, direct_count, promoted_count
 
 
-def _print_company_stats(company, jobs_fetched, direct_count, promoted_count, total_matching) -> None:
+def _print_company_stats(
+    company,
+    jobs_fetched,
+    direct_count,
+    promoted_count,
+    total_matching,
+    filter_diagnostics: FilterDiagnostics | None = None,
+) -> None:
     """Print job processing statistics for a company."""
     if promoted_count:
         print(
@@ -812,6 +823,31 @@ def _print_company_stats(company, jobs_fetched, direct_count, promoted_count, to
             f"{jobs_fetched} fetched, "
             f"{total_matching} matching"
         )
+
+    if filter_diagnostics is None:
+        return
+
+    print(
+        "    [FILTER] rejected "
+        f"include={filter_diagnostics.include_keyword} "
+        f"excluded={filter_diagnostics.excluded_keyword} "
+        f"location={filter_diagnostics.location} "
+        f"seniority={filter_diagnostics.seniority}"
+    )
+
+    if total_matching != 0:
+        return
+
+    printed_samples = 0
+    for reason in RejectionReason:
+        for job in filter_diagnostics.samples[reason]:
+            if printed_samples >= 2:
+                return
+            print(
+                f"    [FILTER] sample {reason.value}: "
+                f"{job.title} | {job.location}"
+            )
+            printed_samples += 1
 
 
 def _apply_coverage_report(result: CompanyRunResult, report) -> None:
@@ -973,6 +1009,10 @@ def _run_company(
         )
         result.promoted_count = (
             promoted_count
+        )
+        result.filter_diagnostics = job_filter.diagnose(
+            jobs,
+            sample_limit=2,
         )
 
         return result
@@ -1265,6 +1305,7 @@ def main() -> None:
                 result.direct_count,
                 result.promoted_count,
                 len(result.matching),
+                result.filter_diagnostics,
             )
 
             print(

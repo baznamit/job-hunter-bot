@@ -98,6 +98,63 @@ def test_excludes_new_york(f):
     assert not f.should_include(_job("Backend Engineer", "New York, NY"))
 
 
+def test_remote_indiana_is_not_remote_india(f):
+    job = _job("Backend Engineer", "Remote - Indiana, USA")
+
+    result = f.evaluate(job)
+
+    assert not result.included
+    assert result.reason == RejectionReason.LOCATION
+
+
+def test_multi_location_pipe_accepts_a_supported_city(f):
+    assert f.should_include(
+        _job("Backend Engineer", "London | Bengaluru, India")
+    )
+
+
+def test_multi_location_spaced_slash_accepts_a_supported_city(f):
+    assert f.should_include(
+        _job(
+            "Backend Engineer",
+            "Hyderabad, TS, IN / Bangalore, Karnataka, India",
+        )
+    )
+
+
+def test_multi_location_does_not_make_unsupported_city_eligible(f):
+    assert not f.should_include(
+        _job("Backend Engineer", "Hyderabad, TS, IN / Pune, India")
+    )
+
+
+def test_target_city_with_foreign_country_is_rejected(f):
+    assert not f.should_include(
+        _job("Backend Engineer", "Bengaluru, USA")
+    )
+
+
+def test_city_name_must_not_be_a_substring(f):
+    assert not f.should_include(
+        _job("Backend Engineer", "Mumbaitown, India")
+    )
+
+
+def test_unverified_workday_site_code_does_not_match_city(f):
+    assert not f._location_match("IN-MH-MUMBAI-SITE")
+
+
+def test_location_flags_remain_independent(f):
+    f.allow_india = False
+    f.allow_remote_india = False
+    f.allow_plain_remote = False
+
+    assert not f._location_match("India")
+    assert not f._location_match("Remote - India")
+    assert not f._location_match("Remote")
+    assert f._location_match("Bengaluru")
+
+
 def test_includes_senior_software_engineer(f):
     assert f.should_include(_job("Senior Software Engineer","Bangalore",))
 

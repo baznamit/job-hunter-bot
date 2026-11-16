@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from models import Job
+from src.filters import FilterDiagnostics
 
 
 @dataclass
@@ -16,6 +17,7 @@ class CompanyRunResult:
 
     direct_count: int = 0
     promoted_count: int = 0
+    filter_diagnostics: FilterDiagnostics | None = None
 
     elapsed_seconds: float = 0.0
 

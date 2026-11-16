@@ -100,6 +100,21 @@ def test_remote_usa_is_not_enriched():
     )
 
 
+def test_remote_indiana_is_not_enriched():
+    job_filter = JobFilter()
+
+    job = _job(
+        "Engineer II",
+        "Remote - Indiana, USA",
+    )
+
+    assert not should_enrich(
+        job,
+        RejectionReason.INCLUDE_KEYWORD,
+        job_filter,
+    )
+
+
 def test_remote_india_is_enriched():
     job_filter = JobFilter()
 
@@ -128,11 +143,13 @@ def test_software_development_engineer_outranks_generic_engineer():
     generic_score = _candidate_score(
         generic,
         RejectionReason.INCLUDE_KEYWORD,
+        JobFilter(),
     )
 
     software_score = _candidate_score(
         software,
         RejectionReason.INCLUDE_KEYWORD,
+        JobFilter(),
     )
 
     assert software_score > generic_score
@@ -152,9 +169,11 @@ def test_computer_scientist_outranks_generic_engineer():
     assert _candidate_score(
         computer_scientist,
         RejectionReason.INCLUDE_KEYWORD,
+        JobFilter(),
     ) > _candidate_score(
         generic,
         RejectionReason.INCLUDE_KEYWORD,
+        JobFilter(),
     )
 
 
@@ -172,9 +191,11 @@ def test_target_city_outranks_broad_india_location():
     assert _candidate_score(
         bangalore,
         RejectionReason.INCLUDE_KEYWORD,
+        JobFilter(),
     ) > _candidate_score(
         india,
         RejectionReason.INCLUDE_KEYWORD,
+        JobFilter(),
     )
 
 
@@ -248,7 +269,7 @@ def test_strong_include_miss_can_be_promoted():
 
     job = _job(
         "Senior Engineer, Messaging Platform",
-        "Bengaluru",
+        "London | Bengaluru, India",
     )
 
     from src.description_diagnostics import EnrichedNearMiss
@@ -326,3 +347,22 @@ def test_foreign_remote_role_is_not_promoted():
     )
 
     assert promoted == []
+
+
+def test_unsupported_multi_location_cannot_be_promoted():
+    job_filter = JobFilter()
+    job = _job(
+        "Senior Engineer, Messaging Platform",
+        "London | Pune, India",
+    )
+
+    from src.description_diagnostics import EnrichedNearMiss
+
+    item = EnrichedNearMiss(
+        job=job,
+        rejection_reason=RejectionReason.INCLUDE_KEYWORD,
+        signals=["java", "backend"],
+        strong=True,
+    )
+
+    assert promotable_jobs([item], job_filter) == []

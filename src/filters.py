@@ -8,6 +8,42 @@ from models import Job
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
+_FOREIGN_COUNTRY_TERMS = (
+    "united states",
+    "usa",
+    "us",
+    "canada",
+    "brazil",
+    "united kingdom",
+    "uk",
+    "australia",
+    "germany",
+    "france",
+    "ireland",
+    "netherlands",
+    "singapore",
+    "japan",
+    "china",
+    "spain",
+    "italy",
+    "switzerland",
+    "sweden",
+    "poland",
+    "mexico",
+    "argentina",
+    "colombia",
+    "philippines",
+    "malaysia",
+    "indonesia",
+    "thailand",
+    "israel",
+    "south africa",
+    "new zealand",
+    "united arab emirates",
+    "uae",
+)
+
+
 class RejectionReason(str, Enum):
     INCLUDE_KEYWORD = "include_keyword"
     EXCLUDED_KEYWORD = "excluded_keyword"
@@ -234,6 +270,108 @@ class JobFilter:
             and self._exclude_keyword_match(title)
         )
 
+    @staticmethod
+    def _location_segments(location: str) -> list[str]:
+        return [
+            segment.strip().casefold()
+            for segment in re.split(r"\s*\|\s*|\s+/\s+", location)
+            if segment.strip()
+        ]
+
+    @staticmethod
+    def _contains_location_term(location: str, term: str) -> bool:
+        return bool(
+            re.search(
+                rf"(?<![\w-]){re.escape(term)}(?![\w-])",
+                location,
+            )
+        )
+
+    @classmethod
+    def _has_foreign_country(cls, location: str) -> bool:
+        return any(
+            cls._contains_location_term(location, country)
+            for country in _FOREIGN_COUNTRY_TERMS
+        )
+
+    def _location_has_allowed_city(self, location: str) -> bool:
+        return any(
+            not self._has_foreign_country(segment)
+            and any(
+                self._contains_location_term(segment, city)
+                for city in self.allowed_locations
+            )
+            for segment in self._location_segments(location)
+        )
+
+    def _location_is_remote_india(self, location: str) -> bool:
+        return any(
+            self._contains_location_term(segment, "remote")
+            and self._contains_location_term(segment, "india")
+            and not self._has_foreign_country(segment)
+            for segment in self._location_segments(location)
+        )
+
+    def _location_is_plain_remote(self, location: str) -> bool:
+        return any(
+            segment == "remote"
+            for segment in self._location_segments(location)
+        )
+
+    def _location_is_india_wide(self, location: str) -> bool:
+        return any(
+            segment == "india"
+            for segment in self._location_segments(location)
+        )
+
+    def _location_is_broad_target(self, location: str) -> bool:
+        for segment in self._location_segments(location):
+            if self._has_foreign_country(segment):
+                continue
+            if (
+                self.allow_india
+                and (
+                    segment == "india"
+                    or segment.endswith(", india")
+                )
+            ):
+                return True
+            if (
+                self.allow_remote_india
+                and self._contains_location_term(segment, "remote")
+                and self._contains_location_term(segment, "india")
+            ):
+                return True
+            if (
+                self.allow_plain_remote
+                and segment == "remote"
+            ):
+                return True
+        return False
+
+    def _location_is_diagnostic_target(self, location: str) -> bool:
+        return (
+            self._location_has_allowed_city(location)
+            or self._location_is_broad_target(location)
+        )
+
+    def _location_priority(self, location: str) -> int:
+        if self._location_has_allowed_city(location):
+            return 40
+        if (
+            self.allow_remote_india
+            and self._location_is_remote_india(location)
+        ):
+            return 25
+        if (
+            self.allow_plain_remote
+            and self._location_is_plain_remote(location)
+        ):
+            return 15
+        if self.allow_india and self._location_is_india_wide(location):
+            return 10
+        return 0
+
     def _location_match(self, location: str) -> bool:
         """
         Accept:
@@ -245,39 +383,16 @@ class JobFilter:
         Reject remote jobs explicitly tied to another country.
         """
 
-        loc = location.lower().strip()
-
-        # Preferred physical locations.
-        if any(
-            loc == allowed
-            or loc.startswith(allowed + ",")
-            or loc.startswith(allowed + " ")
-            or (", " + allowed) in loc
-            or (" - " + allowed) in loc
-            for allowed in self.allowed_locations
-        ):
+        if self._location_has_allowed_city(location):
             return True
-
-        if (
-            self.allow_india
-            and loc == "india"
-        ):
+        if self.allow_india and self._location_is_india_wide(location):
             return True
-
-        if (
-            self.allow_remote_india
-            and "remote" in loc
-            and "india" in loc
-        ):
+        if self.allow_remote_india and self._location_is_remote_india(location):
             return True
-
-        if (
+        return (
             self.allow_plain_remote
-            and loc == "remote"
-        ):
-            return True
-
-        return False
+            and self._location_is_plain_remote(location)
+        )
 
     def _seniority_match(self, title: str) -> bool:
         title = title.lower()
@@ -313,26 +428,8 @@ class JobFilter:
             job.title
         )
 
-        target_city = any(
-            city in location
-            for city in (
-                "mumbai",
-                "bangalore",
-                "bengaluru",
-            )
-        )
-
-        broad_location = (
-        location == "india"
-        or location.endswith(", india")
-        or (
-                "remote" in location
-                and (
-                    "india" in location
-                    or location.strip() == "remote"
-                )
-            )
-        )
+        target_city = self._location_has_allowed_city(location)
+        broad_location = self._location_is_broad_target(location)
 
         if reason == RejectionReason.INCLUDE_KEYWORD:
             # Ambiguous engineering titles in a target city are the most

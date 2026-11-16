@@ -14,4 +14,5 @@ def test_company_run_result_defaults():
     assert result.matching == []
     assert result.direct_count == 0
     assert result.promoted_count == 0
+    assert result.filter_diagnostics is None
     assert result.success is True

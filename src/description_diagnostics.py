@@ -81,13 +81,6 @@ _TITLE_REJECT_TERMS = (
     "solution engineer",
 )
 
-_TARGET_CITIES = (
-    "mumbai",
-    "bangalore",
-    "bengaluru",
-)
-
-
 @dataclass
 class EnrichedNearMiss:
     job: Job
@@ -125,22 +118,11 @@ def _strip_html(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip().lower()
 
 
-def _location_is_diagnostic_target(job: Job) -> bool:
-    location = job.location.lower()
-
-    if any(city in location for city in _TARGET_CITIES):
-        return True
-
-    if location == "india":
-        return True
-
-    if "remote" in location and (
-        "india" in location
-        or location.strip() == "remote"
-    ):
-        return True
-
-    return False
+def _location_is_diagnostic_target(
+    job: Job,
+    job_filter: JobFilter,
+) -> bool:
+    return job_filter._location_is_diagnostic_target(job.location)
 
 
 def should_enrich(
@@ -160,7 +142,7 @@ def should_enrich(
     if any(term in title for term in _TITLE_REJECT_TERMS):
         return False
 
-    if not _location_is_diagnostic_target(job):
+    if not _location_is_diagnostic_target(job, job_filter):
         return False
 
     if reason == RejectionReason.INCLUDE_KEYWORD:
@@ -184,7 +166,7 @@ def should_enrich(
         # Only broad India / Remote India jobs should be enriched.
         return (
             job_filter._include_keyword_match(job.title)
-            and _location_is_diagnostic_target(job)
+            and _location_is_diagnostic_target(job, job_filter)
         )
 
     # Excluded-keyword candidates are intentionally not description-
@@ -247,6 +229,7 @@ def find_signals(text: str) -> list[str]:
 def _candidate_score(
     job: Job,
     reason: RejectionReason,
+    job_filter: JobFilter,
 ) -> int:
     """
     Rank diagnostic candidates before description fetching.
@@ -256,19 +239,10 @@ def _candidate_score(
     """
 
     title = job.title.lower()
-    location = job.location.lower()
-
     score = 0
 
     # Prefer exact target cities over broad India/remote locations.
-    if any(city in location for city in _TARGET_CITIES):
-        score += 40
-    elif "remote" in location and "india" in location:
-        score += 25
-    elif location.strip() == "remote":
-        score += 15
-    elif location == "india" or location.endswith(", india"):
-        score += 10
+    score += job_filter._location_priority(job.location)
 
     # Strong software-development role families.
     if "software development engineer" in title:
@@ -359,6 +333,7 @@ def enrich_near_misses(
         score = _candidate_score(
             job,
             result.reason,
+            job_filter,
         )
 
         ranked_candidates.append(
