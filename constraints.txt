@@ -1,0 +1,33 @@
+# Exact versions for reproducible installs: pip install -r requirements.txt -c constraints.txt
+#
+# This file only pins versions; requirements.txt still declares what is needed.
+# Direct requirements: requests, pydantic, pytest, beautifulsoup4.
+# Everything else is transitive. Versions are those installed by the successful
+# production run on Python 3.15.2 (Linux x86_64) on 2026-11-16.
+#
+# To update intentionally: install the new versions, run the tests on
+# Python 3.15, then replace the pins here from `pip freeze`.
+
+# Direct
+beautifulsoup4==4.15.0
+pydantic==2.14.3
+pytest==9.2.0
+requests==2.34.2
+
+# Transitive
+annotated-types==0.8.0
+certifi==2026.10.23
+charset-normalizer==3.5.2
+idna==3.20
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0
+pydantic-core==2.50.4
+pygments==2.21.0
+soupsieve==4.1.1
+typing-extensions==4.16.0
+typing-inspection==0.4.5
+urllib3==2.8.0
+
+# Windows-only pytest dependency (not installed on Linux runners)
+colorama==0.4.6

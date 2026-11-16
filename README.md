@@ -122,10 +122,13 @@ Adjust the JSON configuration to change these rules.
 
 ## Running locally
 
-Requires Python and the dependencies in `requirements.txt`.
+Requires Python and the dependencies in `requirements.txt`. `constraints.txt`
+pins every direct and transitive package to the exact versions validated on
+Python 3.15 so installs are reproducible; update it deliberately (see its
+header) rather than letting versions float.
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt -c constraints.txt
 python -m pytest -q
 python -m research.main
 python -m src.main
