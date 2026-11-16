@@ -76,6 +76,17 @@ Workday's time budget is checked before dispatch, but a thread can be delayed
 after the check and in-flight requests are not cancelled at the deadline.
 Per-host pacing spaces admissions, not necessarily actual HTTP start times.
 
+Eightfold (Microsoft) honors a numeric or HTTP-date `Retry-After` up to 60
+seconds (plus a 0.5-second margin); missing, negative, NaN or malformed values
+use the 15-second default, and a longer or infinite request is deferred as a
+temporary failure instead of being waited out or shortened. The whole company
+fetch has a 420-second monotonic budget: no request or wait is scheduled that
+cannot fit, request timeouts are capped by the remaining time, and a deadline
+or long `Retry-After` failure never returns partial inventory. A response that
+is already in flight when the budget ends is still used, so the budget can be
+overshot by at most one request. Pagination and completeness checks are
+unchanged.
+
 IBM and HCLTech print one pagination summary per attempted search term, including
 failed terms. `pages` counts responses received, `raw_records` counts records
 in validated lists, and `processed_records` counts records accepted for

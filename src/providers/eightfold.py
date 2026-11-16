@@ -1,3 +1,4 @@
+import math
 import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin
@@ -8,6 +9,7 @@ from models import Job
 from models.company import Company
 
 from .base import ProviderAdapter
+from .exceptions import ProviderTemporaryError, parse_retry_after
 
 _TIMEOUT = 20
 _MAX_PAGES = 500
@@ -17,6 +19,58 @@ _REQUEST_DELAY_SECONDS = 0.35
 _RATE_LIMIT_COOLDOWN_SECONDS = 15.0
 _BATCH_SIZE = 5
 _BATCH_COOLDOWN_SECONDS = 15.0
+
+# Normal Microsoft crawls were observed at 143-271 s. The workflow job times
+# out at 15 minutes, so 420 s leaves a wide margin for other companies,
+# reporting and state persistence.
+_FETCH_BUDGET_SECONDS = 420.0
+# Longest server-requested Retry-After that is honored; longer requests are
+# deferred to a later run instead of being shortened or slept through.
+_MAX_RETRY_AFTER_SECONDS = 60.0
+_RETRY_AFTER_MARGIN_SECONDS = 0.5
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+class _Deadline:
+    """Monotonic budget for one company fetch (never shared across fetches)."""
+
+    def __init__(self, budget_seconds: float) -> None:
+        self._expires_at = _now() + budget_seconds
+
+    def remaining(self) -> float:
+        return self._expires_at - _now()
+
+
+def _retry_after_seconds(
+    value: str | None,
+    now: float | None = None,
+) -> float | None:
+    """
+    Return the server-requested wait, or None when absent or invalid.
+
+    Negative and NaN values are invalid. Infinity is a valid but
+    unsatisfiable request. HTTP-dates are handled by the shared parser.
+    """
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    try:
+        number = float(text)
+    except ValueError:
+        return parse_retry_after(text, now)
+
+    if math.isnan(number) or number < 0:
+        return None
+
+    return parse_retry_after(text, now)
+
 
 class EightfoldAdapter(ProviderAdapter):
     """
@@ -45,12 +99,52 @@ class EightfoldAdapter(ProviderAdapter):
             "api/pcsx/search"
         )
 
+    def _deferred_error(
+        self,
+        company: Company,
+        *,
+        start: int,
+        attempted: bool,
+    ) -> ProviderTemporaryError:
+        return ProviderTemporaryError(
+            company=company.name,
+            provider=self.provider_name,
+            message=(
+                f"deferred reason=time_budget company={company.id} "
+                f"operation=listing start={start} "
+                f"budget={_FETCH_BUDGET_SECONDS:.0f}s"
+            ),
+            category="deferred",
+            endpoint=self._endpoint(company),
+            operation="listing",
+            deferral_reason="time_budget",
+            deferred_after_attempt=attempted,
+        )
+
+    def _ensure_time_for(
+        self,
+        company: Company,
+        deadline: _Deadline,
+        needed_seconds: float,
+        *,
+        start: int,
+        attempted: bool,
+    ) -> None:
+        """Defer instead of waiting when the wait plus a request cannot fit."""
+        if needed_seconds >= deadline.remaining():
+            raise self._deferred_error(
+                company,
+                start=start,
+                attempted=attempted,
+            )
+
     def _request_page(
         self,
         company: Company,
         *,
         start: int,
         query: str = "",
+        deadline: _Deadline | None = None,
     ) -> tuple[list[dict], int]:
         config = company.provider.config
 
@@ -78,9 +172,22 @@ class EightfoldAdapter(ProviderAdapter):
             "start": start,
         }
 
+        if deadline is None:
+            deadline = _Deadline(_FETCH_BUDGET_SECONDS)
+
         for attempt in range(
             _MAX_RETRIES + 1
         ):
+            attempted = start > 0 or attempt > 0
+            remaining = deadline.remaining()
+
+            if remaining <= 0:
+                raise self._deferred_error(
+                    company,
+                    start=start,
+                    attempted=attempted,
+                )
+
             response = requests.get(
                 self._endpoint(company),
                 params=params,
@@ -93,7 +200,10 @@ class EightfoldAdapter(ProviderAdapter):
                         "JobHunterBot/1.0)"
                     ),
                 },
-                timeout=_TIMEOUT,
+                timeout=min(
+                    _TIMEOUT,
+                    remaining,
+                ),
             )
 
             if response.status_code != 429:
@@ -110,22 +220,50 @@ class EightfoldAdapter(ProviderAdapter):
                     "Retry-After"
                 )
             )
+            requested = _retry_after_seconds(
+                retry_after
+            )
 
-            try:
-                delay = float(
-                    retry_after
-                )
-
-                # Small safety margin.
-                delay += 0.5
-
-            except (
-                TypeError,
-                ValueError,
-            ):
+            if requested is None:
                 delay = (
                     _RATE_LIMIT_COOLDOWN_SECONDS
                 )
+            elif requested > _MAX_RETRY_AFTER_SECONDS:
+                # Retrying earlier than requested would defeat the server's
+                # limit; waiting this long would stall the whole run.
+                raise ProviderTemporaryError(
+                    company=company.name,
+                    provider=self.provider_name,
+                    message=(
+                        f"deferred reason=retry_after_exceeds_limit "
+                        f"company={company.id} operation=listing "
+                        f"start={start} "
+                        f"retry_after_seconds={requested:g} "
+                        f"limit={_MAX_RETRY_AFTER_SECONDS:g}s"
+                    ),
+                    status=429,
+                    category="rate_limit",
+                    retry_after=retry_after,
+                    retry_after_seconds=requested,
+                    endpoint=response.url,
+                    operation="listing",
+                    deferral_reason="retry_after_exceeds_limit",
+                    deferred_after_attempt=True,
+                )
+            else:
+                # Small safety margin.
+                delay = (
+                    requested
+                    + _RETRY_AFTER_MARGIN_SECONDS
+                )
+
+            self._ensure_time_for(
+                company,
+                deadline,
+                delay,
+                start=start,
+                attempted=True,
+            )
 
             print(
                 f"  [EIGHTFOLD] "
@@ -203,9 +341,14 @@ class EightfoldAdapter(ProviderAdapter):
         self,
         company: Company,
     ) -> dict:
+        deadline = _Deadline(
+            _FETCH_BUDGET_SECONDS
+        )
+
         first_page, total = self._request_page(
             company,
             start=0,
+            deadline=deadline,
         )
 
         if not first_page:
@@ -301,6 +444,18 @@ class EightfoldAdapter(ProviderAdapter):
                     f"start={offset} max_pages={_MAX_PAGES}"
                 )
 
+            self._ensure_time_for(
+                company,
+                deadline,
+                (
+                    _BATCH_COOLDOWN_SECONDS
+                    if pages_since_cooldown >= _BATCH_SIZE
+                    else _REQUEST_DELAY_SECONDS
+                ),
+                start=offset,
+                attempted=True,
+            )
+
             if (
                 pages_since_cooldown
                 >= _BATCH_SIZE
@@ -328,6 +483,7 @@ class EightfoldAdapter(ProviderAdapter):
             page, reported_total = self._request_page(
                 company,
                 start=offset,
+                deadline=deadline,
             )
 
             if not page:

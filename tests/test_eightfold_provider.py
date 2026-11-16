@@ -1,3 +1,6 @@
+import math
+import time
+from email.utils import formatdate
 from unittest.mock import patch
 
 import pytest
@@ -5,7 +8,9 @@ import pytest
 from models.company import Company
 from src.providers.eightfold import (
     EightfoldAdapter,
+    _retry_after_seconds,
 )
+from src.providers.exceptions import ProviderTemporaryError
 
 def _company():
     return Company.model_validate(
@@ -584,4 +589,330 @@ def test_eightfold_defaults_search_location_to_empty():
     params = mock_get.call_args.kwargs["params"]
 
     assert params["location"] == ""
+
+
+class _VirtualClock:
+    """Deterministic clock; HTTP calls and sleeps advance it, nothing waits."""
+
+    def __init__(self, latency=0.5):
+        self.now = 0.0
+        self.latency = latency
+        self.sleeps = []
+        self.calls = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, delay):
+        self.sleeps.append(delay)
+        self.now += delay
+
+
+def _run_virtual(clock, respond, total, action):
+    """
+    Run action with mocked HTTP. respond(call_number, start) returns None for
+    success or a headers dict for HTTP 429.
+    """
+
+    def fake_get(url, *, params, headers, timeout):
+        start = params["start"]
+        clock.calls.append((start, timeout, clock.now))
+        clock.now += clock.latency
+        throttle = respond(len(clock.calls), start)
+        if throttle is None:
+            return _Response(_payload(start, total))
+        response = _Response({})
+        response.status_code = 429
+        response.headers = throttle
+        return response
+
+    with (
+        patch(
+            "src.providers.eightfold.requests.get",
+            side_effect=fake_get,
+        ),
+        patch(
+            "src.providers.eightfold.time.sleep",
+            side_effect=clock.sleep,
+        ),
+        patch(
+            "src.providers.eightfold._now",
+            side_effect=clock.monotonic,
+        ),
+    ):
+        return action()
+
+
+def _fetch_virtual(clock, respond, total):
+    return _run_virtual(
+        clock,
+        respond,
+        total,
+        lambda: EightfoldAdapter()._fetch_raw(_company()),
+    )
+
+
+def _first_429(headers):
+    return lambda call, start: headers if call == 1 else None
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("5", 5.0),
+        (" 7 ", 7.0),
+        ("0", 0.0),
+        ("1.5", 1.5),
+        (formatdate(1030, usegmt=True), 30.0),
+        (formatdate(900, usegmt=True), 0.0),
+        ("inf", math.inf),
+        ("1e999", math.inf),
+        (None, None),
+        ("", None),
+        ("abc", None),
+        ("-5", None),
+        ("nan", None),
+        ("Wed, 99 Foo 2026 25:61:61 GMT", None),
+    ],
+)
+def test_retry_after_seconds_matrix(value, expected):
+    assert _retry_after_seconds(value, now=1000.0) == expected
+
+
+@pytest.mark.parametrize(
+    "header, expected_sleep",
+    [
+        ("5", 5.5),
+        ("0", 0.5),
+        ("60", 60.5),
+        (None, 15.0),
+        ("", 15.0),
+        ("abc", 15.0),
+        ("-5", 15.0),
+        ("nan", 15.0),
+    ],
+)
+def test_429_wait_uses_valid_retry_after_or_default(header, expected_sleep):
+    clock = _VirtualClock()
+    headers = {} if header is None else {"Retry-After": header}
+
+    positions, total = _run_virtual(
+        clock,
+        _first_429(headers),
+        1,
+        lambda: EightfoldAdapter()._request_page(_company(), start=0),
+    )
+
+    assert total == 1 and len(positions) == 1
+    assert clock.sleeps == [expected_sleep]
+    assert len(clock.calls) == 2
+    assert clock.now == pytest.approx(expected_sleep + 2 * clock.latency)
+
+
+def test_429_honors_http_date_retry_after():
+    clock = _VirtualClock()
+    headers = {"Retry-After": formatdate(time.time() + 30, usegmt=True)}
+
+    _run_virtual(
+        clock,
+        _first_429(headers),
+        1,
+        lambda: EightfoldAdapter()._request_page(_company(), start=0),
+    )
+
+    assert len(clock.sleeps) == 1
+    assert 29.0 <= clock.sleeps[0] <= 31.0
+    assert len(clock.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "61",
+        "3600",
+        "inf",
+        formatdate(time.time() + 3600, usegmt=True),
+    ],
+)
+def test_retry_after_above_limit_is_deferred_without_waiting(header):
+    clock = _VirtualClock()
+
+    with pytest.raises(ProviderTemporaryError) as raised:
+        _run_virtual(
+            clock,
+            _first_429({"Retry-After": header}),
+            1,
+            lambda: EightfoldAdapter()._request_page(_company(), start=0),
+        )
+
+    error = raised.value
+    assert error.status == 429
+    assert error.category == "rate_limit"
+    assert error.deferral_reason == "retry_after_exceeds_limit"
+    assert error.retry_after == header
+    assert error.retry_after_seconds > 60
+    assert clock.sleeps == []
+    assert len(clock.calls) == 1
+    assert clock.now == clock.latency
+
+
+def test_retry_after_deferral_is_reported_as_company_failure():
+    clock = _VirtualClock()
+
+    with pytest.raises(ProviderTemporaryError):
+        _fetch_virtual(clock, _first_429({"Retry-After": "3600"}), 212)
+
+    assert len(clock.calls) == 1
+
+
+def test_ordinary_429_exhaustion_keeps_retry_count_and_classification():
+    clock = _VirtualClock()
+
+    with pytest.raises(ProviderTemporaryError) as raised:
+        _fetch_virtual(clock, lambda call, start: {}, 212)
+
+    assert raised.value.category == "rate_limit"
+    assert raised.value.deferral_reason is None
+    assert len(clock.calls) == 4
+    assert clock.sleeps == [15.0, 15.0, 15.0]
+    assert clock.now == pytest.approx(47.0)
+
+
+def test_429_exhaustion_mid_crawl_accepts_no_partial_inventory():
+    clock = _VirtualClock()
+
+    with pytest.raises(ProviderTemporaryError) as raised:
+        _fetch_virtual(
+            clock,
+            lambda call, start: {} if start >= 70 else None,
+            212,
+        )
+
+    assert raised.value.category == "rate_limit"
+    assert [call[0] for call in clock.calls].count(70) == 4
+    assert len(clock.calls) == 11
+    assert clock.now == pytest.approx(67.6)
+
+
+def test_stable_inventory_request_count_and_pacing_are_unchanged():
+    clock = _VirtualClock()
+
+    raw = _fetch_virtual(clock, lambda call, start: None, 212)
+
+    assert len(raw["positions"]) == 212
+    assert [call[0] for call in clock.calls] == list(range(0, 212, 10))
+    assert all(call[1] == 20 for call in clock.calls)
+    assert clock.sleeps.count(15.0) == 4
+    assert clock.sleeps.count(0.35) == 17
+    assert clock.now == pytest.approx(76.95)
+
+
+def test_decreasing_total_still_fails_under_virtual_clock():
+    clock = _VirtualClock()
+    pages = {0: (list(range(10)), 20), 10: (list(range(10, 15)), 15)}
+
+    def fake_get(url, *, params, headers, timeout):
+        clock.calls.append((params["start"], timeout, clock.now))
+        clock.now += clock.latency
+        positions, count = pages.get(params["start"], ([], 15))
+        return _Response(
+            {
+                "data": {
+                    "positions": [
+                        {"id": i, "name": f"Engineer {i}", "positionUrl": f"/j/{i}"}
+                        for i in positions
+                    ],
+                    "count": count,
+                }
+            }
+        )
+
+    with (
+        patch("src.providers.eightfold.requests.get", side_effect=fake_get),
+        patch("src.providers.eightfold.time.sleep", side_effect=clock.sleep),
+        patch("src.providers.eightfold._now", side_effect=clock.monotonic),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="category=empty_page_after_total_decrease",
+        ):
+            EightfoldAdapter()._fetch_raw(_company())
+
+    assert [call[0] for call in clock.calls] == [0, 10, 15]
+
+
+def test_deadline_expiry_during_backoff_defers_without_sleeping():
+    clock = _VirtualClock()
+
+    with patch("src.providers.eightfold._FETCH_BUDGET_SECONDS", 20.0):
+        with pytest.raises(ProviderTemporaryError) as raised:
+            _fetch_virtual(clock, lambda call, start: {}, 212)
+
+    error = raised.value
+    assert error.category == "deferred"
+    assert error.deferral_reason == "time_budget"
+    assert error.deferred_after_attempt is True
+    assert len(clock.calls) == 2
+    assert clock.sleeps == [15.0]
+    assert clock.now == pytest.approx(16.0)
+
+
+def test_deadline_expiry_during_pagination_stops_scheduling_and_accepts_nothing():
+    clock = _VirtualClock()
+
+    with patch("src.providers.eightfold._FETCH_BUDGET_SECONDS", 20.0):
+        with pytest.raises(ProviderTemporaryError) as raised:
+            _fetch_virtual(clock, lambda call, start: None, 212)
+
+    assert raised.value.deferral_reason == "time_budget"
+    assert raised.value.category == "deferred"
+    assert len(clock.calls) < 22
+    assert all(started < 20.0 for _, _, started in clock.calls)
+    for _, timeout, started in clock.calls:
+        assert timeout == pytest.approx(min(20, 20.0 - started))
+    # No request was started after the deadline; overshoot is bounded by the
+    # single request that was already in flight.
+    assert clock.now < 20.0 + clock.latency
+
+
+def test_in_flight_response_completing_after_deadline_is_used():
+    clock = _VirtualClock()
+
+    with patch("src.providers.eightfold._FETCH_BUDGET_SECONDS", 1.2):
+        raw = _fetch_virtual(clock, lambda call, start: None, 15)
+
+    assert len(raw["positions"]) == 15
+    assert len(clock.calls) == 2
+    assert clock.calls[1][1] == pytest.approx(0.35)
+    assert clock.now > 1.2
+
+
+def test_deadline_expired_before_first_request_makes_no_http_attempt():
+    clock = _VirtualClock()
+
+    with patch("src.providers.eightfold._FETCH_BUDGET_SECONDS", 0.0):
+        with pytest.raises(ProviderTemporaryError) as raised:
+            _fetch_virtual(clock, lambda call, start: None, 212)
+
+    assert raised.value.deferral_reason == "time_budget"
+    assert raised.value.deferred_after_attempt is False
+    assert clock.calls == []
+
+
+def test_each_company_fetch_gets_its_own_deadline():
+    clock = _VirtualClock()
+    adapter = EightfoldAdapter()
+
+    with patch("src.providers.eightfold._FETCH_BUDGET_SECONDS", 3.0):
+        for _ in range(2):
+            raw = _run_virtual(
+                clock,
+                lambda call, start: None,
+                25,
+                lambda: adapter._fetch_raw(_company()),
+            )
+            assert len(raw["positions"]) == 25
+
+    assert len(clock.calls) == 6
+    assert clock.now > 3.0
 
