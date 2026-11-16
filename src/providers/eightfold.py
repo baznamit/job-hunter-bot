@@ -1,5 +1,6 @@
 import math
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
@@ -70,6 +71,43 @@ def _retry_after_seconds(
         return None
 
     return parse_retry_after(text, now)
+
+
+@dataclass
+class _InventoryAccounting:
+    """Per-fetch aggregate counts; created for each fetch, never shared."""
+
+    pages: int = 0
+    raw_records: int = 0
+    duplicate_ids: int = 0
+    unique_ids: int = 0
+    total_first: int | None = None
+    total_last: int | None = None
+    total_min: int | None = None
+    total_max: int | None = None
+
+    def record_page(
+        self,
+        records: int,
+        reported_total: int,
+    ) -> None:
+        self.pages += 1
+        self.raw_records += records
+
+        if self.total_first is None:
+            self.total_first = reported_total
+
+        self.total_last = reported_total
+        self.total_min = (
+            reported_total
+            if self.total_min is None
+            else min(self.total_min, reported_total)
+        )
+        self.total_max = (
+            reported_total
+            if self.total_max is None
+            else max(self.total_max, reported_total)
+        )
 
 
 class EightfoldAdapter(ProviderAdapter):
@@ -341,6 +379,126 @@ class EightfoldAdapter(ProviderAdapter):
         self,
         company: Company,
     ) -> dict:
+        accounting = _InventoryAccounting()
+
+        try:
+            raw = self._crawl(
+                company,
+                accounting,
+            )
+        except Exception:
+            self._emit_accounting(
+                company,
+                accounting,
+                status="failed",
+            )
+            raise
+
+        raw["accounting"] = accounting
+        return raw
+
+    def fetch_jobs(
+        self,
+        company: Company,
+    ) -> list[Job]:
+        raw = self._fetch_raw(company)
+        accounting = raw.get("accounting")
+
+        try:
+            jobs, skipped = self._parse_with_skips(
+                raw,
+                company,
+            )
+        except Exception:
+            self._emit_accounting(
+                company,
+                accounting,
+                status="parse_failed",
+            )
+            raise
+
+        self._emit_accounting(
+            company,
+            accounting,
+            status="complete",
+            jobs=jobs,
+            skipped=skipped,
+        )
+        return jobs
+
+    def _emit_accounting(
+        self,
+        company: Company,
+        accounting: "_InventoryAccounting | None",
+        **kwargs,
+    ) -> None:
+        """Diagnostics must never change or mask a fetch outcome."""
+        try:
+            print(
+                self._accounting_line(
+                    company,
+                    accounting,
+                    **kwargs,
+                )
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _accounting_line(
+        company: Company,
+        accounting: "_InventoryAccounting | None",
+        *,
+        status: str,
+        jobs: list[Job] | None = None,
+        skipped: dict[str, int] | None = None,
+    ) -> str:
+        """Aggregate counts and safe category names only; never record data."""
+        if accounting is None:
+            return (
+                f"  [EIGHTFOLD] {company.name}: accounting "
+                f"status={status} unavailable"
+            )
+
+        line = (
+            f"  [EIGHTFOLD] {company.name}: accounting "
+            f"status={status} "
+            f"pages={accounting.pages} "
+            f"raw_records={accounting.raw_records} "
+            f"duplicate_ids={accounting.duplicate_ids} "
+            f"unique_ids={accounting.unique_ids}"
+        )
+
+        if jobs is not None:
+            skipped = skipped or {}
+            reasons = ",".join(
+                f"{reason}:{count}"
+                for reason, count in sorted(skipped.items())
+            ) or "none"
+            line += (
+                f" parsed={len(jobs)} "
+                f"skipped={sum(skipped.values())} "
+                f"skip_reasons={reasons} "
+                f"jobs={len(jobs)} "
+                f"unique_urls={len({str(job.url) for job in jobs})}"
+            )
+
+        def fmt(value: int | None) -> str:
+            return "n/a" if value is None else str(value)
+
+        return (
+            f"{line} "
+            f"total_first={fmt(accounting.total_first)} "
+            f"total_last={fmt(accounting.total_last)} "
+            f"total_min={fmt(accounting.total_min)} "
+            f"total_max={fmt(accounting.total_max)}"
+        )
+
+    def _crawl(
+        self,
+        company: Company,
+        accounting: "_InventoryAccounting",
+    ) -> dict:
         deadline = _Deadline(
             _FETCH_BUDGET_SECONDS
         )
@@ -349,6 +507,10 @@ class EightfoldAdapter(ProviderAdapter):
             company,
             start=0,
             deadline=deadline,
+        )
+        accounting.record_page(
+            len(first_page),
+            total,
         )
 
         if not first_page:
@@ -409,9 +571,11 @@ class EightfoldAdapter(ProviderAdapter):
                 )
 
                 if key in seen_ids:
+                    accounting.duplicate_ids += 1
                     continue
 
                 seen_ids.add(key)
+                accounting.unique_ids += 1
                 all_positions.append(
                     position
                 )
@@ -484,6 +648,10 @@ class EightfoldAdapter(ProviderAdapter):
                 company,
                 start=offset,
                 deadline=deadline,
+            )
+            accounting.record_page(
+                len(page),
+                reported_total,
             )
 
             if not page:
@@ -610,6 +778,16 @@ class EightfoldAdapter(ProviderAdapter):
         raw: dict,
         company: Company,
     ) -> list[Job]:
+        return self._parse_with_skips(
+            raw,
+            company,
+        )[0]
+
+    def _parse_with_skips(
+        self,
+        raw: dict,
+        company: Company,
+    ) -> tuple[list[Job], dict[str, int]]:
         config = company.provider.config
 
         positions = (
@@ -618,12 +796,17 @@ class EightfoldAdapter(ProviderAdapter):
         )
 
         jobs: list[Job] = []
+        skipped: dict[str, int] = {}
+
+        def skip(reason: str) -> None:
+            skipped[reason] = skipped.get(reason, 0) + 1
 
         for item in positions:
             if not isinstance(
                 item,
                 dict,
             ):
+                skip("invalid_record")
                 continue
 
             position_id = item.get("id")
@@ -637,6 +820,12 @@ class EightfoldAdapter(ProviderAdapter):
                 or not title
                 or not position_url
             ):
+                if position_id is None:
+                    skip("missing_id")
+                elif not title:
+                    skip("missing_title")
+                else:
+                    skip("missing_url")
                 continue
 
             url = urljoin(
@@ -678,7 +867,7 @@ class EightfoldAdapter(ProviderAdapter):
                 )
             )
 
-        return jobs
+        return jobs, skipped
 
     def validate(
         self,

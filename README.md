@@ -87,6 +87,15 @@ is already in flight when the budget ends is still used, so the budget can be
 overshot by at most one request. Pagination and completeness checks are
 unchanged.
 
+Each Eightfold fetch prints one `[EIGHTFOLD] <company>: accounting` line with
+`status` (`complete`, `failed` or `parse_failed`), pages received, raw records,
+duplicate and unique job IDs, the first/last/min/max reported totals and, after
+parsing, parsed and skipped records by category (`missing_id`, `missing_title`,
+`missing_url`, `invalid_record`), final jobs and unique URLs. It contains counts
+and category names only and adds no requests. A `failed` line reports the
+progress made before the failure; the failure itself is unchanged and no
+partial inventory is accepted.
+
 IBM and HCLTech print one pagination summary per attempted search term, including
 failed terms. `pages` counts responses received, `raw_records` counts records
 in validated lists, and `processed_records` counts records accepted for

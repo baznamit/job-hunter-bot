@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from models.company import Company
+from models import Job
 from src.providers.eightfold import (
     EightfoldAdapter,
     _retry_after_seconds,
@@ -915,4 +916,325 @@ def test_each_company_fetch_gets_its_own_deadline():
 
     assert len(clock.calls) == 6
     assert clock.now > 3.0
+
+
+def _item(number, **overrides):
+    item = {
+        "id": number,
+        "name": f"Engineer {number}",
+        "positionUrl": f"/careers/job/{number}",
+    }
+    item.update(overrides)
+    return item
+
+
+def _scripted_fetch(clock, items, *, total_for=None, throttle=None, budget=None):
+    """Serve items 10 at a time through fetch_jobs on the virtual clock."""
+
+    def fake_get(url, *, params, headers, timeout):
+        start = params["start"]
+        clock.calls.append((start, timeout, clock.now))
+        clock.now += clock.latency
+        headers_429 = throttle(len(clock.calls), start) if throttle else None
+        if headers_429 is not None:
+            response = _Response({})
+            response.status_code = 429
+            response.headers = headers_429
+            return response
+        total = total_for(len(clock.calls)) if total_for else len(items)
+        return _Response(
+            {"data": {"positions": items[start:start + 10], "count": total}}
+        )
+
+    patches = [
+        patch("src.providers.eightfold.requests.get", side_effect=fake_get),
+        patch("src.providers.eightfold.time.sleep", side_effect=clock.sleep),
+        patch("src.providers.eightfold._now", side_effect=clock.monotonic),
+    ]
+    if budget is not None:
+        patches.append(patch("src.providers.eightfold._FETCH_BUDGET_SECONDS", budget))
+    for active in patches:
+        active.start()
+    try:
+        return EightfoldAdapter().fetch_jobs(_company())
+    finally:
+        for active in patches:
+            active.stop()
+
+
+def _accounting(capsys):
+    lines = [
+        line for line in capsys.readouterr().out.splitlines()
+        if " accounting " in line
+    ]
+    assert len(lines) == 1
+    return lines[0], dict(
+        part.split("=", 1) for part in lines[0].split() if "=" in part
+    )
+
+
+def test_accounting_stable_inventory_without_duplicates(capsys):
+    clock = _VirtualClock()
+
+    jobs = _scripted_fetch(clock, [_item(i) for i in range(1, 213)])
+
+    line, fields = _accounting(capsys)
+    assert len(jobs) == 212
+    assert len(clock.calls) == 22
+    assert fields == {
+        "status": "complete", "pages": "22", "raw_records": "212",
+        "duplicate_ids": "0", "unique_ids": "212", "parsed": "212",
+        "skipped": "0", "skip_reasons": "none", "jobs": "212",
+        "unique_urls": "212", "total_first": "212", "total_last": "212",
+        "total_min": "212", "total_max": "212",
+    }
+
+
+def test_accounting_counts_duplicate_ids_across_pages(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 31)]
+    items[12] = dict(items[2])
+    items[25] = dict(items[2])
+
+    jobs = _scripted_fetch(clock, items)
+
+    _, fields = _accounting(capsys)
+    assert [job.id for job in jobs] == [str(i) for i in range(1, 31) if i not in (13, 26)]
+    assert fields["raw_records"] == "30"
+    assert fields["duplicate_ids"] == "2"
+    assert fields["unique_ids"] == "28"
+    assert fields["jobs"] == "28"
+
+
+def test_accounting_reports_parse_skips_by_safe_category_only(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 21)]
+    items[1] = _item(2, name="")
+    items[2] = _item(3, name=None)
+    items[3] = _item(4, positionUrl="")
+    items[4] = _item(5, name="Secret Title", positionUrl=None)
+
+    jobs = _scripted_fetch(clock, items)
+
+    line, fields = _accounting(capsys)
+    assert [job.id for job in jobs] == [str(i) for i in range(1, 21) if i not in (2, 3, 4, 5)]
+    assert fields["raw_records"] == "20"
+    assert fields["parsed"] == "16" and fields["skipped"] == "4"
+    assert fields["skip_reasons"] == "missing_title:2,missing_url:2"
+    assert "Secret Title" not in line
+    assert "careers/job" not in line
+
+
+def test_parse_skip_categories_for_malformed_records():
+    adapter = EightfoldAdapter()
+    jobs, skipped = adapter._parse_with_skips(
+        {"positions": [
+            "text", None, {"name": "x", "positionUrl": "/p"},
+            _item(1, name=""), _item(2, positionUrl=""), _item(3),
+        ]},
+        _company(),
+    )
+
+    assert [job.id for job in jobs] == ["3"]
+    assert skipped == {
+        "invalid_record": 2, "missing_id": 1, "missing_title": 1, "missing_url": 1,
+    }
+    assert [job.id for job in adapter.parse({"positions": [_item(3)]}, _company())] == ["3"]
+
+
+def test_accounting_does_not_change_returned_jobs_or_urls():
+    items = [_item(i, name=f" Engineer {i} ") for i in range(1, 26)]
+    adapter = EightfoldAdapter()
+    clock = _VirtualClock()
+
+    via_fetch = _scripted_fetch(clock, items)
+    raw = {"positions": items}
+    via_parse = adapter.parse(raw, _company())
+
+    assert [(job.id, job.title, str(job.url)) for job in via_fetch] == [
+        (job.id, job.title, str(job.url)) for job in via_parse
+    ]
+    assert str(via_fetch[0].url) == "https://apply.careers.microsoft.com/careers/job/1"
+
+
+def test_accounting_tracks_total_changes_when_inventory_grows(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 36)]
+
+    jobs = _scripted_fetch(
+        clock, items, total_for=lambda call: 30 if call < 3 else 35,
+    )
+
+    _, fields = _accounting(capsys)
+    assert len(jobs) == 35
+    assert fields["total_first"] == "30" and fields["total_last"] == "35"
+    assert fields["total_min"] == "30" and fields["total_max"] == "35"
+    assert fields["pages"] == "4"
+
+
+def test_accounting_on_decreasing_total_failure_keeps_failure_and_never_succeeds(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 16)]
+
+    with pytest.raises(
+        RuntimeError, match="category=empty_page_after_total_decrease",
+    ):
+        _scripted_fetch(
+            clock, items, total_for=lambda call: 20 if call < 2 else 15,
+        )
+
+    _, fields = _accounting(capsys)
+    assert fields["status"] == "failed"
+    assert "jobs" not in fields and "parsed" not in fields
+    assert fields["pages"] == "3" and fields["raw_records"] == "15"
+    assert fields["total_first"] == "20" and fields["total_last"] == "15"
+    assert fields["total_min"] == "15" and fields["total_max"] == "20"
+    assert [call[0] for call in clock.calls] == [0, 10, 15]
+
+
+def test_accounting_on_429_exhaustion_preserves_classification_and_requests(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 213)]
+
+    with pytest.raises(ProviderTemporaryError) as raised:
+        _scripted_fetch(
+            clock, items, throttle=lambda call, start: {} if start >= 70 else None,
+        )
+
+    _, fields = _accounting(capsys)
+    assert raised.value.category == "rate_limit"
+    assert len(clock.calls) == 11
+    assert fields["status"] == "failed"
+    assert fields["pages"] == "7" and fields["raw_records"] == "70"
+
+
+def test_accounting_on_deadline_expiry_preserves_classification(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 213)]
+
+    with pytest.raises(ProviderTemporaryError) as raised:
+        _scripted_fetch(clock, items, budget=20.0)
+
+    _, fields = _accounting(capsys)
+    assert raised.value.category == "deferred"
+    assert raised.value.deferral_reason == "time_budget"
+    assert fields["status"] == "failed"
+    assert int(fields["pages"]) == len(clock.calls)
+
+
+def test_accounting_failed_on_malformed_record_keeps_existing_category(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 11)]
+    items[4] = _item(5, id=None)
+
+    with pytest.raises(RuntimeError, match="category=missing_position_id"):
+        _scripted_fetch(clock, items)
+
+    _, fields = _accounting(capsys)
+    assert fields["status"] == "failed"
+    assert fields["pages"] == "1" and fields["raw_records"] == "10"
+    assert fields["unique_ids"] == "4"
+    assert len(clock.calls) == 1
+
+
+def test_accounting_marks_parse_failure_and_reraises(capsys):
+    clock = _VirtualClock()
+
+    with patch.object(
+        EightfoldAdapter, "_parse_with_skips", side_effect=ValueError("bad"),
+    ):
+        with pytest.raises(ValueError, match="bad"):
+            _scripted_fetch(clock, [_item(1)])
+
+    _, fields = _accounting(capsys)
+    assert fields["status"] == "parse_failed"
+    assert "jobs" not in fields
+
+
+def test_accounting_counts_reconcile_on_success(capsys):
+    clock = _VirtualClock()
+    items = [_item(i) for i in range(1, 41)]
+    items[7] = dict(items[1])
+    items[20] = dict(items[1])
+    items[10] = _item(11, name="")
+    items[30] = _item(31, positionUrl=None)
+    items[33] = _item(34, positionUrl="/careers/job/1")
+
+    jobs = _scripted_fetch(clock, items)
+
+    _, fields = _accounting(capsys)
+    raw_records = int(fields["raw_records"])
+    assert raw_records == 40
+    assert raw_records == int(fields["unique_ids"]) + int(fields["duplicate_ids"])
+    # Parser input is exactly the deduplicated records.
+    assert int(fields["parsed"]) + int(fields["skipped"]) == int(fields["unique_ids"])
+    assert int(fields["parsed"]) == int(fields["jobs"]) == len(jobs)
+    assert int(fields["unique_urls"]) == len({str(job.url) for job in jobs})
+    assert int(fields["unique_urls"]) == len(jobs) - 1
+    # Output order is the ATS order with the first duplicate occurrence kept.
+    ids = [job.id for job in jobs]
+    assert ids == [
+        str(i) for i in range(1, 41) if i not in (8, 21, 11, 31)
+    ]
+
+
+def test_each_record_is_parsed_exactly_once_for_diagnostics():
+    clock = _VirtualClock()
+    adapter = EightfoldAdapter()
+    original = EightfoldAdapter._parse_with_skips
+    inputs = []
+
+    def spy(self, raw, company):
+        inputs.append(len(raw["positions"]))
+        return original(self, raw, company)
+
+    with patch.object(EightfoldAdapter, "_parse_with_skips", spy):
+        with patch("src.providers.eightfold.Job", wraps=Job) as job_class:
+            patches = [
+                patch("src.providers.eightfold.requests.get", side_effect=lambda url, *, params, headers, timeout: _Response(
+                    {"data": {"positions": [_item(i) for i in range(1, 16)][params["start"]:params["start"] + 10], "count": 15}}
+                )),
+                patch("src.providers.eightfold.time.sleep", side_effect=clock.sleep),
+            ]
+            for active in patches:
+                active.start()
+            try:
+                jobs = adapter.fetch_jobs(_company())
+            finally:
+                for active in patches:
+                    active.stop()
+
+    assert len(jobs) == 15
+    assert inputs == [15]
+    assert job_class.call_count == 15
+
+
+def test_failing_diagnostic_print_never_masks_or_fails_a_fetch():
+    real_print = print
+
+    def flaky_print(*args, **kwargs):
+        if args and " accounting " in str(args[0]):
+            raise OSError("stdout closed")
+        return real_print(*args, **kwargs)
+
+    clock = _VirtualClock()
+
+    with patch("builtins.print", side_effect=flaky_print):
+        jobs = _scripted_fetch(clock, [_item(i) for i in range(1, 13)])
+        assert len(jobs) == 12
+
+        with pytest.raises(
+            RuntimeError, match="category=empty_page_after_total_decrease",
+        ):
+            _scripted_fetch(
+                _VirtualClock(),
+                [_item(i) for i in range(1, 16)],
+                total_for=lambda call: 20 if call < 2 else 15,
+            )
+
+        with pytest.raises(ValueError, match="bad"):
+            with patch.object(
+                EightfoldAdapter, "_parse_with_skips", side_effect=ValueError("bad"),
+            ):
+                _scripted_fetch(_VirtualClock(), [_item(1)])
 
