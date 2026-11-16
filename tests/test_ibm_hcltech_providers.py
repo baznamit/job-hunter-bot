@@ -25,6 +25,24 @@ def company(provider):
     })
 
 
+def _hcl_response(records, total):
+    response = Mock()
+    response.status_code = 200
+    response.url = (
+        "https://careers.hcltech.com"
+        "/services/recruiting/v1/jobs"
+    )
+    response.headers = {
+        "Content-Type": "application/json"
+    }
+    response.json.return_value = {
+        "totalJobs": total,
+        "jobSearchResult": records,
+    }
+    response.raise_for_status = Mock()
+    return response
+
+
 def test_hcl_payload():
     payload = HCLTechAdapter._payload(
         1, "java"
@@ -53,6 +71,10 @@ def test_hcl_parse():
     assert jobs[0].id == "178931"
     assert jobs[0].title == "Administrator - Java"
     assert jobs[0].location == "Pune, India"
+    assert str(jobs[0].url) == (
+        "https://careers.hcltech.com/job/"
+        "Administrator-Java/178931/"
+    )
     assert jobs[0].posted_at.year == 2026
 
 
@@ -68,6 +90,44 @@ def test_hcl_deduplication():
     )
 
     assert len(jobs) == 1
+
+
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_deduplicates_across_search_terms(mock_session):
+    item = {
+        "response": {
+            "id": "178931",
+            "unifiedStandardTitle": "Administrator - Java",
+            "custprimecity": "Mumbai",
+            "custCountryRegion": ["India"],
+            "unifiedUrlTitle": "Administrator-Java",
+        }
+    }
+    session = Mock()
+    session.post.side_effect = [
+        _hcl_response([item], 1),
+        _hcl_response([item], 1),
+    ]
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = [
+        "Mumbai",
+        "Bangalore",
+    ]
+    test_company.provider.config.max_pages = 1
+
+    jobs = HCLTechAdapter().fetch_jobs(test_company)
+
+    assert [job.id for job in jobs] == ["178931"]
+    assert str(jobs[0].url) == (
+        "https://careers.hcltech.com/job/"
+        "Administrator-Java/178931/"
+    )
+    assert [
+        call.kwargs["json"]["keywords"]
+        for call in session.post.call_args_list
+    ] == ["Mumbai", "Bangalore"]
 
 
 @patch("src.providers.hcltech.requests.Session")
@@ -169,6 +229,78 @@ def test_hcltech_fetches_more_than_300_jobs(mock_session):
 
     assert len(jobs) == 316
     assert session.post.call_count == 32
+
+
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_rejects_repeated_page_within_search_term(
+    mock_session,
+):
+    records = [
+        {
+            "response": {
+                "id": f"hcl-{index}",
+                "unifiedStandardTitle": "Engineer",
+            }
+        }
+        for index in range(10)
+    ]
+    session = Mock()
+    session.post.side_effect = [
+        _hcl_response(records, 20),
+        _hcl_response(list(reversed(records)), 20),
+    ]
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Mumbai"]
+    test_company.provider.config.max_pages = 2
+
+    with pytest.raises(
+        RuntimeError,
+        match="HCLTech pagination stalled",
+    ):
+        HCLTechAdapter().fetch_jobs(test_company)
+
+    assert session.post.call_count == 2
+
+
+@patch("src.providers.hcltech.requests.Session")
+def test_hcltech_pagination_allows_partial_id_overlap(
+    mock_session,
+):
+    first_page = [
+        {
+            "response": {
+                "id": f"hcl-{index}",
+                "unifiedStandardTitle": "Engineer",
+            }
+        }
+        for index in range(10)
+    ]
+    second_page = [
+        {
+            "response": {
+                "id": f"hcl-{index}",
+                "unifiedStandardTitle": "Engineer",
+            }
+        }
+        for index in range(8, 18)
+    ]
+    session = Mock()
+    session.post.side_effect = [
+        _hcl_response(first_page, 20),
+        _hcl_response(second_page, 20),
+    ]
+    mock_session.return_value.__enter__.return_value = session
+
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Mumbai"]
+    test_company.provider.config.max_pages = 2
+
+    jobs = HCLTechAdapter().fetch_jobs(test_company)
+
+    assert len(jobs) == 18
+    assert session.post.call_count == 2
 
 
 def test_ibm_payload():

@@ -102,6 +102,7 @@ class HCLTechAdapter(ProviderAdapter):
 
             for term in terms:
                 term_jobs = {}
+                page_signatures: set[frozenset[str]] = set()
                 total = None
                 received_hits = 0
 
@@ -173,6 +174,8 @@ class HCLTechAdapter(ProviderAdapter):
                             "page before inventory completion"
                         )
 
+                    page_jobs = []
+
                     for record in records:
                         if not isinstance(record, dict):
                             raise RuntimeError(
@@ -195,6 +198,22 @@ class HCLTechAdapter(ProviderAdapter):
                                 "Missing HCLTech job ID"
                             )
 
+                        page_jobs.append((job_id, item))
+
+                    page_signature = frozenset(
+                        job_id for job_id, _ in page_jobs
+                    )
+
+                    if page_signature in page_signatures:
+                        raise RuntimeError(
+                            "HCLTech pagination stalled: "
+                            f"term={term!r} page={page} "
+                            "repeated job-ID page"
+                        )
+
+                    page_signatures.add(page_signature)
+
+                    for job_id, item in page_jobs:
                         term_jobs[job_id] = item
 
                     received_hits += len(records)

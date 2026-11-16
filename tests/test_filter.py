@@ -399,6 +399,24 @@ def test_hyphenated_full_stack_title_matches():
         "Fullstack Developer"
     )
 
+    assert job_filter._include_keyword_match(
+        "Java_Full_Stack_Developer"
+    )
+
+    assert job_filter.should_include(
+        _job(
+            "Java Full-Stack Developer",
+            "Bengaluru",
+        )
+    )
+
+    assert job_filter.should_include(
+        _job(
+            "Java_Full_Stack_Developer",
+            "Bengaluru",
+        )
+    )
+
 
 def test_unrelated_title_still_rejected():
     from src.filters import JobFilter
@@ -408,6 +426,18 @@ def test_unrelated_title_still_rejected():
     assert not job_filter._include_keyword_match(
         "Senior Sales Executive"
     )
+
+
+def test_generic_unrelated_engineering_title_remains_rejected(f):
+    result = f.evaluate(
+        _job(
+            "Electrical Engineer",
+            "Bengaluru",
+        )
+    )
+
+    assert not result.included
+    assert result.reason == RejectionReason.INCLUDE_KEYWORD
 
 
 def test_ambiguous_location_not_automatically_accepted():
