@@ -5088,6 +5088,109 @@ def _workday_health_remaining(summary, reason):
     summary.append({"status": "NOT_RUN", "reason": reason})
 
 
+WORKDAY_RATE_LIMIT_SAMPLE = (
+    ("postman", "postman", "wd108", "careers"),
+    ("browserstack", "browserstack", "wd3", "External"),
+    ("bakerhughes", "bakerhughes", "wd5", "BakerHughes"),
+    ("duckcreek", "duckcreek", "wd1", "duckcreekcareers"),
+)
+WORKDAY_RATE_LIMIT_HEADERS = (
+    "retry-after",
+    "ratelimit-limit",
+    "ratelimit-remaining",
+    "ratelimit-reset",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+)
+_HTTP_DATE = re.compile(
+    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} "
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+    r"\d{4} \d{2}:\d{2}:\d{2} GMT"
+)
+
+
+def _workday_rate_limit_headers(headers):
+    safe = {}
+    for name in WORKDAY_RATE_LIMIT_HEADERS:
+        value = headers.get(name)
+        if value is None:
+            continue
+        if re.fullmatch(r"[0-9]{1,12}", value) or (
+            name == "retry-after" and _HTTP_DATE.fullmatch(value)
+        ):
+            safe[name] = value
+        else:
+            safe[name] = "<omitted>"
+    return safe
+
+
+def run_workday_rate_limit_sample():
+    """Collect a single, sequential listing response per allowlisted company."""
+    from research.loader import load_registry
+    from models.company import ProviderStatus, ProviderType
+
+    registry = load_registry()
+    selected = []
+    for company_id, tenant, cluster, board in WORKDAY_RATE_LIMIT_SAMPLE:
+        matches = [company for company in registry.companies if company.id == company_id]
+        if len(matches) != 1:
+            raise ValueError(f"{company_id}: expected exactly one registry entry")
+        company = matches[0]
+        config = company.provider.config
+        if (
+            not company.enabled
+            or company.provider.type != ProviderType.WORKDAY
+            or company.provider.status != ProviderStatus.VERIFIED
+            or config.tenant != tenant
+            or config.cluster != cluster
+            or _workday_health_boards(company) != [board]
+        ):
+            raise ValueError(f"{company_id}: Workday mapping does not match the sample")
+        selected.append((company, board))
+
+    print("WORKDAY_RATE_LIMIT_SAMPLE READ_ONLY=YES max_requests=4")
+    print(f"commit_sha={_git_commit_sha()} python={sys.version.split()[0]}")
+
+    for index, (company, board) in enumerate(selected):
+        if index:
+            time.sleep(5)
+        start_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        started = time.monotonic()
+        try:
+            with requests.Session() as session:
+                session.trust_env = False
+                with session.post(
+                    _workday_health_url(company, board),
+                    json={
+                        "appliedFacets": {},
+                        "limit": 20,
+                        "offset": 0,
+                        "searchText": "",
+                    },
+                    headers=_workday_health_headers(company, board),
+                    timeout=(5, 10),
+                    allow_redirects=False,
+                    stream=True,
+                ) as response:
+                    elapsed = time.monotonic() - started
+                    print(
+                        f"[{company.id}] start_utc={start_utc} "
+                        f"elapsed_seconds={elapsed:.3f} status={response.status_code} "
+                        f"headers={json.dumps(_workday_rate_limit_headers(response.headers), sort_keys=True)}"
+                    )
+                    if response.status_code == 429:
+                        print("stopped=rate_limit")
+                        return
+        except requests.RequestException as exc:
+            elapsed = time.monotonic() - started
+            print(
+                f"[{company.id}] start_utc={start_utc} elapsed_seconds={elapsed:.3f} "
+                f"status=error error_type={type(exc).__name__}"
+            )
+            raise RuntimeError(f"Workday sample request failed: {type(exc).__name__}") from None
+
+
 def run_workday_health(*, session=None, budget_seconds=WORKDAY_HEALTH_BUDGET_SECONDS):
     """Run bounded, sequential Workday listing/detail diagnostics."""
     from research.loader import load_registry
@@ -5298,10 +5401,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Run bounded, read-only diagnostics for enabled Workday companies",
     )
+    parser.add_argument(
+        "--workday-rate-limit-sample",
+        action="store_true",
+        help="Sample one Workday listing for each of four allowlisted companies",
+    )
 
     args = parser.parse_args()
 
-    if args.workday_health:
+    if args.workday_rate_limit_sample:
+        run_workday_rate_limit_sample()
+    elif args.workday_health:
         run_workday_health()
     elif args.enterprise_batch:
         run_enterprise_batch()

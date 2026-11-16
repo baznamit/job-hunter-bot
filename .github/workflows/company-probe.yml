@@ -16,6 +16,7 @@ on:
           - integration-batch
           - enterprise-batch
           - workday-health
+          - workday-rate-limit-sample
           - legacy
 
 permissions:
@@ -73,6 +74,9 @@ jobs:
               ;;
             workday-health)
               python -u -m research.company_probe --workday-health
+              ;;
+            workday-rate-limit-sample)
+              python -u -m research.company_probe --workday-rate-limit-sample
               ;;
             legacy)
               python -u -m research.company_probe

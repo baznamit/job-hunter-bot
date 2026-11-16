@@ -122,6 +122,23 @@ outside this repository; this repository contains the workflow that runs the
 bot. `jobs.yml` also offers a validation-only manual dispatch option for
 checking that the external scheduler can reach GitHub Actions.
 
+For a small read-only Workday rate-limit sample, run
+`python -u -m research.company_probe --workday-rate-limit-sample` or manually
+dispatch `company-probe.yml` with `workday-rate-limit-sample`. It checks the
+verified registry mappings for Postman, BrowserStack, Baker Hughes and Duck
+Creek, then sends at most one listing request per company, five seconds apart.
+It stops on the first HTTP 429 or request error, does not follow redirects or
+retry, and reports only a restricted set of rate-limit headers. It does not
+read or write bot state or send notifications. Connect/read timeouts are 5/10
+seconds per request; DNS and transport behavior can exceed these timeouts.
+This mode makes real public requests only when explicitly invoked.
+
+Unlike the production Workday client, the sample ignores environment proxies,
+netrc credentials, and environment CA-bundle overrides; it does not follow
+redirects and uses shorter timeouts. Its network path and outcomes can
+therefore differ from production. Requests may consume a redirect response
+body internally even though the sample does not print it.
+
 Configure these GitHub repository secrets for Telegram delivery:
 
 - `TELEGRAM_TOKEN` — bot token from [@BotFather](https://t.me/BotFather)
