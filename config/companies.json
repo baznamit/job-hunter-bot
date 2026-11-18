@@ -6,7 +6,7 @@
       "name": "Duck Creek Technologies",
       "category": "Product",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.duckcreek.com/careers/",
       "provider": {
         "type": "workday",
@@ -27,7 +27,7 @@
       "name": "Baker Hughes",
       "category": "Product",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.bakerhughes.com/global/en",
       "provider": {
         "type": "workday",
@@ -48,7 +48,7 @@
       "name": "Postman",
       "category": "Developer Tools",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.postman.com/company/careers/",
       "provider": {
         "type": "workday",
@@ -143,7 +143,7 @@
       "name": "BrowserStack",
       "category": "Developer Tools",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.browserstack.com/careers",
       "provider": {
         "type": "workday",
@@ -164,7 +164,7 @@
       "name": "Fractal",
       "category": "AI",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://fractal.ai/careers/",
       "provider": {
         "type": "workday",
@@ -373,7 +373,7 @@
       "name": "Visa",
       "category": "Payments",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://corporate.visa.com/en/jobs/",
       "provider": {
         "type": "workday",
@@ -394,7 +394,7 @@
       "name": "Mastercard",
       "category": "Payments",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.mastercard.com/",
       "provider": {
         "type": "workday",
@@ -415,7 +415,7 @@
       "name": "Deutsche Bank",
       "category": "Banking",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.db.com/professionals/search-roles/",
       "provider": {
         "type": "workday",
@@ -436,7 +436,7 @@
       "name": "Morgan Stanley",
       "category": "Banking",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.morganstanley.com/people",
       "provider": {
         "type": "workday",
@@ -477,7 +477,7 @@
       "name": "TIAA",
       "category": "Banking",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.tiaa.org/jobs",
       "provider": {
         "type": "workday",
@@ -498,7 +498,7 @@
       "name": "Barclays",
       "category": "Banking",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://home.barclays/careers/",
       "provider": {
         "type": "workday",
@@ -583,7 +583,7 @@
       "name": "Adobe",
       "category": "SaaS",
       "priority": 3,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://careers.adobe.com/",
       "provider": {
         "type": "workday",
@@ -604,7 +604,7 @@
       "name": "Salesforce",
       "category": "SaaS",
       "priority": 3,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.salesforce.com/company/careers/jobs",
       "provider": {
         "type": "workday",
@@ -739,7 +739,7 @@
       "name": "Nasdaq",
       "category": "SaaS",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.nasdaq.com/about/careers",
       "provider": {
         "type": "workday",
@@ -760,7 +760,7 @@
       "name": "SS&C Technologies",
       "category": "FinTech",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.ssctech.com/careers",
       "provider": {
         "type": "workday",
@@ -781,7 +781,7 @@
       "name": "Accelya",
       "category": "SaaS",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://accelya.wd103.myworkdayjobs.com/Careers",
       "provider": {
         "type": "workday",
@@ -802,7 +802,7 @@
       "name": "Morningstar",
       "category": "FinTech",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.morningstar.com/company/careers",
       "provider": {
         "type": "workday",
@@ -826,7 +826,7 @@
       "name": "General Mills",
       "category": "Product",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.careers.generalmills.com/",
       "provider": {
         "type": "workday",
@@ -847,7 +847,7 @@
       "name": "S&P Global",
       "category": "FinTech",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://www.spglobal.com/en/explore-s-p-global/careers",
       "provider": {
         "type": "workday",
@@ -1024,7 +1024,7 @@
       "name": "Broadridge",
       "category": "FinTech",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://broadridge.wd5.myworkdayjobs.com/Careers",
       "provider": {
         "type": "workday",
@@ -1045,7 +1045,7 @@
       "name": "Priceline",
       "category": "SaaS",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://priceline.wd1.myworkdayjobs.com/Priceline",
       "provider": {
         "type": "workday",
@@ -1066,7 +1066,7 @@
       "name": "LexisNexis Risk Solutions",
       "category": "SaaS",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://relx.wd3.myworkdayjobs.com/RiskSolutions",
       "provider": {
         "type": "workday",
@@ -1087,7 +1087,7 @@
       "name": "Ares Management",
       "category": "FinTech",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://aresmgmt.wd1.myworkdayjobs.com/External",
       "provider": {
         "type": "workday",
@@ -1108,7 +1108,7 @@
       "name": "Husqvarna Group",
       "category": "SaaS",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://husqvarnagroup.wd3.myworkdayjobs.com/External_Career_Site",
       "provider": {
         "type": "workday",
@@ -1129,7 +1129,7 @@
       "name": "Dentsu",
       "category": "SaaS",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://dentsuaegis.wd3.myworkdayjobs.com/DAN_GLOBAL",
       "provider": {
         "type": "workday",
@@ -1150,7 +1150,7 @@
       "name": "RXO",
       "category": "SaaS",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://rxo.wd501.myworkdayjobs.com/rxojobs",
       "provider": {
         "type": "workday",
@@ -1171,7 +1171,7 @@
       "name": "Sulzer",
       "category": "SaaS",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://sulzer.wd502.myworkdayjobs.com/SulzerJobs",
       "provider": {
         "type": "workday",
@@ -1192,7 +1192,7 @@
       "name": "Applied Materials",
       "category": "SaaS",
       "priority": 2,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://amat.wd1.myworkdayjobs.com/External",
       "provider": {
         "type": "workday",
@@ -1367,7 +1367,7 @@
       "name": "Synechron",
       "category": "Product",
       "priority": 1,
-      "enabled": false,
+      "enabled": true,
       "career_page": "https://synechron.wd1.myworkdayjobs.com/SynechronCareers",
       "provider": {
         "type": "workday",
