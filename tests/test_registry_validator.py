@@ -6,6 +6,8 @@ from models.company import (
 )
 from research.loader import load_registry
 from research.validator import validate_registry
+from src.main import _ADAPTERS
+from src.providers.eightfold import EightfoldAdapter
 
 
 @pytest.fixture
@@ -214,6 +216,49 @@ def test_bakerhughes_uses_verified_workday_configuration(registry):
 
     assert "Phenom" in company.notes
     assert "not yet verified" in company.notes
+
+
+def test_morganstanley_uses_verified_eightfold_configuration(registry):
+    matches = [
+        company
+        for company in registry.companies
+        if company.id == "morganstanley"
+    ]
+
+    assert len(matches) == 1
+
+    company = matches[0]
+    config = company.provider.config
+
+    assert company.name == "Morgan Stanley"
+    assert company.enabled is True
+    assert company.priority == 2
+    assert company.category.value == "Banking"
+    assert company.provider.type == ProviderType.EIGHTFOLD
+    assert company.provider.status == ProviderStatus.IMPLEMENTED
+    assert str(company.career_page) == (
+        "https://morganstanley.eightfold.ai/careers/search"
+    )
+    assert config.base_url == "https://morganstanley.eightfold.ai"
+    assert config.domain == "morganstanley.com"
+    assert config.search_location == "India"
+    assert company.supports_remote is False
+    assert isinstance(
+        _ADAPTERS[company.provider.type],
+        EightfoldAdapter,
+    )
+
+
+def test_microsoft_eightfold_remains_disabled(registry):
+    company = next(
+        company
+        for company in registry.companies
+        if company.id == "microsoft"
+    )
+
+    assert company.provider.type == ProviderType.EIGHTFOLD
+    assert company.enabled is False
+    assert company.provider.config.domain == "microsoft.com"
 
 
 def test_new_workday_companies_have_unique_ids(registry):

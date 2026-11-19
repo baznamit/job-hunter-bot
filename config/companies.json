@@ -437,20 +437,20 @@
       "category": "Banking",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://www.morganstanley.com/people",
+      "career_page": "https://morganstanley.eightfold.ai/careers/search",
       "provider": {
-        "type": "workday",
-        "status": "verified",
+        "type": "eightfold",
+        "status": "implemented",
         "config": {
-          "tenant": "ms",
-          "board": "External",
-          "cluster": "wd5"
+          "base_url": "https://morganstanley.eightfold.ai",
+          "domain": "morganstanley.com",
+          "search_location": "India"
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Uses Workday ATS (ms.wd5.myworkdayjobs.com). Experienced hiring board only."
+      "notes": "Uses Eightfold PCS public careers search API with location=India."
     },
     {
       "id": "goldmansachs",

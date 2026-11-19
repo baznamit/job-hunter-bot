@@ -7,6 +7,7 @@ import pytest
 
 from models.company import Company
 from models import Job
+from src.filters import JobFilter
 from src.providers.eightfold import (
     EightfoldAdapter,
     _retry_after_seconds,
@@ -38,6 +39,32 @@ def _company():
             },
         }
     )
+
+
+def _morganstanley_company():
+    return Company.model_validate(
+        {
+            "id": "morganstanley",
+            "name": "Morgan Stanley",
+            "category": "Banking",
+            "priority": 2,
+            "career_page": (
+                "https://morganstanley.eightfold.ai/careers/search"
+            ),
+            "provider": {
+                "type": "eightfold",
+                "status": "implemented",
+                "config": {
+                    "base_url": (
+                        "https://morganstanley.eightfold.ai"
+                    ),
+                    "domain": "morganstanley.com",
+                    "search_location": "India",
+                },
+            },
+        }
+    )
+
 
 def test_eightfold_parses_position():
     adapter = EightfoldAdapter()
@@ -116,6 +143,122 @@ def test_eightfold_parses_position():
         "microsoft.com/careers/job/"
         "1970393556960679"
     )
+
+
+def test_morganstanley_uses_india_schema_and_canonical_urls():
+    company = _morganstanley_company()
+    positions = [
+        {
+            "id": 549799918919 + index,
+            "displayJobId": f"JR{index:06d}",
+            "name": "Backend Engineer",
+            "standardizedLocations": [
+                "Bengaluru, KA, IN",
+            ],
+            "postedTs": 1793664000,
+            "department": "Data & Technology",
+            "workLocationOption": "hybrid",
+            "positionUrl": (
+                f"/careers/job/{549799918919 + index}"
+            ),
+        }
+        for index in range(79)
+    ]
+    positions[0].update(
+        {
+            "displayJobId": "PT-JR042853",
+            "name": (
+                "Java Software Engineer "
+                "-Vice President - Parametric"
+            ),
+            "standardizedLocations": [
+                "Mumbai, MH, IN",
+            ],
+        }
+    )
+    positions[2].update(
+        {
+            "standardizedLocations": [
+                "Remote - India",
+            ],
+            "workLocationOption": "remote",
+        }
+    )
+    starts = []
+
+    def request_page(_company, *, start, deadline):
+        starts.append(start)
+        return positions[start:start + 10], len(positions)
+
+    with (
+        patch.object(
+            EightfoldAdapter,
+            "_request_page",
+            side_effect=request_page,
+        ),
+        patch(
+            "src.providers.eightfold.time.sleep"
+        ),
+    ):
+        raw = EightfoldAdapter()._fetch_raw(company)
+
+    jobs = EightfoldAdapter().parse(raw, company)
+    job_filter = JobFilter()
+
+    assert starts == list(range(0, 79, 10))
+    assert len(jobs) == 79
+    assert [job.id for job in jobs] == [
+        str(549799918919 + index)
+        for index in range(79)
+    ]
+    assert len({job.id for job in jobs}) == 79
+    assert [str(job.url) for job in jobs] == [
+        (
+            "https://morganstanley.eightfold.ai/"
+            f"careers/job/{549799918919 + index}"
+        )
+        for index in range(79)
+    ]
+    assert len({str(job.url) for job in jobs}) == 79
+    assert jobs[0].location == "Mumbai, MH, IN"
+    assert jobs[1].location == "Bengaluru, KA, IN"
+    assert jobs[0].title == (
+        "Java Software Engineer -Vice President - Parametric"
+    )
+    assert not job_filter.should_include(jobs[0])
+    assert job_filter.should_include(jobs[1])
+    assert jobs[2].remote is True
+    assert job_filter.should_include(jobs[2])
+
+
+def test_morganstanley_request_uses_india_location():
+    company = _morganstanley_company()
+    response = _Response(
+        {
+            "status": 200,
+            "data": {
+                "positions": [],
+                "count": 0,
+            },
+        }
+    )
+
+    with patch(
+        "src.providers.eightfold.requests.get",
+        return_value=response,
+    ) as mock_get:
+        EightfoldAdapter()._request_page(company, start=0)
+
+    assert mock_get.call_args.args[0] == (
+        "https://morganstanley.eightfold.ai/api/pcsx/search"
+    )
+    assert mock_get.call_args.kwargs["params"] == {
+        "domain": "morganstanley.com",
+        "query": "",
+        "location": "India",
+        "start": 0,
+    }
+
 
 def test_eightfold_remote_flag():
     adapter = EightfoldAdapter()
