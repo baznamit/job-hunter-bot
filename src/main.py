@@ -30,6 +30,8 @@ from research.discovery import discover_provider
 from research.loader import load_registry
 from research.validator import validate_candidate
 from src.description_diagnostics import (
+    DescriptionPromotionReport,
+    classify_workday_candidate_title,
     enrich_near_misses,
     promotable_jobs,
 )
@@ -770,6 +772,11 @@ def _recover_and_retry_fetch(
 
 def _process_jobs_for_company(jobs, job_filter) -> tuple[list[Job], int, int]:
     """Filter and promote jobs, returning matching jobs and counts."""
+    description_report = (
+        DescriptionPromotionReport()
+        if jobs and jobs[0].company == "Salesforce"
+        else None
+    )
     matching = [
         job
         for job in jobs
@@ -780,6 +787,7 @@ def _process_jobs_for_company(jobs, job_filter) -> tuple[list[Job], int, int]:
         jobs,
         job_filter,
         limit=8,
+        report=description_report,
     )
 
     promoted = promotable_jobs(
@@ -796,6 +804,24 @@ def _process_jobs_for_company(jobs, job_filter) -> tuple[list[Job], int, int]:
             matching.append(job)
             matching_urls.add(str(job.url))
             promoted_count += 1
+
+    if description_report is not None:
+        description_report.promoted = promoted_count
+        print(
+            "[DESCRIPTION] PROMOTION_ACCOUNTING "
+            "company=salesforce "
+            f"candidate_pool={description_report.candidate_pool} "
+            f"shortlist={description_report.shortlist} "
+            f"shortlist_limit={description_report.shortlist_limit} "
+            f"requests={description_report.requests} "
+            f"empty_responses={description_report.empty_responses} "
+            f"no_signal_responses="
+            f"{description_report.no_signal_responses} "
+            f"enriched_candidates="
+            f"{description_report.enriched_candidates} "
+            f"strong_candidates={description_report.strong_candidates} "
+            f"promoted={description_report.promoted}"
+        )
 
     return matching, direct_count, promoted_count
 
@@ -1249,7 +1275,18 @@ def main() -> None:
         if adapter is None:
             continue
         if company.provider.type == ProviderType.WORKDAY:
-            adapter = WorkdayAdapter(workday_policy)
+            candidate_classifier = None
+            if company.id == "salesforce":
+                candidate_classifier = lambda title: (
+                    classify_workday_candidate_title(
+                        title,
+                        job_filter,
+                    )
+                )
+            adapter = WorkdayAdapter(
+                workday_policy,
+                candidate_classifier=candidate_classifier,
+            )
 
         companies.append(
             (

@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 import math
 import re
+import sys
 from threading import Lock, local
 import time
+from typing import Callable
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -34,6 +36,12 @@ _BACKOFF_SECONDS = (1.0, 3.0)
 _RESPONSE_PREVIEW_BYTES = 300
 _MAINTENANCE_HOST = "community.workday.com"
 _MAINTENANCE_PATH = "/maintenance-page"
+_CANDIDATE_CATEGORIES = (
+    "direct_title_possible",
+    "description_promotion_possible",
+    "selection_inert",
+    "unknown",
+)
 
 
 def _is_finite_number(value) -> bool:
@@ -62,6 +70,17 @@ _SINGLE_LOCATION_CODE_RE = re.compile(
 
 
 @dataclass
+class WorkdayCandidateAccounting:
+    candidates: int = 0
+    attempted: int = 0
+    resolved: int = 0
+    failed: int = 0
+    detail_attempts: int = 0
+    retries: int = 0
+    unstarted: int = 0
+
+
+@dataclass
 class WorkdayCoverageReport:
     """Coverage counts; deferrals overlap candidate outcomes, not extra candidates."""
 
@@ -79,6 +98,10 @@ class WorkdayCoverageReport:
     deferred_after_attempt: int = 0
     deferral_reasons: dict[str, int] = field(default_factory=dict)
     stop_reason: str | None = None
+    candidate_accounting: dict[str, WorkdayCandidateAccounting] = field(
+        default_factory=dict
+    )
+    potentially_avoidable_detail_attempts: int = 0
 
     @property
     def coverage_status(self) -> str:
@@ -267,8 +290,13 @@ class WorkdayAdapter(ProviderAdapter):
 
     provider_name = "Workday"
 
-    def __init__(self, request_policy: WorkdayRequestPolicy | None = None) -> None:
+    def __init__(
+        self,
+        request_policy: WorkdayRequestPolicy | None = None,
+        candidate_classifier: Callable[[object], str] | None = None,
+    ) -> None:
         self._request_policy = request_policy or WorkdayRequestPolicy()
+        self._candidate_classifier = candidate_classifier
         self._request_stats = local()
 
     def _current_request_stats(self) -> _RequestStats | None:
@@ -785,6 +813,14 @@ class WorkdayAdapter(ProviderAdapter):
         report = WorkdayCoverageReport()
         candidates = []
         seen_candidates = set()
+        candidate_accounting = (
+            {
+                category: WorkdayCandidateAccounting()
+                for category in _CANDIDATE_CATEGORIES
+            }
+            if self._candidate_classifier is not None
+            else {}
+        )
 
         for posting in postings:
             location = str(
@@ -819,9 +855,34 @@ class WorkdayAdapter(ProviderAdapter):
             if candidate_key in seen_candidates:
                 continue
             seen_candidates.add(candidate_key)
-            candidates.append((posting, board))
+            category = None
+            if self._candidate_classifier is not None:
+                try:
+                    category = self._candidate_classifier(
+                        posting.get("title")
+                    )
+                except Exception as exc:
+                    print(
+                        "[WORKDAY] CANDIDATE_ACCOUNTING_WARNING "
+                        f"company={company.id} "
+                        f"error={type(exc).__name__}; "
+                        "classified_as=unknown",
+                        file=sys.stderr,
+                    )
+                    category = "unknown"
+                if category not in candidate_accounting:
+                    print(
+                        "[WORKDAY] CANDIDATE_ACCOUNTING_WARNING "
+                        f"company={company.id} invalid_category; "
+                        "classified_as=unknown",
+                        file=sys.stderr,
+                    )
+                    category = "unknown"
+                candidate_accounting[category].candidates += 1
+            candidates.append((posting, board, category))
 
         report.enrichment_candidates = len(candidates)
+        report.candidate_accounting = candidate_accounting
         if not candidates:
             return report
 
@@ -840,7 +901,7 @@ class WorkdayAdapter(ProviderAdapter):
                 and next_candidate < len(candidates)
                 and len(pending) < _DETAIL_WORKERS
             ):
-                posting, board = candidates[next_candidate]
+                posting, board, category = candidates[next_candidate]
                 next_candidate += 1
                 pending[executor.submit(
                     self._run_detail_candidate,
@@ -848,7 +909,7 @@ class WorkdayAdapter(ProviderAdapter):
                     board,
                     posting,
                     deadline,
-                )] = posting
+                )] = (posting, category)
 
         with ThreadPoolExecutor(max_workers=_DETAIL_WORKERS) as executor:
             submit_available(executor)
@@ -858,7 +919,7 @@ class WorkdayAdapter(ProviderAdapter):
                     return_when=FIRST_COMPLETED,
                 )
                 for future in done:
-                    posting = pending.pop(future)
+                    posting, category = pending.pop(future)
                     had_error = False
                     try:
                         result = future.result()
@@ -920,11 +981,24 @@ class WorkdayAdapter(ProviderAdapter):
                     candidate_attempted = bool(
                         stats is not None and stats.attempts
                     )
+                    accounting = (
+                        candidate_accounting.get(category)
+                        if category is not None
+                        else None
+                    )
+                    if candidate_attempted and accounting is not None:
+                        accounting.attempted += 1
+                        accounting.detail_attempts += stats.attempts
+                        accounting.retries += stats.retries
                     if candidate_attempted and location:
                         posting["_resolved_location"] = location
                         report.enrichment_resolved += 1
+                        if accounting is not None:
+                            accounting.resolved += 1
                     elif candidate_attempted:
                         report.enrichment_unresolved += 1
+                        if accounting is not None:
+                            accounting.failed += 1
                         if not had_error:
                             failures["no_usable_location"] = (
                                 failures.get("no_usable_location", 0) + 1
@@ -948,6 +1022,15 @@ class WorkdayAdapter(ProviderAdapter):
         report.deferred_after_attempt = deferred_after_attempt
         report.deferral_reasons = deferral_reasons
         report.deferred = deferred_before_attempt + deferred_after_attempt
+        for accounting in candidate_accounting.values():
+            accounting.unstarted = (
+                accounting.candidates - accounting.attempted
+            )
+        report.potentially_avoidable_detail_attempts = (
+            candidate_accounting["selection_inert"].detail_attempts
+            if candidate_accounting
+            else 0
+        )
 
         print(
             "[WORKDAY] LOCATION_ENRICHMENT "
@@ -963,6 +1046,27 @@ class WorkdayAdapter(ProviderAdapter):
             f"deferral_reasons={deferral_reasons} "
             f"stop_reason={report.stop_reason}"
         )
+        if candidate_accounting:
+            accounting_summary = " ".join(
+                (
+                    f"{category}["
+                    f"candidates={accounting.candidates} "
+                    f"attempted={accounting.attempted} "
+                    f"resolved={accounting.resolved} "
+                    f"failed={accounting.failed} "
+                    f"detail_attempts={accounting.detail_attempts} "
+                    f"retries={accounting.retries} "
+                    f"unstarted={accounting.unstarted}]"
+                )
+                for category, accounting in candidate_accounting.items()
+            )
+            print(
+                "[WORKDAY] CANDIDATE_ACCOUNTING "
+                f"company={company.id} "
+                f"categories={accounting_summary} "
+                "potentially_avoidable_detail_attempts="
+                f"{report.potentially_avoidable_detail_attempts}"
+            )
         return report
 
     def _request_page(
@@ -1057,6 +1161,21 @@ class WorkdayAdapter(ProviderAdapter):
             target.deferral_reasons[reason] = (
                 target.deferral_reasons.get(reason, 0) + count
             )
+        target.potentially_avoidable_detail_attempts += (
+            source.potentially_avoidable_detail_attempts
+        )
+        for category, accounting in source.candidate_accounting.items():
+            merged = target.candidate_accounting.setdefault(
+                category,
+                WorkdayCandidateAccounting(),
+            )
+            merged.candidates += accounting.candidates
+            merged.attempted += accounting.attempted
+            merged.resolved += accounting.resolved
+            merged.failed += accounting.failed
+            merged.detail_attempts += accounting.detail_attempts
+            merged.retries += accounting.retries
+            merged.unstarted += accounting.unstarted
 
     def fetch_jobs_with_report(
         self,

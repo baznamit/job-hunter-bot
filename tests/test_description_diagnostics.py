@@ -1,8 +1,12 @@
 from unittest.mock import patch
 
+import pytest
+
 from models import Job
 from src.description_diagnostics import (
+    DescriptionPromotionReport,
     _candidate_score,
+    classify_workday_candidate_title,
     enrich_near_misses,
     find_signals,
     promotable_jobs,
@@ -263,6 +267,71 @@ def test_enrichment_limit_is_applied_after_ranking(
         results[0].job.title
         == "Computer Scientist II"
     )
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Java Software Engineer", "direct_title_possible"),
+        (
+            "Computer Scientist II",
+            "description_promotion_possible",
+        ),
+        ("Software Engineer Intern", "selection_inert"),
+        ("Staff Backend Engineer", "selection_inert"),
+        ("Account Executive", "selection_inert"),
+        ("", "unknown"),
+        (None, "unknown"),
+    ],
+)
+def test_workday_candidate_title_classification(
+    title,
+    expected,
+):
+    assert (
+        classify_workday_candidate_title(
+            title,
+            JobFilter(),
+        )
+        == expected
+    )
+
+
+@patch(
+    "src.description_diagnostics.fetch_description_text"
+)
+def test_description_promotion_report_reuses_existing_requests(
+    mock_fetch,
+):
+    mock_fetch.side_effect = [
+        "Java Spring Boot backend",
+        None,
+    ]
+    report = DescriptionPromotionReport()
+
+    results = enrich_near_misses(
+        [
+            _job(
+                "Computer Scientist II",
+                "Bangalore",
+            ),
+            _job(
+                "Engineer II",
+                "Bangalore",
+            ),
+        ],
+        JobFilter(),
+        limit=8,
+        report=report,
+    )
+
+    assert mock_fetch.call_count == 2
+    assert report.candidate_pool == 2
+    assert report.shortlist == 2
+    assert report.requests == 2
+    assert report.empty_responses == 1
+    assert report.strong_candidates == 1
+    assert len(results) == 1
 
 def test_strong_include_miss_can_be_promoted():
     job_filter = JobFilter()

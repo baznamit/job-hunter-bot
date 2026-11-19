@@ -13,12 +13,16 @@ from models import Job
 from models.company import ProviderType
 from src.main import (
     _print_performance_summary,
+    _process_jobs_for_company,
     _record_selection_diagnostics,
     _run_company,
 )
+from src.description_diagnostics import classify_workday_candidate_title
+from src.filters import JobFilter
 from src.providers.base import ProviderAdapter
 from src.providers.exceptions import ProviderTemporaryError, parse_retry_after
 from src.providers.workday import (
+    _RequestStats,
     WorkdayAdapter,
     WorkdayCoverageReport,
     WorkdayRequestPolicy,
@@ -205,6 +209,255 @@ def test_running_success_is_retained_after_parallel_failure():
     assert report.enrichment_unstarted == 1
     assert postings[1]["_resolved_location"] == "Mumbai, India"
     assert calls == ["/job/IN-MH-MUMBAI/0", "/job/IN-MH-MUMBAI/1"]
+
+
+def test_candidate_accounting_reconciles_without_changing_order(capsys):
+    job_filter = JobFilter()
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0),
+        candidate_classifier=lambda title: (
+            classify_workday_candidate_title(title, job_filter)
+        ),
+    )
+    postings = [
+        {
+            **_posting(0),
+            "title": "Java Software Engineer",
+        },
+        {
+            **_posting(1),
+            "title": "Computer Scientist II",
+        },
+        {
+            **_posting(2),
+            "title": "Account Executive",
+        },
+        {
+            **_posting(3),
+            "title": None,
+        },
+    ]
+    original_order = [posting["externalPath"] for posting in postings]
+    stats_by_path = {}
+
+    def run_candidate(
+        company,
+        board,
+        posting,
+        deadline,
+    ):
+        stats = _RequestStats()
+        stats.attempts = 2 if posting["title"] == "Java Software Engineer" else 1
+        stats.retries = stats.attempts - 1
+        stats_by_path[posting["externalPath"]] = stats
+        if posting["title"] == "Account Executive":
+            error = ProviderTemporaryError(
+                company.name,
+                "Workday",
+                "HTTP 429",
+                category="rate_limit",
+                status=429,
+            )
+            error._workday_stats = stats
+            raise error
+        return "Mumbai, India", stats
+
+    with patch("src.providers.workday._DETAIL_WORKERS", 1):
+        with patch.object(
+            adapter,
+            "_run_detail_candidate",
+            side_effect=run_candidate,
+        ):
+            report = adapter._enrich_ambiguous_locations(
+                _company(),
+                postings,
+            )
+
+    assert [posting["externalPath"] for posting in postings] == original_order
+    assert report.enrichment_candidates == 4
+    assert report.enrichment_attempted == 3
+    assert report.enrichment_resolved == 2
+    assert report.enrichment_unresolved == 1
+    assert report.enrichment_unstarted == 1
+    assert report.http_attempts == 4
+    assert report.http_retries == 1
+    assert report.potentially_avoidable_detail_attempts == 1
+
+    accounting = report.candidate_accounting
+    assert accounting["direct_title_possible"].candidates == 1
+    assert accounting["direct_title_possible"].attempted == 1
+    assert accounting["direct_title_possible"].resolved == 1
+    assert accounting["direct_title_possible"].retries == 1
+    assert (
+        accounting["description_promotion_possible"].resolved
+        == 1
+    )
+    assert accounting["selection_inert"].failed == 1
+    assert accounting["unknown"].unstarted == 1
+    assert sum(item.candidates for item in accounting.values()) == 4
+    assert all(
+        item.candidates == item.attempted + item.unstarted
+        for item in accounting.values()
+    )
+    assert all(
+        item.attempted == item.resolved + item.failed
+        for item in accounting.values()
+    )
+
+    output = capsys.readouterr().out
+    assert "[WORKDAY] CANDIDATE_ACCOUNTING" in output
+    assert "potentially_avoidable_detail_attempts=1" in output
+    for sensitive in (
+        "Java Software Engineer",
+        "Computer Scientist II",
+        "Account Executive",
+    ):
+        assert sensitive not in output
+
+
+def test_candidate_accounting_preserves_enrichment_behavior():
+    job_filter = JobFilter()
+    inputs = [
+        {
+            **_posting(index),
+            "title": title,
+        }
+        for index, title in enumerate(
+            (
+                "Java Software Engineer",
+                "Computer Scientist II",
+                "Account Executive",
+            )
+        )
+    ]
+
+    def run(classify):
+        now = [0.0]
+        policy = WorkdayRequestPolicy(
+            pacing_seconds=0.2,
+            clock=lambda: now[0],
+            sleeper=lambda delay: now.__setitem__(
+                0,
+                now[0] + delay,
+            ),
+        )
+        adapter = WorkdayAdapter(
+            policy,
+            candidate_classifier=classify,
+        )
+        postings = [dict(posting) for posting in inputs]
+        url = (
+            "https://test.wd1.myworkdayjobs.com/wday/cxs/"
+            "test/Careers/job/IN-MH-MUMBAI/0"
+        )
+        response = _response(
+            200,
+            url,
+            {
+                "jobPostingInfo": {
+                    "location": "Mumbai, India",
+                    "country": {"descriptor": "India"},
+                }
+            },
+        )
+        with patch("src.providers.workday._DETAIL_WORKERS", 1):
+            with patch(
+                "src.providers.workday.requests.get",
+                return_value=response,
+            ) as request:
+                report = adapter._enrich_ambiguous_locations(
+                    _company(),
+                    postings,
+                    deadline=10,
+                )
+
+        jobs = adapter.parse(
+            {"jobPostings": postings},
+            _company(),
+        )
+        with patch(
+            "src.description_diagnostics.fetch_description_text",
+            return_value="Java Spring Boot backend",
+        ):
+            matching, direct, promoted = _process_jobs_for_company(
+                jobs,
+                job_filter,
+            )
+
+        return {
+            "request_count": request.call_count,
+            "elapsed": now[0],
+            "postings": postings,
+            "jobs": [
+                job.model_dump(mode="json")
+                for job in jobs
+            ],
+            "matching": [
+                job.model_dump(mode="json")
+                for job in matching
+            ],
+            "direct": direct,
+            "promoted": promoted,
+            "enrichment": (
+                report.enrichment_candidates,
+                report.enrichment_attempted,
+                report.enrichment_resolved,
+                report.enrichment_unresolved,
+                report.enrichment_unstarted,
+                report.http_attempts,
+                report.http_retries,
+                report.failure_reasons,
+                report.deferral_reasons,
+                report.stop_reason,
+                report.coverage_status,
+            ),
+        }
+
+    baseline = run(None)
+    accounted = run(
+        lambda title: classify_workday_candidate_title(
+            title,
+            job_filter,
+        )
+    )
+
+    assert accounted == baseline
+
+
+def test_candidate_accounting_error_does_not_change_enrichment(capsys):
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0),
+        candidate_classifier=MagicMock(
+            side_effect=RuntimeError("diagnostic failure")
+        ),
+    )
+    posting = {
+        **_posting(0),
+        "title": "Java Software Engineer",
+    }
+
+    with patch.object(
+        adapter,
+        "_fetch_detail_location",
+        side_effect=lambda *_: _record_fake_detail_call(adapter)
+        or "Mumbai, India",
+    ) as mock_fetch:
+        report = adapter._enrich_ambiguous_locations(
+            _company(),
+            [posting],
+        )
+
+    assert mock_fetch.call_count == 1
+    assert report.enrichment_candidates == 1
+    assert report.enrichment_attempted == 1
+    assert report.enrichment_resolved == 1
+    assert report.candidate_accounting["unknown"].candidates == 1
+    assert posting["_resolved_location"] == "Mumbai, India"
+    assert (
+        "CANDIDATE_ACCOUNTING_WARNING company=workday-company "
+        "error=RuntimeError; classified_as=unknown"
+        in capsys.readouterr().err
+    )
 
 
 def test_isolated_timeout_allows_remaining_candidates_to_continue():

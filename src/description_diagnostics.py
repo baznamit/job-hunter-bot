@@ -81,6 +81,82 @@ _TITLE_REJECT_TERMS = (
     "solution engineer",
 )
 
+
+@dataclass
+class DescriptionPromotionReport:
+    candidate_pool: int = 0
+    shortlist: int = 0
+    shortlist_limit: int = 0
+    requests: int = 0
+    empty_responses: int = 0
+    no_signal_responses: int = 0
+    enriched_candidates: int = 0
+    strong_candidates: int = 0
+    promoted: int = 0
+
+
+def _description_title_is_eligible(
+    title: str,
+    reason: RejectionReason,
+    job_filter: JobFilter,
+) -> bool:
+    if any(term in title.lower() for term in _TITLE_REJECT_TERMS):
+        return False
+
+    title_lower = title.lower()
+    if reason == RejectionReason.INCLUDE_KEYWORD:
+        return (
+            "engineer" in title_lower
+            or "developer" in title_lower
+            or "computer scientist" in title_lower
+            or "technical staff" in title_lower
+        )
+
+    if reason == RejectionReason.SENIORITY:
+        return (
+            "senior software engineer" in title_lower
+            or "senior software developer" in title_lower
+        )
+
+    if reason == RejectionReason.LOCATION:
+        return job_filter._include_keyword_match(title)
+
+    return False
+
+
+def classify_workday_candidate_title(
+    title: object,
+    job_filter: JobFilter,
+) -> str:
+    if not isinstance(title, str) or not title.strip():
+        return "unknown"
+
+    include_match = job_filter._include_keyword_match(title)
+    exclude_match = job_filter._exclude_keyword_match(title)
+    seniority_match = job_filter._seniority_match(title)
+
+    if (
+        include_match
+        and exclude_match
+        and seniority_match
+    ):
+        return "direct_title_possible"
+
+    if (
+        not include_match
+        and exclude_match
+        and seniority_match
+        and _description_title_is_eligible(
+            title,
+            RejectionReason.INCLUDE_KEYWORD,
+            job_filter,
+        )
+    ):
+        return "description_promotion_possible"
+
+    return "selection_inert"
+
+
 @dataclass
 class EnrichedNearMiss:
     job: Job
@@ -137,42 +213,17 @@ def should_enrich(
     logger so we don't fetch hundreds of job-description pages.
     """
 
-    title = job.title.lower()
-
-    if any(term in title for term in _TITLE_REJECT_TERMS):
+    if not _description_title_is_eligible(
+        job.title,
+        reason,
+        job_filter,
+    ):
         return False
 
     if not _location_is_diagnostic_target(job, job_filter):
         return False
 
-    if reason == RejectionReason.INCLUDE_KEYWORD:
-        return (
-            "engineer" in title
-            or "developer" in title
-            or "computer scientist" in title
-            or "technical staff" in title
-        )
-
-    if reason == RejectionReason.SENIORITY:
-        # Senior software engineer/developer is explicitly interesting
-        # for diagnostics. Lead/staff/principal/etc. are not promoted
-        # here merely because they are senior.
-        return (
-            "senior software engineer" in title
-            or "senior software developer" in title
-        )
-
-    if reason == RejectionReason.LOCATION:
-        # Only broad India / Remote India jobs should be enriched.
-        return (
-            job_filter._include_keyword_match(job.title)
-            and _location_is_diagnostic_target(job, job_filter)
-        )
-
-    # Excluded-keyword candidates are intentionally not description-
-    # enriched yet. This avoids spending requests on internships,
-    # mobile, QA, staff/principal, etc.
-    return False
+    return True
 
 
 def fetch_description_text(job: Job) -> str | None:
@@ -306,6 +357,7 @@ def enrich_near_misses(
     jobs: list[Job],
     job_filter: JobFilter,
     limit: int = 20,
+    report: DescriptionPromotionReport | None = None,
 ) -> list[EnrichedNearMiss]:
     """
     Fetch descriptions for at most `limit` promising rejected jobs.
@@ -329,6 +381,9 @@ def enrich_near_misses(
             job_filter,
         ):
             continue
+
+        if report is not None:
+            report.candidate_pool += 1
 
         score = _candidate_score(
             job,
@@ -357,18 +412,27 @@ def enrich_near_misses(
         for _, _, job, reason
         in ranked_candidates[:limit]
     ]
+    if report is not None:
+        report.shortlist_limit = limit
+        report.shortlist = len(candidates)
 
     enriched: list[EnrichedNearMiss] = []
 
     for job, reason in candidates:
+        if report is not None:
+            report.requests += 1
         text = fetch_description_text(job)
 
         if not text:
+            if report is not None:
+                report.empty_responses += 1
             continue
 
         signals = find_signals(text)
 
         if not signals:
+            if report is not None:
+                report.no_signal_responses += 1
             continue
 
         strong_count = sum(
@@ -377,14 +441,17 @@ def enrich_near_misses(
             if signal in _STRONG_SIGNALS
         )
 
-        enriched.append(
-            EnrichedNearMiss(
-                job=job,
-                rejection_reason=reason,
-                signals=signals,
-                strong=strong_count >= 2,
-            )
+        near_miss = EnrichedNearMiss(
+            job=job,
+            rejection_reason=reason,
+            signals=signals,
+            strong=strong_count >= 2,
         )
+        enriched.append(near_miss)
+        if report is not None:
+            report.enriched_candidates += 1
+            if near_miss.strong:
+                report.strong_candidates += 1
 
     return enriched
 
