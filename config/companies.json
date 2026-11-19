@@ -562,7 +562,7 @@
       "name": "Microsoft",
       "category": "SaaS",
       "priority": 3,
-      "enabled": true,
+      "enabled": false,
       "career_page": "https://apply.careers.microsoft.com/careers",
       "provider": {
         "type": "eightfold",
