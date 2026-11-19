@@ -25,6 +25,13 @@ class ProviderAdapter(ABC):
 
     provider_name = "ATS"
 
+    @staticmethod
+    def _emit_diagnostic(*args, **kwargs) -> None:
+        try:
+            print(*args, **kwargs)
+        except (OSError, ValueError):
+            pass
+
     def fetch_jobs(self, company: Company) -> list[Job]:
         raw = self._fetch_raw(company)
         return self.parse(raw, company)

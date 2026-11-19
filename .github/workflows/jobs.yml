@@ -68,7 +68,7 @@ jobs:
       - name: Run Bot
         id: bot
         run: |
-          python -m src.main
+          python -u -m src.main
 
       - name: Commit bot state
         if: >-

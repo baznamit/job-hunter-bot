@@ -231,11 +231,6 @@ class InfosysAdapter(ProviderAdapter):
                 "non-object job records"
             )
 
-        print(
-            f"  [INFOSYS] {company.name}: "
-            f"raw_jobs={len(raw)}"
-        )
-
         return raw
 
     def parse(
@@ -308,10 +303,5 @@ class InfosysAdapter(ProviderAdapter):
                 f"{company.name}: Infosys parser "
                 "produced no valid jobs"
             )
-
-        print(
-            f"  [INFOSYS] {company.name}: "
-            f"normalized_jobs={len(jobs)}"
-        )
 
         return jobs

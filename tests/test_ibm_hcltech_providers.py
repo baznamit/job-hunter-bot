@@ -98,7 +98,7 @@ def test_pagination_summary_counts_overlapping_records(
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1
     assert tag in lines[0]
-    assert "term='Java' status=complete pages=2" in lines[0]
+    assert "terms=1 status=complete pages=2" in lines[0]
     assert "raw_records=4 processed_records=4" in lines[0]
     assert "total=4 unique=3 duplicates=1" in lines[0]
 
@@ -137,6 +137,89 @@ def test_pagination_failure_keeps_progress_and_propagates(
     assert "term='Java' status=failed pages=1" in lines[0]
     assert "raw_records=1 processed_records=1" in lines[0]
     assert "total=2 unique=1 duplicates=0" in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter"),
+    [("ibm", IBMAdapter), ("hcltech", HCLTechAdapter)],
+)
+def test_failure_diagnostic_cannot_mask_original_error(provider, adapter):
+    test_company = company(provider)
+    test_company.provider.config.search_terms = ["Java"]
+
+    with (
+        patch("requests.Session") as factory,
+        patch("builtins.print", side_effect=OSError("closed")),
+    ):
+        factory.return_value.__enter__.return_value.post.side_effect = (
+            requests.ConnectionError("offline")
+        )
+        with pytest.raises(
+            requests.ConnectionError,
+            match="offline",
+        ):
+            adapter().fetch_jobs(test_company)
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter"),
+    [("ibm", IBMAdapter), ("hcltech", HCLTechAdapter)],
+)
+def test_later_failure_keeps_completed_and_failed_term_summaries(
+    provider,
+    adapter,
+    capsys,
+):
+    if provider == "ibm":
+        complete = _ibm_response(
+            [
+                {
+                    "_source": {
+                        "url": (
+                            "https://careers.ibm.com/careers/"
+                            "JobDetail?jobId=1"
+                        ),
+                        "title": "Engineer",
+                    }
+                }
+            ],
+            1,
+        )
+    else:
+        complete = _hcl_response(
+            [
+                {
+                    "response": {
+                        "id": "1",
+                        "unifiedStandardTitle": "Engineer",
+                    }
+                }
+            ],
+            1,
+        )
+
+    session = Mock()
+    session.post.side_effect = [
+        complete,
+        requests.ConnectionError("offline"),
+    ]
+    test_company = company(provider)
+    test_company.provider.config.search_terms = [
+        "Java",
+        "Backend",
+    ]
+
+    with patch("requests.Session") as factory:
+        factory.return_value.__enter__.return_value = session
+        with pytest.raises(
+            requests.ConnectionError,
+            match="offline",
+        ):
+            adapter().fetch_jobs(test_company)
+
+    output = capsys.readouterr().out
+    assert "status=complete_before_failure" in output
+    assert "term='Backend' status=failed" in output
 
 
 @pytest.mark.parametrize(
@@ -276,8 +359,8 @@ def test_hcltech_deduplicates_across_search_terms(mock_session, capsys):
         for call in session.post.call_args_list
     ] == ["Mumbai", "Bangalore"]
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 2
-    assert all("status=complete pages=1" in line for line in lines)
+    assert len(lines) == 1
+    assert "terms=2 status=complete pages=2" in lines[0]
 
 
 @patch("src.providers.hcltech.requests.Session")
@@ -308,7 +391,8 @@ def test_hcltech_zero_results_without_job_list(mock_session, capsys):
 
     assert jobs == []
     assert (
-        "status=complete pages=1 raw_records=0 processed_records=0 "
+        "terms=1 status=complete pages=1 "
+        "raw_records=0 processed_records=0 "
         "total=0 unique=0 duplicates=0"
     ) in capsys.readouterr().out
 

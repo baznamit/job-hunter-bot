@@ -6,6 +6,7 @@ from models.company import ProviderType
 from src.filters import JobFilter
 from src.main import (
     _print_company_stats,
+    _process_jobs_for_company,
     _record_selection_diagnostics,
     _run_company,
 )
@@ -23,7 +24,7 @@ def _job(title: str, location: str) -> Job:
     )
 
 
-def test_zero_match_company_prints_counts_and_at_most_two_samples(capsys):
+def test_zero_match_company_prints_one_compact_summary(capsys):
     jobs = [
         _job("Engineer II", "Bengaluru"),
         _job("Software Engineer Intern", "Bengaluru"),
@@ -39,16 +40,20 @@ def test_zero_match_company_prints_counts_and_at_most_two_samples(capsys):
         promoted_count=0,
         total_matching=0,
         filter_diagnostics=diagnostics,
+        elapsed_seconds=1.25,
+        provider="workday",
     )
 
     output = capsys.readouterr().out
+    lines = output.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("  Acme: 4 fetched, 0 matching")
     assert (
-        "[FILTER] rejected include=1 excluded=1 "
+        "filter include=1 excluded=1 "
         "location=1 seniority=1"
     ) in output
-    assert output.count("[FILTER] sample ") == 2
-    assert "Engineer II | Bengaluru" in output
-    assert "Software Engineer Intern | Bengaluru" in output
+    assert "1.2s via workday" in output
+    assert "sample " not in output
 
 
 def test_company_stats_without_diagnostics_do_not_print_filter_output(capsys):
@@ -61,6 +66,59 @@ def test_company_stats_without_diagnostics_do_not_print_filter_output(capsys):
     )
 
     assert "[FILTER]" not in capsys.readouterr().out
+
+
+def test_salesforce_promotion_accounting_is_preserved(capsys):
+    jobs = [
+        Job(
+            id="engineer",
+            title="Computer Scientist II",
+            company="Salesforce",
+            location="Bengaluru, India",
+            url="https://example.com/engineer",
+        )
+    ]
+
+    with patch(
+        "src.description_diagnostics.fetch_description_text",
+        return_value="Java Spring Boot backend",
+    ):
+        matching, direct, promoted = _process_jobs_for_company(
+            jobs,
+            JobFilter(),
+        )
+
+    output = capsys.readouterr().out
+    assert len(matching) == 1
+    assert direct == 0
+    assert promoted == 1
+    assert "[DESCRIPTION] PROMOTION_ACCOUNTING company=salesforce" in output
+    assert "candidate_pool=1 shortlist=1 shortlist_limit=8 requests=1" in output
+
+
+def test_salesforce_promotion_diagnostic_failure_is_nonfatal(capsys):
+    job = Job(
+        id="engineer",
+        title="Computer Scientist II",
+        company="Salesforce",
+        location="Bengaluru, India",
+        url="https://example.com/engineer",
+    )
+
+    with (
+        patch(
+            "src.description_diagnostics.fetch_description_text",
+            return_value=None,
+        ),
+        patch("builtins.print", side_effect=OSError("closed")),
+    ):
+        matching, direct, promoted = _process_jobs_for_company(
+            [job],
+            JobFilter(),
+        )
+
+    assert matching == []
+    assert direct == promoted == 0
 
 
 def test_run_company_attaches_diagnostics_only_after_successful_fetch():

@@ -38,7 +38,6 @@ from src.description_diagnostics import (
 from src.filters import (
     FilterDiagnostics,
     JobFilter,
-    RejectionReason,
 )
 from src.notifier import (
     MAX_MESSAGE_LEN,
@@ -86,6 +85,14 @@ _RECOVERY_FILE = (
     / "recovery.json"
 )
 _SETTINGS_FILE = _PROJECT_ROOT / "config" / "settings.json"
+
+
+def _print_diagnostic(*args, **kwargs) -> None:
+    try:
+        print(*args, **kwargs)
+    except (OSError, ValueError):
+        pass
+
 
 _ADAPTERS = {
     ProviderType.GREENHOUSE: GreenhouseAdapter(),
@@ -807,7 +814,7 @@ def _process_jobs_for_company(jobs, job_filter) -> tuple[list[Job], int, int]:
 
     if description_report is not None:
         description_report.promoted = promoted_count
-        print(
+        _print_diagnostic(
             "[DESCRIPTION] PROMOTION_ACCOUNTING "
             "company=salesforce "
             f"candidate_pool={description_report.candidate_pool} "
@@ -833,10 +840,12 @@ def _print_company_stats(
     promoted_count,
     total_matching,
     filter_diagnostics: FilterDiagnostics | None = None,
+    elapsed_seconds: float | None = None,
+    provider: str | None = None,
 ) -> None:
-    """Print job processing statistics for a company."""
+    """Print one compact result line for a company."""
     if promoted_count:
-        print(
+        summary = (
             f"  {company.name}: "
             f"{jobs_fetched} fetched, "
             f"{direct_count} direct + "
@@ -844,36 +853,25 @@ def _print_company_stats(
             f"{total_matching} matching"
         )
     else:
-        print(
+        summary = (
             f"  {company.name}: "
             f"{jobs_fetched} fetched, "
             f"{total_matching} matching"
         )
 
-    if filter_diagnostics is None:
-        return
+    if filter_diagnostics is not None:
+        summary += (
+            " | filter "
+            f"include={filter_diagnostics.include_keyword} "
+            f"excluded={filter_diagnostics.excluded_keyword} "
+            f"location={filter_diagnostics.location} "
+            f"seniority={filter_diagnostics.seniority}"
+        )
 
-    print(
-        "    [FILTER] rejected "
-        f"include={filter_diagnostics.include_keyword} "
-        f"excluded={filter_diagnostics.excluded_keyword} "
-        f"location={filter_diagnostics.location} "
-        f"seniority={filter_diagnostics.seniority}"
-    )
+    if elapsed_seconds is not None and provider is not None:
+        summary += f" | {elapsed_seconds:.1f}s via {provider}"
 
-    if total_matching != 0:
-        return
-
-    printed_samples = 0
-    for reason in RejectionReason:
-        for job in filter_diagnostics.samples[reason]:
-            if printed_samples >= 2:
-                return
-            print(
-                f"    [FILTER] sample {reason.value}: "
-                f"{job.title} | {job.location}"
-            )
-            printed_samples += 1
+    _print_diagnostic(summary)
 
 
 def _apply_coverage_report(result: CompanyRunResult, report) -> None:
@@ -1131,7 +1129,7 @@ def _print_performance_summary(
     print(f"Failed              : {len(failed_coverage)}")
     print(f"Skipped cooldown    : {len(skipped)}")
     print(
-        "HTTP attempts/retries: "
+        "Workday HTTP attempts/retries (instrumented only): "
         f"{sum(result.http_attempts for result in results)}/"
         f"{sum(result.http_retries for result in results)}"
     )
@@ -1367,12 +1365,8 @@ def main() -> None:
                 result.promoted_count,
                 len(result.matching),
                 result.filter_diagnostics,
-            )
-
-            print(
-                f"    [TIME] "
-                f"{result.elapsed_seconds:.1f}s "
-                f"via {result.provider}"
+                result.elapsed_seconds,
+                result.provider,
             )
 
             if result.coverage_status == "partial":

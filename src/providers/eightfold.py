@@ -303,7 +303,7 @@ class EightfoldAdapter(ProviderAdapter):
                 attempted=True,
             )
 
-            print(
+            self._emit_diagnostic(
                 f"  [EIGHTFOLD] "
                 f"{company.name}: "
                 f"HTTP 429 at start={start}; "
@@ -624,15 +624,6 @@ class EightfoldAdapter(ProviderAdapter):
                 pages_since_cooldown
                 >= _BATCH_SIZE
             ):
-                print(
-                    f"  [EIGHTFOLD] "
-                    f"{company.name}: "
-                    f"batch cooldown "
-                    f"{_BATCH_COOLDOWN_SECONDS:.1f}s "
-                    f"after "
-                    f"{pages_since_cooldown} pages"
-                )
-
                 time.sleep(
                     _BATCH_COOLDOWN_SECONDS
                 )
@@ -702,14 +693,6 @@ class EightfoldAdapter(ProviderAdapter):
             offset = next_offset
 
             page_number += 1
-
-        print(
-            f"  [EIGHTFOLD] "
-            f"{company.name}: "
-            f"pages={page_number}, "
-            f"search_location="
-            f"{company.provider.config.search_location or 'ALL'}"
-        )
 
         return {
             "positions":

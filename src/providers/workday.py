@@ -862,7 +862,7 @@ class WorkdayAdapter(ProviderAdapter):
                         posting.get("title")
                     )
                 except Exception as exc:
-                    print(
+                    self._emit_diagnostic(
                         "[WORKDAY] CANDIDATE_ACCOUNTING_WARNING "
                         f"company={company.id} "
                         f"error={type(exc).__name__}; "
@@ -871,7 +871,7 @@ class WorkdayAdapter(ProviderAdapter):
                     )
                     category = "unknown"
                 if category not in candidate_accounting:
-                    print(
+                    self._emit_diagnostic(
                         "[WORKDAY] CANDIDATE_ACCOUNTING_WARNING "
                         f"company={company.id} invalid_category; "
                         "classified_as=unknown",
@@ -1032,20 +1032,28 @@ class WorkdayAdapter(ProviderAdapter):
             else 0
         )
 
-        print(
-            "[WORKDAY] LOCATION_ENRICHMENT "
-            f"company={company.id} "
-            f"attempted={report.enrichment_attempted} "
-            f"resolved={report.enrichment_resolved} "
-            f"unresolved={report.enrichment_unresolved} "
-            f"failed={sum(failures.values())} "
-            f"unstarted={report.enrichment_unstarted} "
-            f"http_attempts={report.http_attempts} "
-            f"http_retries={report.http_retries} "
-            f"failure_reasons={failures} "
-            f"deferral_reasons={deferral_reasons} "
-            f"stop_reason={report.stop_reason}"
-        )
+        if (
+            report.enrichment_unresolved
+            or report.enrichment_unstarted
+            or report.http_retries
+            or failures
+            or deferral_reasons
+            or report.stop_reason
+        ):
+            self._emit_diagnostic(
+                "[WORKDAY] LOCATION_ENRICHMENT "
+                f"company={company.id} "
+                f"attempted={report.enrichment_attempted} "
+                f"resolved={report.enrichment_resolved} "
+                f"unresolved={report.enrichment_unresolved} "
+                f"failed={sum(failures.values())} "
+                f"unstarted={report.enrichment_unstarted} "
+                f"http_attempts={report.http_attempts} "
+                f"http_retries={report.http_retries} "
+                f"failure_reasons={failures} "
+                f"deferral_reasons={deferral_reasons} "
+                f"stop_reason={report.stop_reason}"
+            )
         if candidate_accounting:
             accounting_summary = " ".join(
                 (
@@ -1060,7 +1068,7 @@ class WorkdayAdapter(ProviderAdapter):
                 )
                 for category, accounting in candidate_accounting.items()
             )
-            print(
+            self._emit_diagnostic(
                 "[WORKDAY] CANDIDATE_ACCOUNTING "
                 f"company={company.id} "
                 f"categories={accounting_summary} "

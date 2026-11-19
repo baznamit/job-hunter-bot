@@ -90,6 +90,7 @@ class HCLTechAdapter(ProviderAdapter):
             )
 
         collected = {}
+        successful_terms = []
 
         with requests.Session() as session:
             session.headers.update({
@@ -239,14 +240,51 @@ class HCLTechAdapter(ProviderAdapter):
                     collected.update(term_jobs)
                     completed = True
                 finally:
-                    print(
-                        f"  [HCLTECH] {company.name}: term={term!r} "
-                        f"status={'complete' if completed else 'failed'} "
-                        f"pages={pages_fetched} raw_records={raw_records} "
-                        f"processed_records={received_hits} total={total} "
-                        f"unique={len(term_jobs)} "
-                        f"duplicates={received_hits - len(term_jobs)}"
-                    )
+                    if completed:
+                        successful_terms.append(
+                            {
+                                "pages": pages_fetched,
+                                "raw_records": raw_records,
+                                "processed_records": received_hits,
+                                "total": total or 0,
+                                "duplicates": (
+                                    received_hits - len(term_jobs)
+                                ),
+                            }
+                        )
+                    else:
+                        if successful_terms:
+                            self._emit_diagnostic(
+                                f"  [HCLTECH] {company.name}: "
+                                f"terms={len(successful_terms)} "
+                                "status=complete_before_failure "
+                                f"pages={sum(item['pages'] for item in successful_terms)} "
+                                f"raw_records={sum(item['raw_records'] for item in successful_terms)} "
+                                f"processed_records={sum(item['processed_records'] for item in successful_terms)} "
+                                f"total={sum(item['total'] for item in successful_terms)}"
+                            )
+                        self._emit_diagnostic(
+                            f"  [HCLTECH] {company.name}: term={term!r} "
+                            "status=failed "
+                            f"pages={pages_fetched} raw_records={raw_records} "
+                            f"processed_records={received_hits} total={total} "
+                            f"unique={len(term_jobs)} "
+                            f"duplicates={received_hits - len(term_jobs)}"
+                        )
+
+        self._emit_diagnostic(
+            f"  [HCLTECH] {company.name}: "
+            f"terms={len(successful_terms)} status=complete "
+            f"pages={sum(item['pages'] for item in successful_terms)} "
+            f"raw_records="
+            f"{sum(item['raw_records'] for item in successful_terms)} "
+            f"processed_records="
+            f"{sum(item['processed_records'] for item in successful_terms)} "
+            f"total={sum(item['total'] for item in successful_terms)} "
+            f"unique={len(collected)} "
+            f"duplicates="
+            f"{sum(item['duplicates'] for item in successful_terms)}"
+        )
 
         return list(collected.values())
 

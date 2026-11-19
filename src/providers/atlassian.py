@@ -181,19 +181,11 @@ class AtlassianAdapter(ProviderAdapter):
                 f"{company.name}: zero listing job links"
             )
 
-        listing_count = len(all_items)
-
         limit = config.detail_limit
         items = (
             all_items[:limit]
             if limit is not None
             else all_items
-        )
-
-        print(
-            f"[ATLASSIAN] listing_count={listing_count} "
-            f"selected_count={len(items)} "
-            f"detail_limit={limit}"
         )
 
         def fetch_detail(item: dict) -> dict:
@@ -249,22 +241,22 @@ class AtlassianAdapter(ProviderAdapter):
             if item["id"] in results_by_id
         ]
 
-        print(
-            f"[ATLASSIAN] detail_success={len(results)} "
-            f"detail_failures={len(failures)} "
-            f"elapsed_seconds="
-            f"{perf_counter() - started:.2f}"
-        )
-
-        for job_id, error_type, message in failures[:10]:
-            print(
-                "[ATLASSIAN] DETAIL_FAILED "
-                f"id={job_id} "
-                f"type={error_type} "
-                f"message={message[:200]}"
+        if failures:
+            self._emit_diagnostic(
+                f"[ATLASSIAN] detail_success={len(results)} "
+                f"detail_failures={len(failures)} "
+                f"elapsed_seconds="
+                f"{perf_counter() - started:.2f}"
             )
 
-        if failures:
+            for job_id, error_type, message in failures[:10]:
+                self._emit_diagnostic(
+                    "[ATLASSIAN] DETAIL_FAILED "
+                    f"id={job_id} "
+                    f"type={error_type} "
+                    f"message={message[:200]}"
+                )
+
             raise ValueError(
                 f"{company.name}: incomplete detail fetch; "
                 f"expected={len(items)} "

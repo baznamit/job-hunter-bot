@@ -159,6 +159,7 @@ class IBMAdapter(ProviderAdapter):
             )
 
         collected = {}
+        successful_terms = []
 
         with requests.Session() as session:
             session.headers.update({
@@ -297,13 +298,49 @@ class IBMAdapter(ProviderAdapter):
                     collected.update(term_jobs)
                     completed = True
                 finally:
-                    print(
-                        f"  [IBM] {company.name}: term={term!r} "
-                        f"status={'complete' if completed else 'failed'} "
-                        f"pages={pages_fetched} raw_records={raw_records} "
-                        f"processed_records={processed_records} total={total} "
-                        f"unique={len(term_jobs)} duplicates={duplicate_ids}"
-                    )
+                    if completed:
+                        successful_terms.append(
+                            {
+                                "pages": pages_fetched,
+                                "raw_records": raw_records,
+                                "processed_records": processed_records,
+                                "total": total or 0,
+                                "duplicates": duplicate_ids,
+                            }
+                        )
+                    else:
+                        if successful_terms:
+                            self._emit_diagnostic(
+                                f"  [IBM] {company.name}: "
+                                f"terms={len(successful_terms)} "
+                                "status=complete_before_failure "
+                                f"pages={sum(item['pages'] for item in successful_terms)} "
+                                f"raw_records={sum(item['raw_records'] for item in successful_terms)} "
+                                f"processed_records={sum(item['processed_records'] for item in successful_terms)} "
+                                f"total={sum(item['total'] for item in successful_terms)}"
+                            )
+                        self._emit_diagnostic(
+                            f"  [IBM] {company.name}: term={term!r} "
+                            "status=failed "
+                            f"pages={pages_fetched} raw_records={raw_records} "
+                            f"processed_records={processed_records} "
+                            f"total={total} unique={len(term_jobs)} "
+                            f"duplicates={duplicate_ids}"
+                        )
+
+        self._emit_diagnostic(
+            f"  [IBM] {company.name}: "
+            f"terms={len(successful_terms)} status=complete "
+            f"pages={sum(item['pages'] for item in successful_terms)} "
+            f"raw_records="
+            f"{sum(item['raw_records'] for item in successful_terms)} "
+            f"processed_records="
+            f"{sum(item['processed_records'] for item in successful_terms)} "
+            f"total={sum(item['total'] for item in successful_terms)} "
+            f"unique={len(collected)} "
+            f"duplicates="
+            f"{sum(item['duplicates'] for item in successful_terms)}"
+        )
 
         return list(collected.values())
 

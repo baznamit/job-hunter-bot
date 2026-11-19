@@ -315,6 +315,61 @@ def test_candidate_accounting_reconciles_without_changing_order(capsys):
         assert sensitive not in output
 
 
+def test_successful_workday_enrichment_omits_redundant_summary(capsys):
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+    posting = {
+        **_posting(0),
+        "title": "Java Software Engineer",
+    }
+
+    with patch.object(
+        adapter,
+        "_fetch_detail_location",
+        side_effect=lambda *_: _record_fake_detail_call(adapter)
+        or "Mumbai, India",
+    ):
+        report = adapter._enrich_ambiguous_locations(
+            _company(),
+            [posting],
+        )
+
+    assert report.coverage_status == "complete"
+    assert report.http_retries == 0
+    assert "[WORKDAY] LOCATION_ENRICHMENT" not in capsys.readouterr().out
+
+
+def test_retried_workday_enrichment_keeps_detailed_summary(capsys):
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0)
+    )
+    posting = {
+        **_posting(0),
+        "title": "Java Software Engineer",
+    }
+
+    def detail(*_):
+        stats = adapter._current_request_stats()
+        assert stats is not None
+        stats.attempts = 2
+        stats.retries = 1
+        return "Mumbai, India"
+
+    with patch.object(
+        adapter,
+        "_fetch_detail_location",
+        side_effect=detail,
+    ):
+        report = adapter._enrich_ambiguous_locations(
+            _company(),
+            [posting],
+        )
+
+    assert report.http_retries == 1
+    assert "[WORKDAY] LOCATION_ENRICHMENT" in capsys.readouterr().out
+
+
 def test_candidate_accounting_preserves_enrichment_behavior():
     job_filter = JobFilter()
     inputs = [
@@ -1464,9 +1519,21 @@ def test_invalid_workday_inventory_flows_to_failed_company_result():
 
 def test_summary_categories_reconcile_and_keep_expected_skips_separate(capsys):
     results = [
-        CompanyRunResult("a", "Complete", "Workday", success=True),
         CompanyRunResult(
-            "b", "Partial", "Workday", success=True, coverage_status="partial"
+            "a",
+            "Complete",
+            "Workday",
+            success=True,
+            http_attempts=1,
+        ),
+        CompanyRunResult(
+            "b",
+            "Partial",
+            "Workday",
+            success=True,
+            coverage_status="partial",
+            http_attempts=3,
+            http_retries=1,
         ),
         CompanyRunResult(
             "c", "Failed", "Workday", success=False, coverage_status="failed"
@@ -1483,6 +1550,10 @@ def test_summary_categories_reconcile_and_keep_expected_skips_separate(capsys):
     _print_performance_summary(results, 1.0, 0)
     output = capsys.readouterr().out
     assert "Successful          : 2" in output
+    assert (
+        "Workday HTTP attempts/retries (instrumented only): 4/1"
+        in output
+    )
     assert "Complete            : 1" in output
     assert "Partial enrichment  : 1" in output
     assert "Failed              : 1" in output

@@ -72,6 +72,9 @@ type is automatically discoverable.
 If a Workday location-detail request exhausts its retries with HTTP 429, the
 company stops submitting new detail requests while in-flight requests finish.
 Unresolved and unstarted locations are reported as partial enrichment.
+Successful location enrichment without retries or deferrals requires no
+separate detail line; partial, retried and deferred enrichment retains the
+detailed accounting line.
 Workday's time budget is checked before dispatch, but a thread can be delayed
 after the check and in-flight requests are not cancelled at the deadline.
 Per-host pacing spaces admissions, not necessarily actual HTTP start times.
@@ -96,9 +99,11 @@ and category names only and adds no requests. A `failed` line reports the
 progress made before the failure; the failure itself is unchanged and no
 partial inventory is accepted.
 
-IBM and HCLTech print one pagination summary per attempted search term, including
-failed terms. `pages` counts responses received, `raw_records` counts records
-in validated lists, and `processed_records` counts records accepted for
+IBM and HCLTech print one aggregate pagination summary after all successful
+search terms and a detailed summary for failed terms. If a term fails after
+earlier terms completed, both the completed-term subtotal and failed term are
+reported. `pages` counts responses received, `raw_records` counts records in
+validated lists, and `processed_records` counts records accepted for
 deduplication; these can differ on a failed page. Duplicate counts cover
 processed records. The run-level `[SELECTION]` summary reports globally unique
 matching and seen URLs alongside the sums of per-company unique and seen URL
