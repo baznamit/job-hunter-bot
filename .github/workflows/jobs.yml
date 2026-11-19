@@ -22,7 +22,7 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       inputs.validation_only == true
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -40,7 +40,7 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       inputs.validation_only != true
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     env:
@@ -54,10 +54,10 @@ jobs:
           echo "UTC start: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.15"
 
