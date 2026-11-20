@@ -1536,7 +1536,13 @@ def test_summary_categories_reconcile_and_keep_expected_skips_separate(capsys):
             http_retries=1,
         ),
         CompanyRunResult(
-            "c", "Failed", "Workday", success=False, coverage_status="failed"
+            "c",
+            "Failed",
+            "Workday",
+            success=False,
+            coverage_status="failed",
+            http_attempts=2,
+            http_retries=1,
         ),
         CompanyRunResult(
             "d",
@@ -1551,9 +1557,10 @@ def test_summary_categories_reconcile_and_keep_expected_skips_separate(capsys):
     output = capsys.readouterr().out
     assert "Successful          : 2" in output
     assert (
-        "Workday HTTP attempts/retries (instrumented only): 4/1"
+        "Tracked HTTP attempts/retries (Workday fetch paths only): 6/2"
         in output
     )
+    assert "Excludes other providers" in output
     assert "Complete            : 1" in output
     assert "Partial enrichment  : 1" in output
     assert "Failed              : 1" in output

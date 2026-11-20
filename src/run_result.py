@@ -34,6 +34,7 @@ class CompanyRunResult:
     enrichment_resolved: int = 0
     enrichment_unresolved: int = 0
     enrichment_unstarted: int = 0
+    # Tracked Workday normal-fetch requests only; not a global HTTP total.
     http_attempts: int = 0
     http_retries: int = 0
     deferred: int = 0

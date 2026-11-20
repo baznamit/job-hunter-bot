@@ -78,6 +78,11 @@ detailed accounting line.
 Workday's time budget is checked before dispatch, but a thread can be delayed
 after the check and in-flight requests are not cancelled at the deadline.
 Per-host pacing spaces admissions, not necessarily actual HTTP start times.
+The performance summary's `Tracked HTTP attempts/retries` value is not a
+global request count. It includes only normal Workday listing, pagination and
+detail-fetch attempts, including failures and retries. It excludes all other
+providers, stale-provider validation/recovery, description enrichment and
+Telegram delivery.
 
 Eightfold (Microsoft) honors a numeric or HTTP-date `Retry-After` up to 60
 seconds (plus a 0.5-second margin); missing, negative, NaN or malformed values

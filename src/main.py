@@ -1129,9 +1129,17 @@ def _print_performance_summary(
     print(f"Failed              : {len(failed_coverage)}")
     print(f"Skipped cooldown    : {len(skipped)}")
     print(
-        "Workday HTTP attempts/retries (instrumented only): "
+        "Tracked HTTP attempts/retries (Workday fetch paths only): "
         f"{sum(result.http_attempts for result in results)}/"
         f"{sum(result.http_retries for result in results)}"
+    )
+    print(
+        "  Scope: Workday listing/pagination and detail requests, "
+        "including failed attempts and retries."
+    )
+    print(
+        "  Excludes other providers, validation/recovery requests, "
+        "description enrichment, and Telegram delivery."
     )
 
     print(
