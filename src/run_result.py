@@ -37,6 +37,8 @@ class CompanyRunResult:
     # Tracked Workday normal-fetch requests only; not a global HTTP total.
     http_attempts: int = 0
     http_retries: int = 0
+    http_429_responses_by_stage: dict[str, int] = field(default_factory=dict)
+    http_429_hosts: set[str] = field(default_factory=set)
     deferred: int = 0
     deferred_before_attempt: int = 0
     deferred_after_attempt: int = 0

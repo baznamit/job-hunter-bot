@@ -83,6 +83,12 @@ global request count. It includes only normal Workday listing, pagination and
 detail-fetch attempts, including failures and retries. It excludes all other
 providers, stale-provider validation/recovery, description enrichment and
 Telegram delivery.
+Each run also prints one aggregate `[WORKDAY-HEALTH]` line. It separates
+company outcomes from HTTP 429 response counts and distinguishes initial
+listing, later pagination, detail enrichment and unknown-stage evidence.
+Only directly observed hostnames are listed. Two or more distinct affected
+hosts classify a run as `multi_host_rate_limit`; a single affected host is
+`rate_limited`. Missing stage or host evidence remains `unknown`.
 
 Eightfold (Microsoft) honors a numeric or HTTP-date `Retry-After` up to 60
 seconds (plus a 0.5-second margin); missing, negative, NaN or malformed values

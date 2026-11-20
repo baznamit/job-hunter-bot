@@ -85,6 +85,9 @@ _RECOVERY_FILE = (
     / "recovery.json"
 )
 _SETTINGS_FILE = _PROJECT_ROOT / "config" / "settings.json"
+# Confirmed 429s on two or more distinct Workday hosts indicate a
+# cross-host pattern rather than a single-site/tenant rate-limit event.
+_WORKDAY_MULTI_HOST_RATE_LIMIT_THRESHOLD = 2
 
 
 def _print_diagnostic(*args, **kwargs) -> None:
@@ -888,6 +891,8 @@ def _apply_coverage_report(result: CompanyRunResult, report) -> None:
         "enrichment_unstarted",
         "http_attempts",
         "http_retries",
+        "http_429_responses_by_stage",
+        "http_429_hosts",
         "deferred",
         "deferred_before_attempt",
         "deferred_after_attempt",
@@ -1175,6 +1180,192 @@ def _print_performance_summary(
         )
         if result.coverage_note:
             print(f"    [COVERAGE] {result.coverage_note}")
+
+    _print_workday_health_summary(results)
+
+
+def _positive_diagnostic_count(value) -> int:
+    return (
+        value
+        if isinstance(value, int)
+        and not isinstance(value, bool)
+        and value > 0
+        else 0
+    )
+
+
+def _workday_health_line(results: list[CompanyRunResult]) -> str:
+    workday_results = [
+        result
+        for result in results
+        if str(getattr(result, "provider", "")).casefold() == "workday"
+        and not getattr(result, "skipped", False)
+        and getattr(result, "coverage_status", None) != "skipped"
+    ]
+
+    complete = sum(
+        result.coverage_status == "complete"
+        for result in workday_results
+    )
+    partial = sum(
+        result.coverage_status == "partial"
+        for result in workday_results
+    )
+    failed = sum(
+        result.coverage_status not in {"complete", "partial"}
+        for result in workday_results
+    )
+
+    known_stages = (
+        "initial_listing",
+        "pagination",
+        "detail_enrichment",
+    )
+    stage_responses = {
+        stage: 0
+        for stage in (*known_stages, "unknown")
+    }
+    stage_companies = {
+        stage: 0
+        for stage in (*known_stages, "unknown")
+    }
+    affected_hosts: set[str] = set()
+    http_429_companies = 0
+    unknown_host_429_companies = 0
+    other_failures = 0
+
+    for result in workday_results:
+        raw_stages = getattr(
+            result,
+            "http_429_responses_by_stage",
+            {},
+        )
+        if not isinstance(raw_stages, dict):
+            raw_stages = {}
+
+        result_stages: set[str] = set()
+        for raw_stage, raw_count in raw_stages.items():
+            count = _positive_diagnostic_count(raw_count)
+            if not count:
+                continue
+            stage = (
+                raw_stage
+                if raw_stage in known_stages
+                else "unknown"
+            )
+            stage_responses[stage] += count
+            result_stages.add(stage)
+
+        for stage in result_stages:
+            stage_companies[stage] += 1
+
+        result_hosts = getattr(result, "http_429_hosts", set())
+        observed_hosts = {
+            host.strip()
+            for host in (
+                result_hosts
+                if isinstance(result_hosts, (set, list, tuple))
+                else []
+            )
+            if isinstance(host, str) and host.strip()
+        }
+        affected_hosts.update(observed_hosts)
+
+        failure_reasons = getattr(result, "failure_reasons", {})
+        has_status_only_429 = (
+            isinstance(failure_reasons, dict)
+            and any(
+                str(reason).casefold().endswith("rate_limit/429")
+                and _positive_diagnostic_count(count)
+                for reason, count in failure_reasons.items()
+            )
+        )
+        if has_status_only_429 and not result_stages:
+            stage_companies["unknown"] += 1
+            result_stages.add("unknown")
+
+        has_non_429_failure = (
+            isinstance(failure_reasons, dict)
+            and any(
+                _positive_diagnostic_count(count)
+                and not str(reason).casefold().endswith("rate_limit/429")
+                for reason, count in failure_reasons.items()
+            )
+        )
+        has_429 = bool(result_stages)
+        if has_429:
+            http_429_companies += 1
+            if not observed_hosts:
+                unknown_host_429_companies += 1
+        if has_non_429_failure or (
+            not has_429
+            and result.coverage_status not in {"complete", "partial"}
+        ):
+            other_failures += 1
+
+    http_429_responses = sum(stage_responses.values())
+    host_count = len(affected_hosts)
+
+    if not workday_results:
+        classification = "no_workday_attempts"
+    elif host_count >= _WORKDAY_MULTI_HOST_RATE_LIMIT_THRESHOLD:
+        classification = "multi_host_rate_limit"
+    elif http_429_companies:
+        classification = "rate_limited"
+    elif partial:
+        classification = "partial_coverage"
+    elif failed:
+        classification = "degraded"
+    else:
+        classification = "healthy"
+
+    hosts = (
+        ",".join(sorted(affected_hosts))
+        if affected_hosts
+        else "unknown" if http_429_companies else "none"
+    )
+
+    return (
+        "[WORKDAY-HEALTH] "
+        f"classification={classification} "
+        f"attempted_companies={len(workday_results)} "
+        f"complete_companies={complete} "
+        f"partial_companies={partial} "
+        f"failed_companies={failed} "
+        f"http_429_companies={http_429_companies} "
+        f"http_429_responses={http_429_responses} "
+        f"initial_listing_429_companies={stage_companies['initial_listing']} "
+        f"initial_listing_429_responses={stage_responses['initial_listing']} "
+        f"later_pagination_429_companies={stage_companies['pagination']} "
+        f"later_pagination_429_responses={stage_responses['pagination']} "
+        f"detail_enrichment_429_companies="
+        f"{stage_companies['detail_enrichment']} "
+        f"detail_enrichment_429_responses="
+        f"{stage_responses['detail_enrichment']} "
+        f"unknown_stage_429_companies={stage_companies['unknown']} "
+        f"unknown_stage_429_responses={stage_responses['unknown']} "
+        f"affected_host_count={host_count} "
+        f"affected_hosts={hosts} "
+        f"multi_host_threshold="
+        f"{_WORKDAY_MULTI_HOST_RATE_LIMIT_THRESHOLD} "
+        f"unknown_host_429_companies={unknown_host_429_companies} "
+        f"other_failure_companies={other_failures}"
+    )
+
+
+def _print_workday_health_summary(
+    results: list[CompanyRunResult],
+) -> None:
+    try:
+        line = _workday_health_line(results)
+    except Exception as exc:
+        _print_diagnostic(
+            "[WORKDAY-HEALTH] classification=unavailable "
+            f"diagnostic_error={type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return
+    _print_diagnostic(line)
 
 
 def _record_selection_diagnostics(

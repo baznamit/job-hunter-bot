@@ -42,6 +42,10 @@ _CANDIDATE_CATEGORIES = (
     "selection_inert",
     "unknown",
 )
+_RATE_LIMIT_STAGE_INITIAL_LISTING = "initial_listing"
+_RATE_LIMIT_STAGE_PAGINATION = "pagination"
+_RATE_LIMIT_STAGE_DETAIL_ENRICHMENT = "detail_enrichment"
+_RATE_LIMIT_STAGE_UNKNOWN = "unknown"
 
 
 def _is_finite_number(value) -> bool:
@@ -92,6 +96,8 @@ class WorkdayCoverageReport:
     enrichment_unstarted: int = 0
     http_attempts: int = 0
     http_retries: int = 0
+    http_429_responses_by_stage: dict[str, int] = field(default_factory=dict)
+    http_429_hosts: set[str] = field(default_factory=set)
     failure_reasons: dict[str, int] = field(default_factory=dict)
     deferred: int = 0
     deferred_before_attempt: int = 0
@@ -285,6 +291,34 @@ class _RequestStats:
     def __init__(self) -> None:
         self.attempts = 0
         self.retries = 0
+        self.http_429_responses_by_stage: dict[str, int] = {}
+        self.http_429_hosts: set[str] = set()
+
+    def record_rate_limit(
+        self,
+        operation: str | None,
+        offset: int | None,
+        host: str,
+    ) -> None:
+        if operation == "listing" and offset == 0:
+            stage = _RATE_LIMIT_STAGE_INITIAL_LISTING
+        elif (
+            operation == "listing"
+            and isinstance(offset, int)
+            and not isinstance(offset, bool)
+            and offset > 0
+        ):
+            stage = _RATE_LIMIT_STAGE_PAGINATION
+        elif operation == "detail_location":
+            stage = _RATE_LIMIT_STAGE_DETAIL_ENRICHMENT
+        else:
+            stage = _RATE_LIMIT_STAGE_UNKNOWN
+
+        self.http_429_responses_by_stage[stage] = (
+            self.http_429_responses_by_stage.get(stage, 0) + 1
+        )
+        if host:
+            self.http_429_hosts.add(host)
 
 class WorkdayAdapter(ProviderAdapter):
 
@@ -442,6 +476,16 @@ class WorkdayAdapter(ProviderAdapter):
 
             if last_error is None:
                 break
+            if stats is not None and last_error.status == 429:
+                try:
+                    stats.record_rate_limit(
+                        last_error.operation or operation,
+                        offset,
+                        host,
+                    )
+                except Exception:
+                    # Diagnostic accounting must not replace a provider error.
+                    pass
             if last_error.retry_after_seconds is None:
                 last_error.retry_after_seconds = (
                     self._request_policy.retry_after_seconds(
@@ -974,9 +1018,7 @@ class WorkdayAdapter(ProviderAdapter):
                                 stop_submitting = True
                         failures[reason] = failures.get(reason, 0) + 1
 
-                    if stats is not None:
-                        report.http_attempts += stats.attempts
-                        report.http_retries += stats.retries
+                    self._merge_request_stats(report, stats)
 
                     candidate_attempted = bool(
                         stats is not None and stats.attempts
@@ -1145,6 +1187,27 @@ class WorkdayAdapter(ProviderAdapter):
             self._request_stats.value = None
 
     @staticmethod
+    def _merge_request_stats(
+        report: WorkdayCoverageReport,
+        stats: _RequestStats | None,
+    ) -> None:
+        try:
+            if stats is None:
+                return
+
+            report.http_attempts += stats.attempts
+            report.http_retries += stats.retries
+            for stage, count in stats.http_429_responses_by_stage.items():
+                report.http_429_responses_by_stage[stage] = (
+                    report.http_429_responses_by_stage.get(stage, 0) + count
+                )
+            report.http_429_hosts.update(stats.http_429_hosts)
+        except Exception:
+            # This merge is observational and must not mask fetch failures
+            # or turn successful provider work into a failure.
+            return
+
+    @staticmethod
     def _merge_enrichment_report(
         target: WorkdayCoverageReport,
         source: WorkdayCoverageReport,
@@ -1156,6 +1219,11 @@ class WorkdayAdapter(ProviderAdapter):
         target.enrichment_unstarted += source.enrichment_unstarted
         target.http_attempts += source.http_attempts
         target.http_retries += source.http_retries
+        for stage, count in source.http_429_responses_by_stage.items():
+            target.http_429_responses_by_stage[stage] = (
+                target.http_429_responses_by_stage.get(stage, 0) + count
+            )
+        target.http_429_hosts.update(source.http_429_hosts)
         target.deferred += source.deferred
         target.deferred_before_attempt += source.deferred_before_attempt
         target.deferred_after_attempt += source.deferred_after_attempt
@@ -1365,12 +1433,9 @@ class WorkdayAdapter(ProviderAdapter):
             )
         except Exception as exc:
             first_stats = getattr(exc, "_workday_stats", None)
-            if first_stats is not None:
-                report.http_attempts += first_stats.attempts
-                report.http_retries += first_stats.retries
+            self._merge_request_stats(report, first_stats)
             raise
-        report.http_attempts += first_stats.attempts
-        report.http_retries += first_stats.retries
+        self._merge_request_stats(report, first_stats)
 
         first_postings = (
             first_page["jobPostings"]
@@ -1503,15 +1568,12 @@ class WorkdayAdapter(ProviderAdapter):
                         data, stats = future.result()
                     except Exception as exc:
                         stats = getattr(exc, "_workday_stats", None)
-                        if stats is not None:
-                            report.http_attempts += stats.attempts
-                            report.http_retries += stats.retries
+                        self._merge_request_stats(report, stats)
                         if failure is None:
                             failure = exc
                         continue
 
-                    report.http_attempts += stats.attempts
-                    report.http_retries += stats.retries
+                    self._merge_request_stats(report, stats)
 
                     if failure is None:
                         postings = data["jobPostings"]
@@ -1658,12 +1720,9 @@ class WorkdayAdapter(ProviderAdapter):
                 )
             except Exception as exc:
                 stats = getattr(exc, "_workday_stats", None)
-                if stats is not None:
-                    report.http_attempts += stats.attempts
-                    report.http_retries += stats.retries
+                self._merge_request_stats(report, stats)
                 raise
-            report.http_attempts += stats.attempts
-            report.http_retries += stats.retries
+            self._merge_request_stats(report, stats)
 
             postings = (
                 data.get(

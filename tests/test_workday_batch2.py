@@ -12,10 +12,12 @@ import requests
 from models import Job
 from models.company import ProviderType
 from src.main import (
+    _print_workday_health_summary,
     _print_performance_summary,
     _process_jobs_for_company,
     _record_selection_diagnostics,
     _run_company,
+    _workday_health_line,
 )
 from src.description_diagnostics import classify_workday_candidate_title
 from src.filters import JobFilter
@@ -168,6 +170,114 @@ def test_429_is_retried_once_without_changing_identity():
 
     assert data["total"] == 0
     assert request.call_count == 2
+
+
+def test_initial_listing_429_report_captures_stage_response_and_host():
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=1)
+    )
+    url = (
+        "https://test.wd1.myworkdayjobs.com/"
+        "wday/cxs/test/Careers/jobs"
+    )
+
+    with patch(
+        "src.providers.workday.requests.post",
+        return_value=_response(429, url, {}, {"Retry-After": "0"}),
+    ) as request:
+        with pytest.raises(ProviderTemporaryError) as raised:
+            adapter.fetch_jobs_with_report(_company())
+
+    report = raised.value.workday_report
+    assert request.call_count == 1
+    assert report.http_attempts == 1
+    assert report.http_retries == 0
+    assert report.http_429_responses_by_stage == {
+        "initial_listing": 1,
+    }
+    assert report.http_429_hosts == {
+        "test.wd1.myworkdayjobs.com",
+    }
+
+
+def test_later_pagination_429_report_captures_stage_and_request_order():
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=1)
+    )
+    url = (
+        "https://test.wd1.myworkdayjobs.com/"
+        "wday/cxs/test/Careers/jobs"
+    )
+    first_page = {
+        "total": 21,
+        "jobPostings": [
+            {
+                "externalPath": f"/job/{index}",
+                "title": f"Job {index}",
+            }
+            for index in range(20)
+        ],
+    }
+    call_offsets = []
+
+    def post(_url, *, json, **_kwargs):
+        call_offsets.append(json["offset"])
+        if json["offset"] == 0:
+            return _response(200, url, first_page)
+        return _response(429, url, {}, {"Retry-After": "0"})
+
+    with patch(
+        "src.providers.workday.requests.post",
+        side_effect=post,
+    ):
+        with pytest.raises(ProviderTemporaryError) as raised:
+            adapter.fetch_jobs_with_report(_company())
+
+    report = raised.value.workday_report
+    assert call_offsets == [0, 20]
+    assert report.http_attempts == 2
+    assert report.http_429_responses_by_stage == {
+        "pagination": 1,
+    }
+    assert report.http_429_hosts == {
+        "test.wd1.myworkdayjobs.com",
+    }
+
+
+def test_detail_enrichment_429_report_captures_stage_and_partial_coverage():
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=2)
+    )
+    url = (
+        "https://test.wd1.myworkdayjobs.com/"
+        "wday/cxs/test/Careers/job/IN-MH-MUMBAI/1"
+    )
+
+    with patch(
+        "src.providers.workday.requests.get",
+        return_value=_response(
+            429,
+            url,
+            {},
+            {"Retry-After": "0"},
+        ),
+    ) as request:
+        report = adapter._enrich_ambiguous_locations(
+            _company(),
+            [_posting(1)],
+            deadline=10**10,
+        )
+
+    assert request.call_count == 2
+    assert report.coverage_status == "partial"
+    assert report.http_attempts == 2
+    assert report.http_retries == 1
+    assert report.http_429_responses_by_stage == {
+        "detail_enrichment": 2,
+    }
+    assert report.http_429_hosts == {
+        "test.wd1.myworkdayjobs.com",
+    }
 
 
 def test_running_success_is_retained_after_parallel_failure():
@@ -1567,6 +1677,340 @@ def test_summary_categories_reconcile_and_keep_expected_skips_separate(capsys):
     assert "Skipped cooldown    : 1" in output
 
 
+def _health_result(
+    company_id: str,
+    *,
+    coverage_status: str = "complete",
+    success: bool = True,
+    provider: str = "workday",
+    stages: dict[str, int] | None = None,
+    hosts: set[str] | None = None,
+    failure_reasons: dict[str, int] | None = None,
+    skipped: bool = False,
+):
+    return CompanyRunResult(
+        company_id,
+        company_id.title(),
+        provider,
+        success=success,
+        skipped=skipped,
+        coverage_status=coverage_status,
+        listing_status=(
+            "failed"
+            if coverage_status == "failed"
+            else "complete"
+        ),
+        http_429_responses_by_stage=dict(stages or {}),
+        http_429_hosts=set(hosts or set()),
+        failure_reasons=dict(failure_reasons or {}),
+    )
+
+
+def test_workday_health_all_companies_complete():
+    line = _workday_health_line(
+        [
+            _health_result("a"),
+            _health_result("b"),
+        ]
+    )
+
+    assert "classification=healthy" in line
+    assert "attempted_companies=2" in line
+    assert "complete_companies=2" in line
+    assert "http_429_companies=0" in line
+    assert "affected_hosts=none" in line
+
+
+@pytest.mark.parametrize(
+    ("stage", "company_field", "response_field"),
+    [
+        (
+            "initial_listing",
+            "initial_listing_429_companies=1",
+            "initial_listing_429_responses=1",
+        ),
+        (
+            "pagination",
+            "later_pagination_429_companies=1",
+            "later_pagination_429_responses=1",
+        ),
+        (
+            "detail_enrichment",
+            "detail_enrichment_429_companies=1",
+            "detail_enrichment_429_responses=1",
+        ),
+    ],
+)
+def test_workday_health_reports_each_confirmed_stage(
+    stage,
+    company_field,
+    response_field,
+):
+    coverage = (
+        "partial"
+        if stage == "detail_enrichment"
+        else "failed"
+    )
+    line = _workday_health_line(
+        [
+            _health_result(
+                "limited",
+                coverage_status=coverage,
+                success=coverage != "failed",
+                stages={stage: 1},
+                hosts={"limited.wd1.myworkdayjobs.com"},
+            )
+        ]
+    )
+
+    assert "classification=rate_limited" in line
+    assert company_field in line
+    assert response_field in line
+
+
+def test_workday_health_multiple_hosts_are_widespread():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "a",
+                coverage_status="failed",
+                stages={"initial_listing": 1},
+                hosts={"a.wd1.myworkdayjobs.com"},
+            ),
+            _health_result(
+                "b",
+                coverage_status="failed",
+                stages={"pagination": 1},
+                hosts={"b.wd5.myworkdayjobs.com"},
+            ),
+        ]
+    )
+
+    assert "classification=multi_host_rate_limit" in line
+    assert "multi_host_threshold=2" in line
+    assert "affected_host_count=2" in line
+    assert "http_429_companies=2" in line
+    assert "http_429_responses=2" in line
+
+
+def test_workday_health_repeated_429s_from_one_host_are_not_widespread():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "a",
+                coverage_status="failed",
+                stages={"initial_listing": 4},
+                hosts={"same.wd1.myworkdayjobs.com"},
+            )
+        ]
+    )
+
+    assert "classification=rate_limited" in line
+    assert "affected_host_count=1" in line
+    assert "http_429_companies=1" in line
+    assert "http_429_responses=4" in line
+
+
+def test_workday_health_reports_unknown_stage_without_guessing():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "legacy",
+                coverage_status="failed",
+                failure_reasons={"rate_limit/429": 2},
+            )
+        ]
+    )
+
+    assert "classification=rate_limited" in line
+    assert "unknown_stage_429_companies=1" in line
+    assert "unknown_stage_429_responses=0" in line
+    assert "affected_hosts=unknown" in line
+    assert "unknown_host_429_companies=1" in line
+
+
+def test_workday_health_non_429_failure_is_degraded():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "timeout",
+                coverage_status="failed",
+                success=False,
+                failure_reasons={"timeout": 1},
+            )
+        ]
+    )
+
+    assert "classification=degraded" in line
+    assert "other_failure_companies=1" in line
+    assert "http_429_companies=0" in line
+
+
+def test_workday_health_partial_non_429_failure_is_partial_coverage():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "partial-timeout",
+                coverage_status="partial",
+                failure_reasons={"timeout": 1},
+            )
+        ]
+    )
+
+    assert "classification=partial_coverage" in line
+    assert "partial_companies=1" in line
+    assert "other_failure_companies=1" in line
+
+
+def test_workday_health_mixed_429_and_non_429_failures_are_independent():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "mixed",
+                coverage_status="failed",
+                success=False,
+                stages={"initial_listing": 1},
+                hosts={"mixed.wd1.myworkdayjobs.com"},
+                failure_reasons={
+                    "rate_limit/429": 1,
+                    "timeout": 1,
+                },
+            )
+        ]
+    )
+
+    assert "classification=rate_limited" in line
+    assert "http_429_companies=1" in line
+    assert "other_failure_companies=1" in line
+
+
+def test_workday_health_no_attempts_excludes_skipped_workday():
+    line = _workday_health_line(
+        [
+            _health_result(
+                "cooldown",
+                coverage_status="skipped",
+                success=False,
+                skipped=True,
+            )
+        ]
+    )
+
+    assert "classification=no_workday_attempts" in line
+    assert "attempted_companies=0" in line
+
+
+def test_workday_health_ignores_non_workday_failures():
+    line = _workday_health_line(
+        [
+            _health_result("workday"),
+            _health_result(
+                "greenhouse",
+                provider="greenhouse",
+                coverage_status="failed",
+                success=False,
+            ),
+        ]
+    )
+
+    assert "classification=healthy" in line
+    assert "attempted_companies=1" in line
+    assert "failed_companies=0" in line
+    assert "other_failure_companies=0" in line
+
+
+def test_workday_health_diagnostic_failure_cannot_fail_run(
+    monkeypatch,
+    capsys,
+):
+    from src import main as main_module
+
+    monkeypatch.setattr(
+        main_module,
+        "_workday_health_line",
+        MagicMock(side_effect=ValueError("simulated diagnostic failure")),
+    )
+
+    _print_workday_health_summary([_health_result("a")])
+
+    output = capsys.readouterr()
+    assert "classification=unavailable" in output.err
+    assert "diagnostic_error=ValueError" in output.err
+
+
+def test_workday_429_collection_failure_preserves_provider_exception(
+    monkeypatch,
+):
+    adapter = WorkdayAdapter(
+        WorkdayRequestPolicy(pacing_seconds=0, max_attempts=1)
+    )
+    url = (
+        "https://test.wd1.myworkdayjobs.com/"
+        "wday/cxs/test/Careers/jobs"
+    )
+    stats = adapter._request_stats
+    original_current = adapter._current_request_stats
+
+    def current_stats():
+        value = original_current()
+        if value is not None:
+            monkeypatch.setattr(
+                value,
+                "record_rate_limit",
+                MagicMock(side_effect=RuntimeError("diagnostic failure")),
+            )
+        return value
+
+    monkeypatch.setattr(adapter, "_current_request_stats", current_stats)
+
+    with patch(
+        "src.providers.workday.requests.post",
+        return_value=_response(429, url, {}, {"Retry-After": "0"}),
+    ):
+        with pytest.raises(ProviderTemporaryError) as raised:
+            adapter.fetch_jobs_with_report(_company())
+
+    assert raised.value.status == 429
+    assert raised.value.category == "rate_limit"
+    assert raised.value.workday_report.http_attempts == 1
+    assert stats is adapter._request_stats
+
+
+def test_workday_report_merge_failure_cannot_mask_success():
+    report = WorkdayCoverageReport()
+    stats = object()
+
+    WorkdayAdapter._merge_request_stats(report, stats)
+
+    assert report.http_attempts == 0
+    assert report.http_retries == 0
+
+
+def test_workday_health_is_observational_only_for_results_and_jobs():
+    jobs = [_job(1), _job(2)]
+    result = _health_result(
+        "a",
+        stages={"initial_listing": 2},
+        hosts={"a.wd1.myworkdayjobs.com"},
+    )
+    result.matching = list(jobs)
+    before = (
+        result.coverage_status,
+        result.http_429_responses_by_stage.copy(),
+        result.http_429_hosts.copy(),
+        list(result.matching),
+    )
+
+    _workday_health_line([result])
+
+    assert (
+        result.coverage_status,
+        result.http_429_responses_by_stage,
+        result.http_429_hosts,
+        result.matching,
+    ) == before
+
+
 def test_selection_diagnostics_reconcile_global_plan_without_writing_state(tmp_path):
     seen_path = tmp_path / "seen.json"
     store = SeenStore(seen_path)
@@ -1678,6 +2122,7 @@ def test_failed_company_does_not_suppress_another_companies_notification(
     assert send.call_count == 1
     assert send.call_args.args[2] == [_job(99)]
     output = capsys.readouterr().out
+    assert "[WORKDAY-HEALTH] classification=no_workday_attempts" in output
     assert "Complete            : 1" in output
     assert "Failed              : 1" in output
     assert "new_unique_urls=1" in output
@@ -1760,5 +2205,6 @@ def test_zero_new_summary_keeps_coverage_warning_and_does_not_send(
     send.assert_not_called()
     assert seen_path.read_bytes() == state_before
     output = capsys.readouterr().out
+    assert "[WORKDAY-HEALTH] classification=no_workday_attempts" in output
     assert "No unseen matching URLs remained" in output
     assert "Coverage warning: failed=1 partial=0." in output
