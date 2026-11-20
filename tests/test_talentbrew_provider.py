@@ -10,6 +10,8 @@ from src.providers.talentbrew import (
     TalentBrewAdapter,
 )
 
+import pytest
+import requests
 from unittest.mock import patch
 
 
@@ -228,3 +230,51 @@ def test_search_terms_are_sent_as_keyword_queries():
         "p": 1,
         "k": "Remote",
     }
+
+
+def test_pagination_timeout_rejects_partial_inventory():
+    adapter = TalentBrewAdapter()
+    company = Company(
+        id="citi",
+        name="Citi",
+        category=CompanyCategory.BANKING,
+        priority=1,
+        career_page="https://jobs.citi.com/",
+        provider=Provider(
+            type=ProviderType.TALENTBREW,
+            status=ProviderStatus.PARTIAL,
+            config=ProviderConfig(
+                base_url="https://jobs.citi.com",
+                page_size=15,
+                search_terms=["India"],
+            ),
+        ),
+    )
+    first_page = """
+    <h2 class="sr-heading">16 Results</h2>
+    <li class="sr-job-item">
+        <a href="/job/mumbai/software-engineer/287/123"
+           data-job-id="123">Software Engineer</a>
+        <span class="sr-job-location">Mumbai, India</span>
+    </li>
+    """
+
+    with patch.object(
+        adapter,
+        "_fetch_html",
+        side_effect=[
+            first_page,
+            requests.Timeout("simulated pagination timeout"),
+        ],
+    ) as mock_fetch:
+        with pytest.raises(requests.Timeout):
+            adapter._fetch_raw(company)
+
+    assert mock_fetch.call_count == 2
+    assert [
+        call.kwargs["params"]
+        for call in mock_fetch.call_args_list
+    ] == [
+        {"p": 1, "k": "India"},
+        {"p": 2, "k": "India"},
+    ]
