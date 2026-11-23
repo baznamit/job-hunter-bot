@@ -20,7 +20,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": true,
-      "notes": "Official Workday careers board. Full adapter validation passed on 2026-11-05: 35 normalized jobs, 35 unique IDs and URLs, matching the Workday-reported total. Disabled pending controlled production activation and India-location filtering review."
+      "notes": "Official Workday careers board; adapter and job inventory validated."
     },
     {
       "id": "bakerhughes",
@@ -41,7 +41,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Workday CXS adapter validated on 2026-11-05: 678 normalized jobs, 678 unique IDs and URLs, matching the Workday-reported total. Official Phenom careers frontend may expose a different inventory; equivalence is not yet verified. Keep disabled pending source comparison."
+      "notes": "Official Workday board validated; inventory equivalence with the Phenom careers frontend is not yet verified."
     },
     {
       "id": "postman",
