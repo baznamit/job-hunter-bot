@@ -1,11 +1,18 @@
+import json
+from pathlib import Path
+
 import pytest
 import requests
 from unittest.mock import Mock, patch
 
 from models.company import Company
+from src.filters import JobFilter
+from src.main import _run_company, _send_notifications, _settings
 from src.providers.exceptions import ProviderTemporaryError
 from src.providers.hcltech import HCLTechAdapter
 from src.providers.ibm import IBMAdapter
+from src.recovery_store import RecoveryStore
+from src.store import SeenStore
 
 
 def company(provider):
@@ -674,3 +681,197 @@ def test_ibm_deduplication():
     )
 
     assert len(jobs) == 1
+
+
+def _registry_ibm():
+    registry_path = Path(__file__).resolve().parent.parent / "config" / "companies.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    return Company.model_validate(
+        next(item for item in registry["companies"] if item["id"] == "ibm")
+    )
+
+
+def _ibm_hit(number, title="Java Developer", location="Bangalore, India"):
+    return {"_source": {
+        "url": f"https://careers.ibm.com/careers/JobDetail?jobId={number}",
+        "title": title,
+        "field_keyword_19": location,
+    }}
+
+
+def _ibm_run(test_company, responses):
+    session = Mock()
+    session.post.side_effect = responses
+    with patch("src.providers.ibm.requests.Session") as factory:
+        factory.return_value.__enter__.return_value = session
+        try:
+            jobs = IBMAdapter().fetch_jobs(test_company)
+        except RuntimeError as exc:
+            return session, None, str(exc)
+    return session, jobs, None
+
+
+def _requests(session):
+    return [
+        (call.kwargs["json"]["sm"]["query"], call.kwargs["json"]["p"],
+         call.kwargs["json"]["from"], call.kwargs["json"]["size"])
+        for call in session.post.call_args_list
+    ]
+
+
+@pytest.mark.parametrize("unique", [796, 696])
+def test_ibm_registry_capacity_completes_stable_796_hits(capsys, unique):
+    test_company = _registry_ibm()
+    terms = test_company.provider.config.search_terms
+    records = [_ibm_hit(number % unique + 1) for number in range(796)]
+    responses = [_ibm_response(records[i:i + 30], 796) for i in range(0, 796, 30)]
+    responses.extend(_ibm_response([], 0) for _ in terms[1:])
+
+    old_company = test_company.model_copy(deep=True)
+    old_company.provider.config.max_pages = 25
+    old_session, old_jobs, old_error = _ibm_run(old_company, responses)
+    assert old_jobs is None
+    assert old_error == "IBM query 'Java' incomplete: 750/796 hits"
+    assert len(_requests(old_session)) == 25
+
+    session, jobs, error = _ibm_run(test_company, responses)
+    assert error is None
+    assert [job.id for job in jobs] == [str(number) for number in range(1, unique + 1)]
+    assert [str(job.url) for job in jobs] == [
+        f"https://careers.ibm.com/careers/JobDetail?jobId={number}"
+        for number in range(1, unique + 1)
+    ]
+    assert _requests(session) == [
+        ("Java", page, (page - 1) * 30, 30) for page in range(1, 28)
+    ] + [(term, 1, 0, 30) for term in terms[1:]]
+    assert (
+        f"raw_records=796 processed_records=796 total=796 "
+        f"unique={unique} duplicates={796 - unique}"
+    ) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("pages", "expected_ids", "error", "offsets"),
+    [
+        ([([1, 2], 5), ([3, 4], 6)], None, "IBM inventory changed during pagination", [0, 2]),
+        ([([1, 2], 5), ([3, 4], 4)], None, "IBM inventory changed during pagination", [0, 2]),
+        ([([1, 2], 4), ([], 4)], None, "IBM query 'Java' incomplete: 2/4 hits", [0, 2]),
+        ([([1, 1], 2)], ["1"], None, [0]),
+        ([([1, 2], 4), ([2, 3], 4)], ["1", "2", "3"], None, [0, 2]),
+        ([([1, 2], 4), ([1, 2], 4)], ["1", "2"], None, [0, 2]),
+        ([([1, 2], 3), ([3], 3)], ["1", "2", "3"], None, [0, 2]),
+        ([([], 0)], [], None, [0]),
+    ],
+    ids=["increasing-total", "decreasing-total", "empty-intermediate",
+         "within-page-duplicate", "cross-page-duplicate", "repeated-page",
+         "short-final-page", "empty-inventory"],
+)
+def test_ibm_small_inventory_matches_old_cap(pages, expected_ids, error, offsets):
+    outcomes = []
+    for cap in (25, _registry_ibm().provider.config.max_pages):
+        test_company = _registry_ibm()
+        test_company.provider.config.search_terms = ["Java"]
+        test_company.provider.config.page_size = 2
+        test_company.provider.config.max_pages = cap
+        responses = [
+            _ibm_response([_ibm_hit(number) for number in numbers], total)
+            for numbers, total in pages
+        ]
+        session, jobs, actual_error = _ibm_run(test_company, responses)
+        outcomes.append((
+            _requests(session),
+            None if jobs is None else [job.model_dump(mode="json") for job in jobs],
+            actual_error,
+        ))
+        assert actual_error == error
+        assert (None if jobs is None else [job.id for job in jobs]) == expected_ids
+        assert _requests(session) == [
+            ("Java", page, offset, 2)
+            for page, offset in enumerate(offsets, 1)
+        ]
+    assert outcomes[0] == outcomes[1]
+
+
+def test_ibm_cap_exhaustion_fails_before_later_terms():
+    test_company = _registry_ibm()
+    test_company.provider.config.search_terms = ["Java", "Backend"]
+    cap = test_company.provider.config.max_pages
+    responses = [
+        _ibm_response([_ibm_hit(number) for number in range(i * 30, (i + 1) * 30)], cap * 30 + 1)
+        for i in range(cap)
+    ]
+    session, jobs, error = _ibm_run(test_company, responses)
+    assert jobs is None
+    assert error == f"IBM query 'Java' incomplete: {cap * 30}/{cap * 30 + 1} hits"
+    assert _requests(session) == [
+        ("Java", page, (page - 1) * 30, 30) for page in range(1, cap + 1)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("fail_first", "delivery_fails"), [(False, False), (False, True), (True, False)]
+)
+def test_ibm_head_equivalent_company_and_notifications(tmp_path, fail_first, delivery_fails):
+    outcomes = []
+    for label, cap in (("head", 25), ("current", _registry_ibm().provider.config.max_pages)):
+        test_company = _registry_ibm()
+        test_company.provider.config.search_terms = ["Java", "Backend"]
+        test_company.provider.config.max_pages = cap
+        responses = (
+            [_ibm_response([_ibm_hit(1)], 2), _ibm_response([], 2)]
+            if fail_first else [
+                _ibm_response([
+                    _ibm_hit(1),
+                    _ibm_hit(2, "Product Designer"),
+                    _ibm_hit(3, location="New York, USA"),
+                ], 3),
+                _ibm_response([_ibm_hit(1, "Backend Engineer"), _ibm_hit(4)], 2),
+            ]
+        )
+        session = Mock()
+        session.post.side_effect = responses
+        recovery_path = tmp_path / f"{label}-recovery.json"
+        recovery_path.write_text(json.dumps({"ibm": {"failures": 1}}), encoding="utf-8")
+        recovery = RecoveryStore(recovery_path)
+        store = SeenStore(tmp_path / f"{label}-seen.json")
+        store.mark_seen(IBMAdapter().parse([_ibm_hit(1)["_source"]], test_company))
+        with patch("src.providers.ibm.requests.Session") as factory:
+            factory.return_value.__enter__.return_value = session
+            result = _run_company(test_company, IBMAdapter(), JobFilter(), recovery, {})
+
+        pending = store.filter_new(result.matching)
+        notifier = Mock()
+        if delivery_fails:
+            notifier.send_message.side_effect = RuntimeError("offline")
+            with pytest.raises(SystemExit):
+                _send_notifications(store, notifier, pending, 25, _settings())
+        else:
+            _send_notifications(store, notifier, pending, 25, _settings())
+        outcomes.append((
+            _requests(session), result.success, result.coverage_status, result.listing_status,
+            result.error, result.jobs_fetched,
+            [job.model_dump(mode="json") for job in result.matching],
+            [call.args[0] for call in notifier.send_message.call_args_list],
+            json.loads((tmp_path / f"{label}-seen.json").read_text(encoding="utf-8")),
+            json.loads(recovery_path.read_text(encoding="utf-8")),
+        ))
+        if fail_first:
+            assert _requests(session) == [("Java", 1, 0, 30), ("Java", 2, 1, 30)]
+            assert not result.success and result.coverage_status == "failed"
+            assert result.listing_status == "failed"
+            assert "incomplete" in result.error
+            assert notifier.send_message.call_count == 0
+            assert json.loads(recovery_path.read_text(encoding="utf-8")) == {"ibm": {"failures": 1}}
+        else:
+            assert _requests(session) == [("Java", 1, 0, 30), ("Backend", 1, 0, 30)]
+            assert result.success and result.coverage_status == "complete"
+            assert result.jobs_fetched == 4
+            assert [job.id for job in result.matching] == ["1", "4"]
+            assert result.matching[0].title == "Backend Engineer"
+            assert [job.id for job in pending] == ["4"]
+            assert notifier.send_message.call_count == 1
+            assert [job.id for job in SeenStore(tmp_path / f"{label}-seen.json").filter_new(pending)] == (
+                ["4"] if delivery_fails else []
+            )
+            assert json.loads(recovery_path.read_text(encoding="utf-8")) == {}
+    assert outcomes[0] == outcomes[1]

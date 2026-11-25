@@ -1481,7 +1481,7 @@
         "config": {
           "api_url": "https://www-api.ibm.com/search/api/v2",
           "page_size": 30,
-          "max_pages": 25,
+          "max_pages": 30,
           "search_terms": [
             "Java",
             "Spring Boot",

@@ -116,7 +116,13 @@ earlier terms completed, both the completed-term subtotal and failed term are
 reported. `pages` counts responses received, `raw_records` counts records in
 validated lists, and `processed_records` counts records accepted for
 deduplication; these can differ on a failed page. Duplicate counts cover
-processed records. The run-level `[SELECTION]` summary reports globally unique
+processed records. IBM's configured limit is 30 pages per search term, with up
+to 30 records per page; reaching the limit before the reported total fails the
+company rather than returning partial results. A changed total or an empty page
+before completion also fails. The adapter counts raw hits toward the total and
+deduplicates job IDs afterward; IBM's total semantics are unverified, and
+repeated or overlapping pages can therefore hide missing unique jobs.
+The run-level `[SELECTION]` summary reports globally unique
 matching and seen URLs alongside the sums of per-company unique and seen URL
 counts; cross-company overlaps can make those sums larger.
 
