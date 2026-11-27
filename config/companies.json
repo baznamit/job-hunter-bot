@@ -708,14 +708,17 @@
       "enabled": true,
       "career_page": "https://navi.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "turbohire",
+        "status": "verified",
+        "config": {
+          "base_url": "https://navi.turbohire.co",
+          "organization": "navi"
+        }
       },
-      "locations": [],
+      "locations": ["Bengaluru", "Bangalore", "Mumbai"],
       "roles": [],
       "supports_remote": false,
-      "notes": "Previous Ashby organization 'navi' belongs to an unrelated aviation company. Navi Technologies ATS requires rediscovery."
+      "notes": "Verified public TurboHire feed; currently 49 listings, concentrated in Bengaluru with Mumbai roles."
     },
     {
       "id": "jupiter",

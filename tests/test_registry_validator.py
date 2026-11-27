@@ -58,7 +58,7 @@ def test_freshworks_uses_smartrecruiters(
     )
 
 
-def test_navi_does_not_use_unrelated_ashby_board(
+def test_navi_uses_verified_turbohire_board(
     registry,
 ):
     company = next(
@@ -70,12 +70,22 @@ def test_navi_does_not_use_unrelated_ashby_board(
 
     assert (
         company.provider.type
-        == ProviderType.UNKNOWN
+        == ProviderType.TURBOHIRE
     )
 
     assert (
         company.provider.status
-        == ProviderStatus.RESEARCH_PENDING
+        == ProviderStatus.VERIFIED
+    )
+
+    assert (
+        company.provider.config.base_url
+        == "https://navi.turbohire.co"
+    )
+
+    assert (
+        company.provider.config.organization
+        == "navi"
     )
 
 

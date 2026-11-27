@@ -32,6 +32,7 @@ class ProviderType(str, Enum):
     BANKOFAMERICA = "bankofamerica"
     PHONEPE = "phonepe"
     DARWINBOX = "darwinbox"
+    TURBOHIRE = "turbohire"
     KEKA = "keka"
     COGNIZANT = "cognizant"
     ZOHO_RECRUIT = "zoho_recruit"

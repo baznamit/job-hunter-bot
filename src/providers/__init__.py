@@ -12,6 +12,7 @@ from .algolia import AlgoliaAdapter
 from .bankofamerica import BankOfAmericaAdapter
 from .phonepe import PhonePeAdapter
 from .darwinbox import DarwinboxAdapter
+from .turbohire import TurboHireAdapter
 from .keka import KekaAdapter
 from .kula import KulaAdapter
 from .eightfold import EightfoldAdapter
@@ -40,6 +41,7 @@ __all__ = [
     "BankOfAmericaAdapter",
     "PhonePeAdapter",
     "DarwinboxAdapter",
+    "TurboHireAdapter",
     "KekaAdapter",
     "KulaAdapter",
     "EightfoldAdapter",
