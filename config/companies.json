@@ -72,14 +72,16 @@
       "enabled": true,
       "career_page": "https://upstox.com/careers/",
       "provider": {
-        "type": "unknown",
-        "status": "research_pending",
-        "config": {}
+        "type": "darwinbox",
+        "status": "verified",
+        "config": {
+          "api_url": "https://service.upstox.com/content/open/v1/jobs/"
+        }
       },
-      "locations": [],
+      "locations": ["Mumbai", "Bangalore"],
       "roles": [],
       "supports_remote": false,
-      "notes": ""
+      "notes": "Verified public Darwinbox jobs feed; listings include Mumbai and Bangalore roles."
     },
     {
       "id": "phonepe",
