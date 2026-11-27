@@ -273,6 +273,25 @@ def test_morganstanley_uses_verified_eightfold_configuration(registry):
     )
 
 
+def test_imc_uses_verified_greenhouse_configuration(registry):
+    company = next(
+        company
+        for company in registry.companies
+        if company.id == "imc"
+    )
+
+    assert company.name == "IMC Trading"
+    assert company.enabled is True
+    assert company.priority == 1
+    assert company.category.value == "FinTech"
+    assert company.provider.type == ProviderType.GREENHOUSE
+    assert company.provider.status == ProviderStatus.VERIFIED
+    assert company.provider.config.board == "imc"
+    assert str(company.career_page) == (
+        "https://www.imc.com/in/search-careers"
+    )
+
+
 def test_microsoft_eightfold_remains_disabled(registry):
     company = next(
         company

@@ -473,6 +473,25 @@
       "notes": "Uses Goldman Sachs Higher careers platform. Anonymous GetRoles GraphQL API verified."
     },
     {
+      "id": "imc",
+      "name": "IMC Trading",
+      "category": "FinTech",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://www.imc.com/in/search-careers",
+      "provider": {
+        "type": "greenhouse",
+        "status": "verified",
+        "config": {
+          "board": "imc"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official India careers page uses the public Greenhouse board API; the board returned 151 jobs and includes Mumbai roles matching the careers page."
+    },
+    {
       "id": "tiaa",
       "name": "TIAA",
       "category": "Banking",
