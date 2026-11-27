@@ -541,7 +541,7 @@
       "category": "Banking",
       "priority": 2,
       "enabled": true,
-      "career_page": "https://careers.bnpparibas.com/",
+      "career_page": "https://group.bnpparibas/en/careers/all-job-offers/india",
       "provider": {
         "type": "unknown",
         "status": "research_pending",
@@ -550,7 +550,7 @@
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "Likely Workday ATS. May not be auto-detected."
+      "notes": "Official India careers page refreshed; direct HTTP probe returned Akamai Access Denied (403), so provider mapping remains unverified."
     },
     {
       "id": "oracle",
