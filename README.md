@@ -62,8 +62,8 @@ The application has adapters for these provider types:
 
 **Greenhouse, Lever, Ashby, Workday, Atlassian, SmartRecruiters, Oracle,
 Higher, SuccessFactors, TalentBrew, Algolia, Bank of America, PhonePe, Keka,
-Kula, Eightfold, Cognizant, Zoho Recruit, Fynd, Infosys, HCLTech, IBM, and
-Publicis Sapient.**
+Kula, Eightfold, Cognizant, Zoho Recruit, Fynd, Infosys, HCLTech, IBM,
+Publicis Sapient, and RippleHire.**
 
 Provider configuration is company-specific and stored in
 `config/companies.json`. The separate `research/` tools support ATS discovery

@@ -33,6 +33,7 @@ from src.providers import (
     LeverAdapter,
     OracleAdapter,
     PhonePeAdapter,
+    RippleHireAdapter,
     SmartRecruitersAdapter,
     SuccessFactorsAdapter,
     TalentBrewAdapter,
@@ -49,6 +50,7 @@ _ADAPTERS = {
     ProviderType.WORKDAY: WorkdayAdapter(),
     ProviderType.SMARTRECRUITERS: SmartRecruitersAdapter(),
     ProviderType.ORACLE: OracleAdapter(),
+    ProviderType.RIPPLEHIRE: RippleHireAdapter(),
     ProviderType.HIGHER: HigherAdapter(),
     ProviderType.SUCCESSFACTORS: SuccessFactorsAdapter(),
     ProviderType.TALENTBREW: TalentBrewAdapter(),
@@ -234,6 +236,24 @@ def validate_registry(registry: CompanyRegistry) -> None:
                     f"{company.name}: SuccessFactors provider "
                     f"is missing config fields: "
                     f"{', '.join(missing)}"
+                )
+
+        elif provider.type == ProviderType.RIPPLEHIRE:
+            missing = []
+
+            if not config.base_url:
+                missing.append("base_url")
+
+            if not config.token:
+                missing.append("token")
+
+            if not config.source:
+                missing.append("source")
+
+            if missing:
+                raise ValueError(
+                    f"{company.name}: RippleHire provider is missing "
+                    f"config fields: {', '.join(missing)}"
                 )
 
         elif provider.type == ProviderType.ATLASSIAN:

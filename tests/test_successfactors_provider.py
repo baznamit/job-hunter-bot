@@ -339,6 +339,14 @@ def test_location_from_job_url():
         == "Bengaluru"
     )
 
+    assert (
+        adapter._location_from_job_url(
+            "https://jobs.atos.net/job/Navi-Mumbai-SENIOR-CONSULTANT/"
+            "1452371233/"
+        )
+        == "Navi Mumbai"
+    )
+
 
 def test_successfactors_search_location_filter():
     adapter = SuccessFactorsAdapter()

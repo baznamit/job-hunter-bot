@@ -24,9 +24,11 @@ from .hcltech import HCLTechAdapter
 from .ibm import IBMAdapter
 from .publicis_sapient import PublicisSapientAdapter
 from .atlassian import AtlassianAdapter
+from .ripplehire import RippleHireAdapter
 
 __all__ = [
     "AtlassianAdapter",
+    "RippleHireAdapter",
     "ProviderAdapter",
     "GreenhouseAdapter",
     "LeverAdapter",

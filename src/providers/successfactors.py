@@ -214,8 +214,17 @@ class SuccessFactorsAdapter(ProviderAdapter):
             match.group(1)
         )
 
+        slug_parts = slug.split("-")
+
+        if (
+            len(slug_parts) >= 2
+            and slug_parts[0].lower() == "navi"
+            and slug_parts[1].lower() == "mumbai"
+        ):
+            return "Navi Mumbai"
+
         first_part = (
-            slug.split("-", 1)[0]
+            slug_parts[0]
             .replace("_", " ")
             .strip()
         )

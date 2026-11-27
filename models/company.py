@@ -41,6 +41,7 @@ class ProviderType(str, Enum):
     HCLTECH = "hcltech"
     IBM = "ibm"
     PUBLICIS_SAPIENT = "publicis_sapient"
+    RIPPLEHIRE = "ripplehire"
     CUSTOM = "custom"
 
 
@@ -91,6 +92,7 @@ class ProviderConfig(BaseModel):
     app_id: str | None = None
     api_key: str | None = None
     index_name: str | None = None
+    token: str | None = None
 
     config_url: str | None = None
     source_id: str | None = None

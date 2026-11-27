@@ -1609,6 +1609,77 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official Pearson Candidate Experience site uses Oracle Recruiting Cloud at hccz.fa.em3.oraclecloud.com, site CX_2. Live API probe on 2026-11-27 fetched 316 listings across pagination with 316 unique IDs; a generated /job/{id} detail URL returned HTTP 200."
+    },
+    {
+      "id": "atos",
+      "name": "Atos",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://jobs.atos.net/go/Jobs-in-India/3676501/",
+      "provider": {
+        "type": "successfactors",
+        "status": "verified",
+        "config": {
+          "base_url": "https://jobs.atos.net",
+          "listing_path": "/go/Jobs-in-India/3676501/",
+          "page_size": 50,
+          "pagination_mode": "path"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official SAP SuccessFactors India board. Live adapter probe on 2026-11-27 fetched and validated 37 jobs. Navi Mumbai URL location parsing is normalized by the SuccessFactors adapter."
+    },
+    {
+      "id": "hexaware",
+      "name": "Hexaware",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs",
+      "provider": {
+        "type": "oracle",
+        "status": "verified",
+        "config": {
+          "host": "fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com",
+          "sites": [
+            {
+              "site_number": "CX_1",
+              "site_path": "CX_1",
+              "enabled": true
+            }
+          ]
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Oracle Recruiting Cloud Candidate Experience site CX_1. Live Oracle adapter probe on 2026-11-27 fetched 247 jobs; the public India-filtered search view shows a subset of the broader inventory."
+    },
+    {
+      "id": "citiustech",
+      "name": "CitiusTech",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://www.citiustech.com/careers",
+      "provider": {
+        "type": "ripplehire",
+        "status": "verified",
+        "config": {
+          "base_url": "https://citiustech.ripplehire.com/candidate",
+          "token": "bCKlfz3OO8vQIgiM2vuI",
+          "source": "CAREERSITE",
+          "page_size": 50,
+          "max_pages": 100
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official careers page links to RippleHire. Public candidate API pagination and a job detail response were live-verified on 2026-11-27; 34 unique jobs were present in the initial inventory probe."
     }
   ]
 }

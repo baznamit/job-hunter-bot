@@ -65,6 +65,7 @@ from src.providers import (
     DarwinboxAdapter,
     TurboHireAdapter,
     PublicisSapientAdapter,
+    RippleHireAdapter,
     SmartRecruitersAdapter,
     SuccessFactorsAdapter,
     TalentBrewAdapter,
@@ -126,6 +127,7 @@ _ADAPTERS = {
     ProviderType.HCLTECH: HCLTechAdapter(),
     ProviderType.IBM: IBMAdapter(),
     ProviderType.PUBLICIS_SAPIENT: PublicisSapientAdapter(),
+    ProviderType.RIPPLEHIRE: RippleHireAdapter(),
 }
 
 
