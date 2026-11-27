@@ -621,6 +621,27 @@
       "notes": "Uses Workday ATS (salesforce.wd12.myworkdayjobs.com), board External_Career_Site."
     },
     {
+      "id": "cisco",
+      "name": "Cisco",
+      "category": "SaaS",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.cisco.com/global/en/",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "cisco",
+          "cluster": "wd5",
+          "board": "Cisco_Careers"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Uses Cisco's Workday CXS careers source. Adds to aggregate Workday traffic and may encounter existing HTTP 429 rate limits."
+    },
+    {
       "id": "freshworks",
       "name": "Freshworks",
       "category": "SaaS",

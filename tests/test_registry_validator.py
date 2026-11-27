@@ -218,6 +218,30 @@ def test_bakerhughes_uses_verified_workday_configuration(registry):
     assert "not yet verified" in company.notes
 
 
+def test_cisco_uses_verified_workday_configuration(registry):
+    matches = [
+        company
+        for company in registry.companies
+        if company.id == "cisco"
+    ]
+
+    assert len(matches) == 1
+
+    company = matches[0]
+    config = company.provider.config
+
+    assert company.name == "Cisco"
+    assert company.enabled is True
+    assert company.provider.type == ProviderType.WORKDAY
+    assert company.provider.status == ProviderStatus.VERIFIED
+    assert config.tenant == "cisco"
+    assert config.cluster == "wd5"
+    assert config.board == "Cisco_Careers"
+    assert config.boards == []
+    assert company.locations == []
+    assert company.roles == []
+
+
 def test_morganstanley_uses_verified_eightfold_configuration(registry):
     matches = [
         company
