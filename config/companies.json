@@ -1037,6 +1037,27 @@
       "notes": "TalentBrew/Radancy public careers search. Server-rendered pagination and detail URLs verified from GitHub Actions. Mumbai Software Engineering roles confirmed."
     },
     {
+      "id": "wellsfargo",
+      "name": "Wells Fargo",
+      "category": "Banking",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://www.wellsfargojobs.com/en/jobs/",
+      "provider": {
+        "type": "workday",
+        "status": "verified",
+        "config": {
+          "tenant": "wf",
+          "board": "WellsFargoJobs",
+          "cluster": "wd1"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Workday CXS validation succeeded; a Bengaluru search returned 41 jobs, including software engineering roles."
+    },
+    {
       "id": "msci",
       "name": "MSCI",
       "category": "FinTech",
