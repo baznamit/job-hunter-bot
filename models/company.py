@@ -38,6 +38,7 @@ class ProviderType(str, Enum):
     INFOSYS = "infosys"
     HCLTECH = "hcltech"
     IBM = "ibm"
+    PUBLICIS_SAPIENT = "publicis_sapient"
     CUSTOM = "custom"
 
 

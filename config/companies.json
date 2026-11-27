@@ -1495,6 +1495,28 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Public IBM search API verified on 2026-10-14. JSON POST uses from/p pagination with 30 jobs per page. Keyword inventory is global; server-side India filtering and broader inventory coverage remain to be verified."
+    },
+    {
+      "id": "publicissapient",
+      "name": "Publicis Sapient",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://careers.publicissapient.com/job-search?country=India",
+      "provider": {
+        "type": "publicis_sapient",
+        "status": "implemented",
+        "config": {
+          "api_url": "https://careers.publicissapient.com/bin/ps-redesign/careersJobsearch",
+          "search_location": "India",
+          "page_size": 20,
+          "max_pages": 10
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Publicis Sapient careers search JSON verified on 2026-11-27: country=India returned exact numFound=93 across start=0..80 (final page 13) with 93 unique document IDs and 27 jobId requisitions. One document per advertised city; documents sharing jobId are grouped into one job with all locations. Canonical URL is the primary document's jobDetailUrl; Apply links go to iCIMS."
     }
   ]
 }

@@ -62,6 +62,7 @@ from src.providers import (
     LeverAdapter,
     OracleAdapter,
     PhonePeAdapter,
+    PublicisSapientAdapter,
     SmartRecruitersAdapter,
     SuccessFactorsAdapter,
     TalentBrewAdapter,
@@ -120,6 +121,7 @@ _ADAPTERS = {
     ProviderType.INFOSYS: InfosysAdapter(),
     ProviderType.HCLTECH: HCLTechAdapter(),
     ProviderType.IBM: IBMAdapter(),
+    ProviderType.PUBLICIS_SAPIENT: PublicisSapientAdapter(),
 }
 
 

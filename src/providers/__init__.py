@@ -20,6 +20,7 @@ from .fynd import FyndAdapter
 from .infosys import InfosysAdapter
 from .hcltech import HCLTechAdapter
 from .ibm import IBMAdapter
+from .publicis_sapient import PublicisSapientAdapter
 from .atlassian import AtlassianAdapter
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "InfosysAdapter",
     "HCLTechAdapter",
     "IBMAdapter",
+    "PublicisSapientAdapter",
 ]

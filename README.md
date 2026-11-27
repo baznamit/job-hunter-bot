@@ -62,7 +62,8 @@ The application has adapters for these provider types:
 
 **Greenhouse, Lever, Ashby, Workday, Atlassian, SmartRecruiters, Oracle,
 Higher, SuccessFactors, TalentBrew, Algolia, Bank of America, PhonePe, Keka,
-Kula, Eightfold, Cognizant, Zoho Recruit, Fynd, Infosys, HCLTech, and IBM.**
+Kula, Eightfold, Cognizant, Zoho Recruit, Fynd, Infosys, HCLTech, IBM, and
+Publicis Sapient.**
 
 Provider configuration is company-specific and stored in
 `config/companies.json`. The separate `research/` tools support ATS discovery
@@ -122,6 +123,14 @@ company rather than returning partial results. A changed total or an empty page
 before completion also fails. The adapter counts raw hits toward the total and
 deduplicates job IDs afterward; IBM's total semantics are unverified, and
 repeated or overlapping pages can therefore hide missing unique jobs.
+Publicis Sapient's search index returns one document per advertised city;
+documents sharing a `jobId` are merged into one job whose location lists every
+city (joined with ` | `) before central filtering, and whose URL is the primary
+document's (`id == jobId`) official job-detail page. The total must be exact
+and stable, every offset must return new document IDs, and the full reported
+inventory must be received within `max_pages`; otherwise the company fails
+without partial results. One `[PUBLICIS]` line reports pages, records, total
+and requisitions.
 The run-level `[SELECTION]` summary reports globally unique
 matching and seen URLs alongside the sums of per-company unique and seen URL
 counts; cross-company overlaps can make those sums larger.
