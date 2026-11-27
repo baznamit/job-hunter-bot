@@ -1538,6 +1538,32 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official Publicis Sapient careers search JSON verified on 2026-11-27: country=India returned exact numFound=93 across start=0..80 (final page 13) with 93 unique document IDs and 27 jobId requisitions. One document per advertised city; documents sharing jobId are grouped into one job with all locations. Canonical URL is the primary document's jobDetailUrl; Apply links go to iCIMS."
+    },
+    {
+      "id": "pearson",
+      "name": "Pearson",
+      "category": "Product",
+      "priority": 2,
+      "enabled": true,
+      "career_page": "https://hccz.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_2/",
+      "provider": {
+        "type": "oracle",
+        "status": "verified",
+        "config": {
+          "host": "hccz.fa.em3.oraclecloud.com",
+          "sites": [
+            {
+              "site_number": "CX_2",
+              "site_path": "CX_2",
+              "enabled": true
+            }
+          ]
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official Pearson Candidate Experience site uses Oracle Recruiting Cloud at hccz.fa.em3.oraclecloud.com, site CX_2. Live API probe on 2026-11-27 fetched 316 listings across pagination with 316 unique IDs; a generated /job/{id} detail URL returned HTTP 200."
     }
   ]
 }
