@@ -24,7 +24,14 @@ def test_new_company_successfactors_configuration():
     wissen = companies["wissen_successfactors"]
 
     assert deloitte.enabled
-    assert wissen.enabled
+    assert not wissen.enabled
+
+    assert wissen.provider.type.value == "successfactors"
+    assert str(wissen.career_page) == "https://jobs.wissen.com/"
+    assert wissen.provider.config.base_url == "https://jobs.wissen.com"
+    assert wissen.provider.config.listing_path == "/search/"
+    assert wissen.provider.config.page_size == 25
+    assert wissen.provider.config.pagination_mode == "path"
 
     assert (
         deloitte.provider.config.job_link_selector
@@ -62,8 +69,12 @@ def test_existing_wissen_zoho_is_preserved():
     wissen = companies["wissen"]
 
     assert wissen.enabled
+    assert str(wissen.career_page) == "https://careers.wissen.com/"
     assert wissen.provider.type.value == "zoho_recruit"
+    assert wissen.provider.status.value == "verified"
     assert wissen.provider.config.api_url == (
         "https://wissen.zohorecruit.in/"
         "recruit/v2/public/Job_Openings"
     )
+    assert wissen.provider.config.page_name == "Careers"
+    assert wissen.provider.config.source == "CareerSite"

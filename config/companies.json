@@ -1323,7 +1323,7 @@
       "name": "Wissen Technology",
       "category": "Product",
       "priority": 1,
-      "enabled": true,
+      "enabled": false,
       "career_page": "https://jobs.wissen.com/",
       "provider": {
         "type": "successfactors",
