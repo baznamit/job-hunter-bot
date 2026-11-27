@@ -84,3 +84,89 @@ def test_missing_file_treated_as_empty_store(tmp_path):
     store = SeenStore(tmp_path / "nonexistent.json")
     jobs = [_job("https://example.com/jobs/1")]
     assert store.filter_new(jobs) == jobs
+
+
+def test_legacy_hcltech_url_suppresses_canonical_url_without_rewrite(tmp_path):
+    path = tmp_path / "seen.json"
+    legacy = (
+        "https://careers.hcltech.com/job/"
+        "Senior-Full-Stack-Developer/136528/"
+    )
+    path.write_text(json.dumps({"seen": [legacy]}, indent=2) + "\n")
+    before = path.read_bytes()
+    store = SeenStore(path)
+    canonical = _job(
+        "https://careers.hcltech.com/job/"
+        "Senior-Full-Stack-Developer/136528-en_US"
+    )
+
+    assert store.filter_new([canonical]) == []
+    assert store.contains_url(str(canonical.url))
+    assert store.contains_url(legacy)
+    store.mark_seen([canonical])
+    assert path.read_bytes() == before
+
+
+def test_legacy_hcltech_double_encoded_slug_matches_canonical_url(tmp_path):
+    path = tmp_path / "seen.json"
+    legacy = (
+        "https://careers.hcltech.com/job/"
+        "Developer-Java%252C-Spring/159666/"
+    )
+    path.write_text(json.dumps({"seen": [legacy]}))
+    store = SeenStore(path)
+    canonical = _job(
+        "https://careers.hcltech.com/job/"
+        "Developer-Java%2C-Spring/159666-en_US"
+    )
+
+    assert store.filter_new([canonical]) == []
+
+
+def test_hcltech_url_migration_does_not_merge_different_job_ids(tmp_path):
+    path = tmp_path / "seen.json"
+    path.write_text(json.dumps({"seen": [
+        (
+            "https://careers.hcltech.com/job/"
+            "Senior-Full-Stack-Developer/136528/"
+        )
+    ]}))
+    store = SeenStore(path)
+    different_id = _job(
+        "https://careers.hcltech.com/job/"
+        "Senior-Full-Stack-Developer/136529-en_US"
+    )
+
+    assert store.filter_new([different_id]) == [different_id]
+    assert not store.contains_url(str(different_id.url))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/job/Senior-Full-Stack-Developer/136528/",
+        (
+            "http://careers.hcltech.com/job/"
+            "Senior-Full-Stack-Developer/136528/"
+        ),
+        (
+            "https://careers.hcltech.example/job/"
+            "Senior-Full-Stack-Developer/136528/"
+        ),
+    ],
+)
+def test_hcltech_url_migration_leaves_unrelated_urls_unchanged(
+    tmp_path, url
+):
+    path = tmp_path / "seen.json"
+    path.write_text(json.dumps({"seen": [
+        (
+            "https://careers.hcltech.com/job/"
+            "Senior-Full-Stack-Developer/136528/"
+        )
+    ]}))
+    store = SeenStore(path)
+    unrelated = _job(url)
+
+    assert store.filter_new([unrelated]) == [unrelated]
+    assert not store.contains_url(url)

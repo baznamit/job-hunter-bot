@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from urllib.parse import quote
 
 import requests
 
 from models import Job
 from models.company import Company
+from src.hcltech_urls import canonical_hcltech_job_url
 from .base import ProviderAdapter
 
 API = (
@@ -50,17 +50,14 @@ class HCLTechAdapter(ProviderAdapter):
 
     @staticmethod
     def _job_url(item: dict) -> str:
-        job_id = str(item["id"]).strip()
-        slug = str(
+        slug = (
             item.get("unifiedUrlTitle")
             or item.get("urlTitle")
-            or "job"
-        ).strip().strip("/")
-
-        return (
-            f"{BASE}/job/"
-            f"{quote(slug, safe='-')}/"
-            f"{quote(job_id, safe='')}/"
+            or ""
+        )
+        return canonical_hcltech_job_url(
+            item.get("id"),
+            slug,
         )
 
     def _fetch_raw(self, company: Company) -> list:
@@ -205,6 +202,7 @@ class HCLTechAdapter(ProviderAdapter):
                                     "Missing HCLTech job ID"
                                 )
 
+                            self._job_url(item)
                             page_jobs.append((job_id, item))
 
                         page_signature = frozenset(

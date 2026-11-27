@@ -83,7 +83,11 @@ def test_pagination_summary_counts_overlapping_records(
                 "url": f"https://careers.ibm.com/careers/JobDetail?jobId={number}",
                 "title": "Engineer",
             }}
-        return {"response": {"id": str(number), "unifiedStandardTitle": "Engineer"}}
+        return {"response": {
+            "id": str(number),
+            "unifiedStandardTitle": "Engineer",
+            "unifiedUrlTitle": "Engineer",
+        }}
 
     response = _ibm_response if provider == "ibm" else _hcl_response
     session = Mock()
@@ -124,7 +128,11 @@ def test_pagination_failure_keeps_progress_and_propagates(
         }}
         first_response = _ibm_response([record], 2)
     else:
-        record = {"response": {"id": "1", "unifiedStandardTitle": "Engineer"}}
+        record = {"response": {
+            "id": "1",
+            "unifiedStandardTitle": "Engineer",
+            "unifiedUrlTitle": "Engineer",
+        }}
         first_response = _hcl_response([record], 2)
 
     session = Mock()
@@ -199,6 +207,7 @@ def test_later_failure_keeps_completed_and_failed_term_summaries(
                     "response": {
                         "id": "1",
                         "unifiedStandardTitle": "Engineer",
+                        "unifiedUrlTitle": "Engineer",
                     }
                 }
             ],
@@ -241,7 +250,11 @@ def test_incomplete_pagination_keeps_failure_summary(provider, adapter, capsys):
         }}
         response = _ibm_response([record], 2)
     else:
-        record = {"response": {"id": "1", "unifiedStandardTitle": "Engineer"}}
+        record = {"response": {
+            "id": "1",
+            "unifiedStandardTitle": "Engineer",
+            "unifiedUrlTitle": "Engineer",
+        }}
         response = _hcl_response([record], 2)
     test_company = company(provider)
     test_company.provider.config.search_terms = ["Java"]
@@ -310,9 +323,164 @@ def test_hcl_parse():
     assert jobs[0].location == "Pune, India"
     assert str(jobs[0].url) == (
         "https://careers.hcltech.com/job/"
-        "Administrator-Java/178931/"
+        "Administrator-Java/178931-en_US"
     )
     assert jobs[0].posted_at.year == 2026
+
+
+@pytest.mark.parametrize(
+    ("job_id", "title", "slug"),
+    [
+        (
+            "148643",
+            "Senior Spring Boot Developer - Hibernate",
+            "Senior-Spring-Boot-Developer-Hibernate",
+        ),
+        (
+            "136528",
+            "Senior Full Stack Developer",
+            "Senior-Full-Stack-Developer",
+        ),
+        (
+            "148717",
+            "Java Golang Developer",
+            "Java-Golang-Developer",
+        ),
+    ],
+)
+def test_hcl_canonical_url_for_official_job_shape(
+    job_id, title, slug
+):
+    jobs = HCLTechAdapter().parse([{
+        "id": job_id,
+        "unifiedStandardTitle": title,
+        "unifiedUrlTitle": slug,
+    }], company("hcltech"))
+
+    assert jobs[0].id == job_id
+    assert str(jobs[0].url) == (
+        f"https://careers.hcltech.com/job/{slug}/{job_id}-en_US"
+    )
+
+
+def test_hcl_rejects_missing_slug_instead_of_inventing_route():
+    with pytest.raises(ValueError, match="Missing HCLTech URL slug"):
+        HCLTechAdapter().parse([{
+            "id": "148643",
+            "unifiedStandardTitle": "Engineer",
+        }], company("hcltech"))
+
+
+@pytest.mark.parametrize("job_id", [None, "", "148643/other", "not-numeric"])
+def test_hcl_rejects_missing_or_malformed_job_id(job_id):
+    item = {
+        "id": job_id,
+        "unifiedStandardTitle": "Engineer",
+        "unifiedUrlTitle": "Engineer",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Missing HCLTech job ID|Malformed HCLTech job ID",
+    ):
+        HCLTechAdapter().parse([item], company("hcltech"))
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        (None, "Invalid HCLTech record"),
+        ({}, "Missing HCLTech job object"),
+        ({"response": []}, "Missing HCLTech job object"),
+        (
+            {"response": {"unifiedStandardTitle": "Engineer"}},
+            "Missing HCLTech job ID",
+        ),
+        (
+            {"response": {
+                "id": "not-numeric",
+                "unifiedStandardTitle": "Engineer",
+                "unifiedUrlTitle": "Engineer",
+            }},
+            "Malformed HCLTech job ID",
+        ),
+        (
+            {"response": {
+                "id": "148717",
+                "unifiedStandardTitle": "Java Golang Developer",
+            }},
+            "Missing HCLTech URL slug",
+        ),
+    ],
+)
+@patch("src.providers.hcltech.requests.Session")
+def test_hcl_invalid_record_fails_before_complete_inventory_summary(
+    mock_session, record, message, capsys,
+):
+    session = Mock()
+    session.post.return_value = _hcl_response([record], 1)
+    mock_session.return_value.__enter__.return_value = session
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = ["Java"]
+    test_company.provider.config.max_pages = 1
+
+    with pytest.raises((RuntimeError, ValueError), match=message):
+        HCLTechAdapter().fetch_jobs(test_company)
+
+    assert session.post.call_count == 1
+    output = capsys.readouterr().out
+    assert "status=failed pages=1" in output
+    assert "terms=1 status=complete" not in output
+
+
+def test_hcl_preserves_official_slug_encoding_exactly_once():
+    jobs = HCLTechAdapter().parse([{
+        "id": "159666",
+        "unifiedStandardTitle": (
+            "Senior Technical Lead - Java, Spring, Hibernate, MongoDB"
+        ),
+        "unifiedUrlTitle": (
+            "Senior-Technical-Lead-Java%2C-Spring%2C-Hibernate%2C-MongoDB"
+        ),
+    }], company("hcltech"))
+
+    assert str(jobs[0].url) == (
+        "https://careers.hcltech.com/job/"
+        "Senior-Technical-Lead-Java%2C-Spring%2C-Hibernate%2C-MongoDB/"
+        "159666-en_US"
+    )
+
+
+def test_hcl_uses_url_title_when_unified_url_title_is_absent():
+    jobs = HCLTechAdapter().parse([{
+        "id": "136528",
+        "unifiedStandardTitle": "Senior Full Stack Developer",
+        "urlTitle": "Senior-Full-Stack-Developer",
+    }], company("hcltech"))
+
+    assert str(jobs[0].url) == (
+        "https://careers.hcltech.com/job/"
+        "Senior-Full-Stack-Developer/136528-en_US"
+    )
+
+
+@pytest.mark.parametrize("job_id", ["148643", "136528"])
+@patch("src.providers.hcltech.requests.Session")
+def test_hcl_removed_job_search_returns_no_notification_candidate(
+    mock_session, job_id
+):
+    session = Mock()
+    session.post.return_value = _hcl_response([], 0)
+    mock_session.return_value.__enter__.return_value = session
+    test_company = company("hcltech")
+    test_company.provider.config.search_terms = [job_id]
+    test_company.provider.config.max_pages = 1
+
+    jobs = HCLTechAdapter().fetch_jobs(test_company)
+
+    assert jobs == []
+    assert session.post.call_count == 1
+    assert session.post.call_args.kwargs["json"]["keywords"] == job_id
 
 
 def test_hcl_deduplication():
@@ -320,6 +488,7 @@ def test_hcl_deduplication():
         "id": "178931",
         "unifiedStandardTitle": "Administrator - Java",
         "custprimecity": "Pune",
+        "unifiedUrlTitle": "Administrator-Java",
     }
 
     jobs = HCLTechAdapter().parse(
@@ -359,7 +528,7 @@ def test_hcltech_deduplicates_across_search_terms(mock_session, capsys):
     assert [job.id for job in jobs] == ["178931"]
     assert str(jobs[0].url) == (
         "https://careers.hcltech.com/job/"
-        "Administrator-Java/178931/"
+        "Administrator-Java/178931-en_US"
     )
     assert [
         call.kwargs["json"]["keywords"]
@@ -463,8 +632,9 @@ def test_hcltech_fetches_more_than_300_jobs(mock_session):
         records = [
             {
                 "response": {
-                    "id": f"hcl-{page * 10 + index}",
+                    "id": str(page * 10 + index),
                     "unifiedStandardTitle": "Engineer",
+                    "unifiedUrlTitle": "Engineer",
                 }
             }
             for index in range(page_size)
@@ -502,8 +672,9 @@ def test_hcltech_rejects_repeated_page_within_search_term(
     records = [
         {
             "response": {
-                "id": f"hcl-{index}",
+                "id": str(index),
                 "unifiedStandardTitle": "Engineer",
+                "unifiedUrlTitle": "Engineer",
             }
         }
         for index in range(10)
@@ -538,8 +709,9 @@ def test_hcltech_pagination_allows_partial_id_overlap(
     first_page = [
         {
             "response": {
-                "id": f"hcl-{index}",
+                "id": str(index),
                 "unifiedStandardTitle": "Engineer",
+                "unifiedUrlTitle": "Engineer",
             }
         }
         for index in range(10)
@@ -547,8 +719,9 @@ def test_hcltech_pagination_allows_partial_id_overlap(
     second_page = [
         {
             "response": {
-                "id": f"hcl-{index}",
+                "id": str(index),
                 "unifiedStandardTitle": "Engineer",
+                "unifiedUrlTitle": "Engineer",
             }
         }
         for index in range(8, 18)

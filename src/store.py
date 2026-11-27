@@ -17,6 +17,7 @@ from pathlib import Path
 import tempfile
 
 from models import Job
+from src.hcltech_urls import hcltech_seen_key
 
 
 class SeenStore:
@@ -30,7 +31,10 @@ class SeenStore:
     def filter_new(self, jobs: list[Job]) -> list[Job]:
         """Return unseen jobs once each, preserving input order."""
         result = []
-        candidates = set(self._seen)
+        candidates = {
+            hcltech_seen_key(url)
+            for url in self._seen
+        }
 
         for job in jobs:
             key = self._key(job)
@@ -43,13 +47,25 @@ class SeenStore:
 
     def contains_url(self, url: str) -> bool:
         """Return whether the canonical URL is already in seen history."""
-        return str(url) in self._seen
+        key = hcltech_seen_key(url)
+        return any(
+            hcltech_seen_key(seen) == key
+            for seen in self._seen
+        )
 
     def mark_seen(self, jobs: list[Job]) -> None:
         """Record jobs as seen and persist to disk immediately."""
         updated = set(self._seen)
+        existing_keys = {
+            hcltech_seen_key(url)
+            for url in updated
+        }
         for job in jobs:
-            updated.add(self._key(job))
+            key = self._key(job)
+            if key in existing_keys:
+                continue
+            updated.add(key)
+            existing_keys.add(key)
         self._persist(updated)
         self._seen = updated
 
@@ -64,8 +80,7 @@ class SeenStore:
 
     @staticmethod
     def _key(job: Job) -> str:
-        # Use the canonical URL string as the global unique key.
-        return str(job.url)
+        return hcltech_seen_key(job.url)
 
     def _load(self) -> set[str]:
         if not self._path.exists():

@@ -54,6 +54,33 @@ def test_seen_filter_deduplicates_unseen_urls_without_mutating_history(tmp_path)
     assert store.filter_new([seen, first, duplicate, distinct]) == [first, distinct]
 
 
+def test_hcltech_url_migration_does_not_send_duplicate_notification(tmp_path):
+    path = tmp_path / "seen.json"
+    legacy_url = (
+        "https://careers.hcltech.com/job/"
+        "Senior-Spring-Boot-Developer-Hibernate/148643/"
+    )
+    path.write_text(json.dumps({"seen": [legacy_url]}))
+    original = path.read_bytes()
+    store = SeenStore(path)
+    migrated = _job(
+        148643,
+        title="Senior Spring Boot Developer - Hibernate",
+        url=(
+            "https://careers.hcltech.com/job/"
+            "Senior-Spring-Boot-Developer-Hibernate/148643-en_US"
+        ),
+    )
+    notifier = _Notifier()
+
+    pending = store.filter_new([migrated])
+    _send_notifications(store, notifier, pending, 25, _settings())
+
+    assert pending == []
+    assert notifier.messages == []
+    assert path.read_bytes() == original
+
+
 def test_count_limit_plans_all_jobs_once_with_complete_urls():
     jobs = [_job(index) for index in range(26)]
     batches = _build_message_batches(jobs, 25, _settings())
