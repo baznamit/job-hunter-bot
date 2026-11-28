@@ -1719,6 +1719,25 @@
       "roles": [],
       "supports_remote": false,
       "notes": "Official careers page links to RippleHire. Public candidate API pagination and a job detail response were live-verified on 2026-11-27; 34 unique jobs were present in the initial inventory probe."
+    },
+    {
+      "id": "thirdbridge",
+      "name": "Third Bridge Group",
+      "category": "Product",
+      "priority": 3,
+      "enabled": true,
+      "career_page": "https://www.thirdbridge.com/en-us/vacancies",
+      "provider": {
+        "type": "greenhouse",
+        "status": "verified",
+        "config": {
+          "board": "thirdbridge"
+        }
+      },
+      "locations": [],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "Official careers site uses the Greenhouse board API. Live Greenhouse adapter probe on 2026-11-28 returned 154 jobs, including 20 in Mumbai and none in Bengaluru."
     }
   ]
 }
