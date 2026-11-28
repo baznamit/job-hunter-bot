@@ -373,6 +373,59 @@ class SuccessFactorsAdapter(ProviderAdapter):
         page_html: str,
         url: str,
     ) -> str:
+        soup = BeautifulSoup(
+            page_html,
+            "html.parser",
+        )
+
+        # SuccessFactors job pages expose the primary city as a structured
+        # property. Prefer it over flattened page text, which can mix the
+        # location with adjacent fields such as "Other locations" and
+        # "Salary".
+        city_property = soup.select_one(
+            '[data-careersite-propertyid="city"]'
+        )
+
+        if city_property is not None:
+            location = city_property.get_text(
+                " ",
+                strip=True,
+            )
+
+            if location:
+                return location
+
+        # Some SuccessFactors pages render job fields as adjacent label and
+        # value elements without the structured city property.
+        for label in soup.select(".joblayouttoken-label"):
+            label_text = (
+                label.get_text(" ", strip=True)
+                .strip(":\u00a0 ")
+                .casefold()
+            )
+
+            if label_text not in {
+                "location",
+                "primary location",
+            }:
+                continue
+
+            value_element = label.find_next_sibling()
+            if (
+                value_element is None
+                or "joblayouttoken-label"
+                in value_element.get("class", [])
+            ):
+                continue
+
+            value = value_element.get_text(
+                " ",
+                strip=True,
+            )
+
+            if value:
+                return value
+
         text = self._extract_text(
             page_html
         )
@@ -381,15 +434,15 @@ class SuccessFactorsAdapter(ProviderAdapter):
             r"Primary Location\s*:?\s*"
             r"(.{1,120}?)"
             r"(?=\s+(?:Job Code|"
-            r"Requisition|Division|"
-            r"Department|Job Type|"
+            r"Requisition|Other locations|"
+            r"Salary|Division|Department|Job Type|"
             r"Date|Apply|$))",
 
-            r"Location\s*:?\s*"
+            r"(?<!\w)Location\b\s*:?\s*"
             r"(.{1,120}?)"
             r"(?=\s+(?:Job Code|"
-            r"Requisition|Division|"
-            r"Department|Job Type|"
+            r"Requisition|Other locations|"
+            r"Salary|Division|Department|Job Type|"
             r"Date|Apply|$))",
         )
 
@@ -401,6 +454,18 @@ class SuccessFactorsAdapter(ProviderAdapter):
             )
 
             if not match:
+                continue
+
+            # In flattened EY pages, "Primary Location" can appear as the
+            # value of the separate "Other locations" field. Do not treat
+            # that value as the primary location label.
+            other_locations = re.search(
+                r"\bOther locations\b",
+                text[:match.start()],
+                flags=re.IGNORECASE,
+            )
+
+            if other_locations:
                 continue
 
             location = (
@@ -422,8 +487,12 @@ class SuccessFactorsAdapter(ProviderAdapter):
                         "python",
                         "java",
                         "spring",
+                        "other locations",
+                        "salary:",
+                        "date:",
                     )
                 )
+                and location.casefold() != "only"
             ):
                 return location
 

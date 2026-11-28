@@ -1385,6 +1385,44 @@
       "notes": "Deloitte India SuccessFactors Java search. Result-row selector verified from GitHub Actions HTML diagnostics. Full adapter validation pending."
     },
     {
+      "id": "ey",
+      "name": "EY",
+      "category": "Product",
+      "priority": 1,
+      "enabled": true,
+      "career_page": "https://careers.ey.com/ey/search/",
+      "provider": {
+        "type": "successfactors",
+        "status": "verified",
+        "config": {
+          "base_url": "https://careers.ey.com",
+          "listing_path": "/ey/search/",
+          "page_size": 25,
+          "pagination_mode": "query",
+          "pagination_param": "startrow",
+          "search_location_param": "optionsFacetsDD_city",
+          "search_locations": [
+            "Mumbai",
+            "Bengaluru",
+            "Bangalore"
+          ],
+          "search_params": {
+            "q": "",
+            "optionsFacetsDD_country": "IN",
+            "locale": "en_GB"
+          }
+        }
+      },
+      "locations": [
+        "Mumbai",
+        "Bengaluru",
+        "Bangalore"
+      ],
+      "roles": [],
+      "supports_remote": false,
+      "notes": "EY SAP SuccessFactors careers search scoped to Mumbai, Bengaluru and Bangalore using the India city facets. Full city-scoped fetch verified 2026-11-28: 1,567 unique job details fetched and parsed without errors."
+    },
+    {
       "id": "wissen_successfactors",
       "name": "Wissen Technology",
       "category": "Product",

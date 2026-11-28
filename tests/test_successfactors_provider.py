@@ -314,6 +314,88 @@ def test_extract_location_from_ltm_successfactors_url():
     assert location == "Bengaluru"
 
 
+def test_extract_location_prefers_successfactors_city_property():
+    adapter = SuccessFactorsAdapter()
+    page_html = """
+    <div class="col-xs-12">
+        <span class="joblayouttoken-label">Location:</span>
+        <span data-careersite-propertyid="city">Bengaluru</span>
+    </div>
+    <div class="col-xs-12">
+        <span class="joblayouttoken-label">Other locations:</span>
+        <span data-careersite-propertyid="customfield3">
+            Primary Location Only
+        </span>
+    </div>
+    <div class="col-xs-12">
+        <span class="joblayouttoken-label">Salary:</span>
+        <span>Competitive</span>
+    </div>
+    """
+
+    location = adapter._extract_location(
+        page_html,
+        "https://careers.ey.com/ey/job/Bengaluru-Analyst/123/",
+    )
+
+    assert location == "Bengaluru"
+
+
+def test_extract_location_uses_exact_label_value_pair():
+    adapter = SuccessFactorsAdapter()
+    page_html = """
+    <div class="col-xs-12">
+        <span class="joblayouttoken-label">Location:</span>
+        <span>Bengaluru</span>
+    </div>
+    <div class="col-xs-12">
+        <span class="joblayouttoken-label">Other locations:</span>
+        <span>Primary Location Only</span>
+    </div>
+    <div class="col-xs-12">
+        <span class="joblayouttoken-label">Salary:</span>
+        <span>Competitive</span>
+    </div>
+    """
+
+    location = adapter._extract_location(
+        page_html,
+        "https://careers.ey.com/ey/job/Bengaluru-Analyst/123/",
+    )
+
+    assert location == "Bengaluru"
+
+
+def test_ey_listing_uses_india_city_facets_and_query_pagination():
+    adapter = SuccessFactorsAdapter()
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://careers.ey.com",
+        listing_path="/ey/search/",
+        page_size=25,
+        pagination_mode="query",
+        pagination_param="startrow",
+        search_location_param="optionsFacetsDD_city",
+        search_locations=["Mumbai", "Bengaluru", "Bangalore"],
+        search_params={
+            "q": "",
+            "optionsFacetsDD_country": "IN",
+            "locale": "en_GB",
+        },
+    )
+
+    assert adapter._listing_url(company, 0, "Mumbai") == (
+        "https://careers.ey.com/ey/search/"
+        "?optionsFacetsDD_city=Mumbai&q="
+        "&optionsFacetsDD_country=IN&locale=en_GB"
+    )
+    assert adapter._listing_url(company, 25, "Bengaluru") == (
+        "https://careers.ey.com/ey/search/"
+        "?optionsFacetsDD_city=Bengaluru&q="
+        "&optionsFacetsDD_country=IN&locale=en_GB&startrow=25"
+    )
+
+
 def test_location_from_job_url():
     adapter = SuccessFactorsAdapter()
 

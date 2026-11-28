@@ -58,6 +58,31 @@ def test_freshworks_uses_smartrecruiters(
     )
 
 
+def test_ey_uses_successfactors_city_scoped_search(registry):
+    company = next(
+        company
+        for company in registry.companies
+        if company.id == "ey"
+    )
+
+    assert company.enabled
+    assert company.provider.type == ProviderType.SUCCESSFACTORS
+    assert company.provider.status == ProviderStatus.VERIFIED
+    assert company.provider.config.base_url == "https://careers.ey.com"
+    assert company.provider.config.listing_path == "/ey/search/"
+    assert company.provider.config.search_location_param == (
+        "optionsFacetsDD_city"
+    )
+    assert company.provider.config.search_locations == [
+        "Mumbai",
+        "Bengaluru",
+        "Bangalore",
+    ]
+    assert company.provider.config.search_params[
+        "optionsFacetsDD_country"
+    ] == "IN"
+
+
 def test_navi_uses_verified_turbohire_board(
     registry,
 ):
