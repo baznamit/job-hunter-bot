@@ -151,6 +151,42 @@ def test_successfactors_location_query_survives_pagination():
     )
 
 
+def test_capgemini_location_facet_query_survives_pagination():
+    adapter = SuccessFactorsAdapter()
+    company = _company(
+        ProviderType.SUCCESSFACTORS,
+        base_url="https://careers.capgemini.com",
+        listing_path="/search/",
+        page_size=25,
+        pagination_mode="query",
+        pagination_param="startrow",
+        search_location_param="optionsFacetsDD_location",
+        search_locations=[
+            "Mumbai, IN",
+            "Mumbai (ex Bombay), IN",
+            "Navi Mumbai, IN",
+            "Bangalore, IN",
+        ],
+    )
+
+    assert adapter._listing_url(
+        company,
+        0,
+        "Mumbai (ex Bombay), IN",
+    ) == (
+        "https://careers.capgemini.com/search/"
+        "?optionsFacetsDD_location=Mumbai+%28ex+Bombay%29%2C+IN"
+    )
+    assert adapter._listing_url(
+        company,
+        25,
+        "Bangalore, IN",
+    ) == (
+        "https://careers.capgemini.com/search/"
+        "?optionsFacetsDD_location=Bangalore%2C+IN&startrow=25"
+    )
+
+
 def test_successfactors_deloitte_search_pagination():
     adapter = SuccessFactorsAdapter()
 

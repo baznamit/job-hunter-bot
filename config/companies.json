@@ -978,25 +978,26 @@
       "career_page": "https://careers.capgemini.com/",
       "provider": {
         "type": "successfactors",
-        "status": "verified",
+        "status": "partial",
         "config": {
           "base_url": "https://careers.capgemini.com",
           "listing_path": "/search/",
           "page_size": 25,
           "pagination_mode": "query",
           "pagination_param": "startrow",
-          "search_location_param": "location",
+          "search_location_param": "optionsFacetsDD_location",
           "search_locations": [
-            "Mumbai",
-            "Bangalore",
-            "Bengaluru"
+            "Mumbai, IN",
+            "Mumbai (ex Bombay), IN",
+            "Navi Mumbai, IN",
+            "Bangalore, IN"
           ]
         }
       },
       "locations": [],
       "roles": [],
       "supports_remote": false,
-      "notes": "SAP SuccessFactors Recruiting Marketing careers site. Server-rendered job listings and startrow query pagination verified from GitHub Actions."
+      "notes": "Uses Capgemini's server-rendered SuccessFactors Location facet and startrow pagination. Coverage is partial: job 1459751733 was directly accessible and filter-matched on 2026-11-28 but absent from all 1,847 public search results and the Mumbai location facets."
     },
     {
       "id": "ltmindtree",

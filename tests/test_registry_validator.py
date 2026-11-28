@@ -58,6 +58,25 @@ def test_freshworks_uses_smartrecruiters(
     )
 
 
+def test_capgemini_uses_official_location_facets(registry):
+    company = next(
+        company
+        for company in registry.companies
+        if company.id == "capgemini"
+    )
+
+    assert company.provider.status == ProviderStatus.PARTIAL
+    assert company.provider.config.search_location_param == (
+        "optionsFacetsDD_location"
+    )
+    assert company.provider.config.search_locations == [
+        "Mumbai, IN",
+        "Mumbai (ex Bombay), IN",
+        "Navi Mumbai, IN",
+        "Bangalore, IN",
+    ]
+
+
 def test_ey_uses_successfactors_city_scoped_search(registry):
     company = next(
         company
